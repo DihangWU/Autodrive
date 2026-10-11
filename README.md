@@ -123,12 +123,34 @@ bash run_lincoln.sh --sensors lidar
 # 已由远程/其他程序运行 SUMO 桥，不自动启动本机桥
 bash run_lincoln.sh --no-sumo
 
-# 所有车辆退出后，停止本命令创建的共享 SUMO（不会停止手工启动的桥）
+# 所有车辆退出后，显式停止共享 SUMO（林肯/NPC 命令自动创建的服务）
 bash run_lincoln.sh --stop-sumo
 ```
 
 关闭驾驶面板或在该车终端按 Ctrl+C，会清理该车、传感器和其 RViz，其他车辆继续运行。
 共享 SUMO 保留供下一辆车复用；停止共享桥会退出同步模式，关闭前先退出驾驶车辆。
+
+### 林肯与随机 NPC 独立启动
+
+加载 Town04 后，下面两条命令可在不同终端按任意顺序启动：
+
+```shell
+bash run_lincoln.sh
+```
+
+```shell
+~/carla-venv/bin/python \
+  ~/Desktop/Carla/carla-source/Co-Simulation/Sumo/spawn_npc_sumo.py \
+  -n 100 --sumo-gui --step-length 0.05 --tls-manager carla
+```
+
+第一个命令自动启动常驻共享桥接，后续命令复用它；只有桥接推进 CARLA/SUMO 并调用 TraCI。NPC 命令不再独占桥接，可重复执行，每次创建独立批次，车辆编号不会冲突。数据文件使用脚本自身目录定位，NPC 命令不要求当前目录是 Sumo。
+
+退出林肯面板仅删除本车及传感器；NPC 终端按 Ctrl+C 仅删除本次 NPC（包括排队未入场车辆）。关闭一个终端不停止另一批车辆、CARLA 或 SUMO；异常退出的 NPC 批次也会由桥接回收。共享服务保持运行，只有显式 `bash run_lincoln.sh --stop-sumo` 或关闭 SUMO GUI 才停止它。
+
+地图、步长、SUMO GUI 模式及信号灯配置由首个启动者确定，后来启动的命令沿用现有配置；需要改变这些配置时先停止所有车辆命令，再显式重启桥接。`--sumo-npcs` 创建的是桥接常驻批次；需要可独立退出的车流请用上面的 NPC 命令。
+
+NPC 的 `--standalone` 可保留旧的单脚本桥接模式，供外部/多 TraCI 客户端场景使用，不用于这里的独立启动流程。
 不允许车辆程序自行 `world.tick()`，不重载地图，也不重新启动 Docker。
 
 运行依赖：本机 ROS2 Jazzy/RViz2、`~/carla-venv` 的 CARLA 0.9.16 与 NumPy、

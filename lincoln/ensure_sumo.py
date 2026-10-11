@@ -1,7 +1,6 @@
 """Reuse an existing bridge or start exactly one local SUMO bridge."""
 import argparse
 import fcntl
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -10,6 +9,7 @@ import subprocess
 import time
 
 import carla
+from shared_sumo import control_folder, atomic_json
 
 PROJECT = Path(__file__).resolve().parents[1]
 
@@ -21,10 +21,11 @@ def bridges(host, port):
             continue
         try:
             args = (directory / 'cmdline').read_bytes().decode().strip('\0').split('\0')
-            if not any(Path(arg).name == 'spawn_npc_sumo.py' for arg in args):
+            if not any(Path(arg).name == 'spawn_npc_sumo.py' for arg in args) or not any(flag in args for flag in ('--bridge-server', '--standalone')):
                 continue
             peer_host = args[args.index('--host') + 1] if '--host' in args else '127.0.0.1'
-            peer_port = int(args[args.index('--port') + 1]) if '--port' in args else 2000
+            port_flag = '--port' if '--port' in args else '-p' if '-p' in args else None
+            peer_port = int(args[args.index(port_flag) + 1]) if port_flag else 2000
             local_hosts = {'localhost', '127.0.0.1'}
             if peer_port == port and (peer_host == host or {peer_host, host} <= local_hosts):
                 matches.append(int(directory.name))
@@ -33,17 +34,13 @@ def bridges(host, port):
     return matches
 
 
-def main():
-    p = argparse.ArgumentParser()
-    p.add_argument('--host', default='127.0.0.1')
-    p.add_argument('--port', type=int, default=2000)
-    p.add_argument('--npcs', type=int, default=0)
-    p.add_argument('--stop', action='store_true')
-    args = p.parse_args()
-    host_key = 'localhost' if args.host in ('localhost', '127.0.0.1') else args.host
-    key = hashlib.sha256(f'{os.getuid()}:{host_key}:{args.port}'.encode()).hexdigest()[:16]
-    folder = Path('/tmp') / ('carla-lincoln-' + key)
-    folder.mkdir(mode=0o700, exist_ok=True)
+def ensure_bridge(host='127.0.0.1', port=2000, npcs=0, stop=False, step_length=.05,
+                  sumo_gui=True, tls_manager='carla', sync_vehicle_color=True,
+                  sync_vehicle_lights=False, require_town04=True):
+    args = argparse.Namespace(host=host, port=port, npcs=npcs, stop=stop)
+    if step_length <= 0:
+        raise ValueError('step-length must be positive')
+    folder = control_folder(host, port)
     with (folder / 'lock').open('w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         state = folder / 'bridge.json'
@@ -64,7 +61,7 @@ def main():
         client = carla.Client(args.host, args.port)
         client.set_timeout(10)
         world = client.get_world()
-        if not world.get_map().name.rsplit('/', 1)[-1].startswith('Town04'):
+        if require_town04 and not world.get_map().name.rsplit('/', 1)[-1].startswith('Town04'):
             raise SystemExit('Please load Town04 first. This command does not change maps.')
         existing = bridges(args.host, args.port)
         if len(existing) > 1:
@@ -81,12 +78,20 @@ def main():
             env['PATH'] = str(sumo / 'bin') + ':' + env['PATH']
             script = PROJECT / 'carla-source/Co-Simulation/Sumo/spawn_npc_sumo.py'
             with (folder / 'sumo.log').open('w') as log:
-                process = subprocess.Popen([str(Path.home() / 'carla-venv/bin/python'), '-u',
-                    str(script), '--host', args.host, '--port', str(args.port), '-n', str(args.npcs),
-                    '--sumo-gui', '--sumo-auto-start', '--sync-vehicle-color',
-                    '--step-length', '0.05', '--tls-manager', 'carla'],
-                    cwd=script.parent, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
-            state.write_text(json.dumps(dict(pid=process.pid)))
+                command = [str(Path.home() / 'carla-venv/bin/python'), '-u', str(script),
+                           '--bridge-server', '--host', args.host, '--port', str(args.port),
+                           '-n', str(args.npcs), '--sumo-auto-start',
+                           '--step-length', str(step_length), '--tls-manager', tls_manager]
+                if sumo_gui:
+                    command.append('--sumo-gui')
+                if sync_vehicle_color:
+                    command.append('--sync-vehicle-color')
+                if sync_vehicle_lights:
+                    command.append('--sync-vehicle-lights')
+                process = subprocess.Popen(command, cwd=script.parent, env=env, stdout=log,
+                                           stderr=subprocess.STDOUT, start_new_session=True)
+            atomic_json(state, dict(pid=process.pid, step_length=step_length,
+                                    tls_manager=tls_manager, sumo_gui=sumo_gui))
             existing = [process.pid]
             print(f'Started shared SUMO bridge {process.pid}; log: {folder / "sumo.log"}', flush=True)
         deadline = time.monotonic() + 90
@@ -102,11 +107,22 @@ def main():
             else:
                 advancing_frames = 0
             last_frame = frame
-            if advancing_frames >= 3:
+            ready = folder / 'ready.json'
+            if advancing_frames >= 3 and ready.exists() and json.loads(ready.read_text()).get('pid') == existing[0]:
                 print(f'Reusing SUMO bridge {existing[0]}. It alone advances simulation.', flush=True)
-                return
+                return json.loads(ready.read_text())
             time.sleep(.5)
         raise SystemExit(f'SUMO startup timed out. See {folder / "sumo.log"}')
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument('--host', default='127.0.0.1')
+    p.add_argument('--port', type=int, default=2000)
+    p.add_argument('--npcs', type=int, default=0)
+    p.add_argument('--stop', action='store_true')
+    args = p.parse_args()
+    ensure_bridge(host=args.host, port=args.port, npcs=args.npcs, stop=args.stop)
 
 
 if __name__ == '__main__':
