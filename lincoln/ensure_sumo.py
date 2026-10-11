@@ -76,7 +76,7 @@ def ensure_bridge(host='127.0.0.1', port=2000, npcs=0, stop=False, step_length=.
                 raise SystemExit('SUMO not found. Set SUMO_HOME to its installation directory.')
             env = dict(os.environ, SUMO_HOME=str(sumo))
             env['PATH'] = str(sumo / 'bin') + ':' + env['PATH']
-            script = PROJECT / 'carla-source/Co-Simulation/Sumo/spawn_npc_sumo.py'
+            script = Path('carla-source/Co-Simulation/Sumo/spawn_npc_sumo.py')
             with (folder / 'sumo.log').open('w') as log:
                 command = [str(Path.home() / 'carla-venv/bin/python'), '-u', str(script),
                            '--bridge-server', '--host', args.host, '--port', str(args.port),
@@ -88,7 +88,7 @@ def ensure_bridge(host='127.0.0.1', port=2000, npcs=0, stop=False, step_length=.
                     command.append('--sync-vehicle-color')
                 if sync_vehicle_lights:
                     command.append('--sync-vehicle-lights')
-                process = subprocess.Popen(command, cwd=script.parent, env=env, stdout=log,
+                process = subprocess.Popen(command, cwd=PROJECT, env=env, stdout=log,
                                            stderr=subprocess.STDOUT, start_new_session=True)
             atomic_json(state, dict(pid=process.pid, step_length=step_length,
                                     tls_manager=tls_manager, sumo_gui=sumo_gui))

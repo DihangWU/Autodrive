@@ -17,6 +17,7 @@ Script to modify automatically vtypes to carla type ids in sumo route files.
 import argparse
 import fnmatch
 import json
+from pathlib import Path
 import logging
 import random
 
@@ -26,7 +27,8 @@ import lxml.etree as ET  # pylint: disable=import-error
 # -- load vtypes -----------------------------------------------------------------------------------
 # ==================================================================================================
 
-with open('../data/vtypes.json') as f:
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
+with (PROJECT_ROOT / 'carla-source/Co-Simulation/Sumo/data/vtypes.json').open() as f:
     VTYPES = json.load(f)['carla_blueprints'].keys()
 
 # ==================================================================================================

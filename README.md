@@ -49,17 +49,22 @@
 
 5. 启动自由视角(用来查看空地图，后续真正执行仿真时用其他入口调用，可以不手动执行)
     ```shell
-    ~/carla-venv/bin/python ~/Desktop/Carla/carla_free_camera.py
+    ~/carla-venv/bin/python carla_free_camera.py
     ```
 
-6. 添加 NPC 车辆
+6. 通过 SUMO 添加 NPC 车辆
     ```shell
-    ~/carla-venv/bin/python ~/Desktop/Carla/npc_traffic.py
+    ~/carla-venv/bin/python \
+    carla-source/Co-Simulation/Sumo/spawn_npc_sumo.py \
+    -n 100 \
+    --sumo-gui \
+    --step-length 0.05 \
+    --tls-manager carla
     ```
 
 7. 添加一辆高配传感器的 lincoln 轿车
     ```shell
-    run run_lincoln.sh
+    bash run_lincoln.sh
     ```
 
 8. 在连接了 CARLA 的 Python 脚本中，用这一行把所有交通信号灯设为红灯：
@@ -81,7 +86,7 @@
 
 ## 项目说明与阅读入口
 
-以下内容说明当前工作区实际存在的模块、实现和使用方法，并整理本次开发中的问题。上方前 80 行按要求原样保留；其中旧命令或说明如与下文不同，以这里的说明为准。例如加入林肯的正确命令是 `bash run_lincoln.sh`，`docker rm` 删除的是容器，`docker rmi` 才删除镜像。
+以下内容说明当前工作区实际存在的模块、实现和使用方法，并整理本次开发中的问题。上方前 80 行原有内容保留，仅按后续要求将工程内调用路径改为相对路径；其中旧命令或说明如与下文不同，以这里的说明为准。例如加入林肯的正确命令是 `bash run_lincoln.sh`，`docker rm` 删除的是容器，`docker rmi` 才删除镜像。
 
 本项目以 Docker 中的 CARLA 0.9.16 为三维仿真服务，以 SUMO 为随机 NPC 的交通仿真器，在 Town04 中加入可独立驾驶的林肯 MKZ 2020，发布 ROS2 传感器与地图数据供 RViz2 观察。借鉴 CarlaDemo 的车辆网格和传感器安装配置，但驾驶、桥接生命周期、ROS 发布及窗口控制由本工程独立实现，不需要运行 Demo 或依赖其 ROS 构建产物。
 
@@ -110,7 +115,7 @@ NPC 由 SUMO 控制，桥接将位置同步到 CARLA；林肯由手动输入或 
 
 | 项目 | 当前配置 |
 |---|---|
-| 项目根目录 | `~/Desktop/Carla` |
+| 项目根目录 | 当前检出的 `Carla/` 目录，下文内部路径均相对此目录 |
 | CARLA 服务 | `carlasim/carla:0.9.16`，默认 `127.0.0.1:2000` |
 | Python | `~/carla-venv/bin/python`，与服务匹配的 CARLA Python 包 |
 | ROS2 / RViz2 | Jazzy，`/opt/ros/jazzy/setup.bash` |
@@ -122,6 +127,8 @@ NPC 由 SUMO 控制，桥接将位置同步到 CARLA；林肯由手动输入或 
 
 ### 推荐启动顺序
 
+本文所有项目内部命令均在工程根目录执行，路径不依赖工程位于哪个用户的桌面。`run_lincoln.sh` 会自动切换到自身所在的根目录；代码内部通过脚本位置确定工程根目录后解析资源，避免依赖调用者当前目录。外部 Python/ROS/SUMO 安装路径不属于项目内部路径。
+
 1. 按上方命令启动 CARLA Docker，等待服务就绪。
 2. 在没有运行车辆/桥接时加载 Town04：
 
@@ -132,13 +139,13 @@ NPC 由 SUMO 控制，桥接将位置同步到 CARLA；林肯由手动输入或 
 3. 在本工程运行林肯和随机 NPC。下面两条可以按任意顺序、在不同终端执行：
 
    ```bash
-   cd ~/Desktop/Carla
+   # 先在终端进入工程根目录
    bash run_lincoln.sh
    ```
 
    ```bash
    ~/carla-venv/bin/python \
-     ~/Desktop/Carla/carla-source/Co-Simulation/Sumo/spawn_npc_sumo.py \
+     carla-source/Co-Simulation/Sumo/spawn_npc_sumo.py \
      -n 100 --sumo-gui --step-length 0.05 --tls-manager carla
    ```
 
@@ -158,7 +165,7 @@ NPC 由 SUMO 控制，桥接将位置同步到 CARLA；林肯由手动输入或 
 | `--sumo-npcs 100` | 新建桥时创建常驻背景批次；复用旧桥时不追加 |
 | `--no-sumo` | 不自动创建桥，用于已有外部推进者；本车不会自行 tick |
 | `--no-rviz` | 不打开 RViz，仍创建传感器并发布 ROS 数据 |
-| `--rviz-config 路径` | 替换默认 RViz 模板 |
+| `--rviz-config 路径` | 替换默认 RViz 模板；相对路径按工程根目录解析，也支持绝对路径 |
 | `--camera-rows 6` | 两列六行，实际仍八路相机，多出的四格为空 |
 | `--host` / `--port` | CARLA 服务地址；自动创建桥仅支持本机 |
 | `--tm-port 8000` | 本车自动驾驶使用的共享 Traffic Manager 端口 |
@@ -445,8 +452,8 @@ for light in world.get_actors().filter('traffic.traffic_light*'):
 根仓库忽略 `carla-source/`，而该目录自身有 `.git`，需要分别查看两个仓库状态。VSCode 是否显示还取决于仓库自动扫描范围和工作区设置；可打开子目录、把它加入多根工作区或调整 Git 扫描设置，不要重新 `git init` 覆盖既有仓库。
 
 ```bash
-git -C ~/Desktop/Carla status --short
-git -C ~/Desktop/Carla/carla-source status --short
+git status --short
+git -C carla-source status --short
 ```
 
 ## 常用只读诊断
@@ -474,7 +481,7 @@ PY
 查询共享桥的车辆 ID 映射与批次，不直接创建第二个 TraCI 客户端：
 
 ```bash
-cd ~/Desktop/Carla
+# 先在终端进入工程根目录
 PYTHONPATH=lincoln ~/carla-venv/bin/python - <<'PY'
 from shared_sumo import request, control_folder
 s = request('localhost', 2000, {'action': 'status'}, timeout=10)

@@ -17,6 +17,7 @@ Script to create sumo vtypes based on carla blueprints.
 import argparse
 import datetime
 import json
+from pathlib import Path
 import logging
 import os
 
@@ -28,7 +29,8 @@ import carla  # pylint: disable=import-error, wrong-import-position
 # -- load specs definition -------------------------------------------------------------------------
 # ==================================================================================================
 
-with open('../data/vtypes.json') as f:
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
+with (PROJECT_ROOT / 'carla-source/Co-Simulation/Sumo/data/vtypes.json').open() as f:
     SPECS = json.load(f)
 
     DEFAULT_2_WHEELED_VEHICLE = SPECS['DEFAULT_2_WHEELED_VEHICLE']

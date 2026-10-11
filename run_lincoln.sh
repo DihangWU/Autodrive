@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -eo pipefail
 PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd -- "$PROJECT_DIR"
 source /opt/ros/jazzy/setup.bash
 export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}/usr/lib/python3/dist-packages"
 PYTHON="$HOME/carla-venv/bin/python"
@@ -21,16 +22,16 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: bash run_lincoln.sh [--spawn-index N | --pose X Y Z YAW]"
             echo "       [--sensors all|lidar] [--sumo-npcs N] [--no-sumo] [--no-rviz]"
             echo "       --stop-sumo stops only the bridge started by this launcher."
-            "$PYTHON" "$PROJECT_DIR/lincoln/ego_vehicle.py" --help
+            "$PYTHON" "lincoln/ego_vehicle.py" --help
             exit 0 ;;
         *) EGO_ARGS+=("$1"); shift ;;
     esac
 done
 "$PYTHON" -c 'import carla, rclpy, tf2_ros, numpy, tkinter, yaml'
 if $STOP_SUMO; then
-    exec "$PYTHON" "$PROJECT_DIR/lincoln/ensure_sumo.py" --host "$HOST_ARG" --port "$PORT_ARG" --stop
+    exec "$PYTHON" "lincoln/ensure_sumo.py" --host "$HOST_ARG" --port "$PORT_ARG" --stop
 fi
 if $START_SUMO; then
-    "$PYTHON" "$PROJECT_DIR/lincoln/ensure_sumo.py" --host "$HOST_ARG" --port "$PORT_ARG" --npcs "$NPC_COUNT"
+    "$PYTHON" "lincoln/ensure_sumo.py" --host "$HOST_ARG" --port "$PORT_ARG" --npcs "$NPC_COUNT"
 fi
-exec "$PYTHON" "$PROJECT_DIR/lincoln/ego_vehicle.py" "${EGO_ARGS[@]}"
+exec "$PYTHON" "lincoln/ego_vehicle.py" "${EGO_ARGS[@]}"
