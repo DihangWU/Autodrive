@@ -74,8 +74,7 @@ def npc_client(args):
         raise ValueError('External/multi-client TraCI mode requires --standalone.')
     ready = ensure_bridge(host=args.host, port=args.port, step_length=args.step_length,
                           sumo_gui=args.sumo_gui, tls_manager=args.tls_manager,
-                          sync_vehicle_color=True, sync_vehicle_lights=args.sync_vehicle_lights,
-                          require_town04=False)
+                          sync_vehicle_color=True, sync_vehicle_lights=args.sync_vehicle_lights)
     if abs(ready['step_length'] - args.step_length) > 1e-8 or ready['tls_manager'] != args.tls_manager:
         logging.warning('Using existing bridge settings: step=%s, tls=%s; not changing the running simulation.',
                         ready['step_length'], ready['tls_manager'])

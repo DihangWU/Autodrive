@@ -88,7 +88,7 @@
 
 以下内容说明当前工作区实际存在的模块、实现和使用方法，并整理本次开发中的问题。上方前 80 行原有内容保留，仅按后续要求将工程内调用路径改为相对路径；其中旧命令或说明如与下文不同，以这里的说明为准。例如加入林肯的正确命令是 `bash run_lincoln.sh`，`docker rm` 删除的是容器，`docker rmi` 才删除镜像。
 
-本项目以 Docker 中的 CARLA 0.9.16 为三维仿真服务，以 SUMO 为随机 NPC 的交通仿真器，在 Town04 中加入可独立驾驶的林肯 MKZ 2020，发布 ROS2 传感器与地图数据供 RViz2 观察。借鉴 CarlaDemo 的车辆网格和传感器安装配置，但驾驶、桥接生命周期、ROS 发布及窗口控制由本工程独立实现，不需要运行 Demo 或依赖其 ROS 构建产物。
+本项目以 Docker 中的 CARLA 0.9.16 为三维仿真服务，以 SUMO 为随机 NPC 的交通仿真器，在当前 CARLA 地图中加入可独立驾驶的林肯 MKZ 2020，发布 ROS2 传感器与地图数据供 RViz2 观察。借鉴 CarlaDemo 的车辆网格和传感器安装配置，但驾驶、桥接生命周期、ROS 发布及窗口控制由本工程独立实现，不需要运行 Demo 或依赖其 ROS 构建产物。
 
 当前工作区中的 `carla-source/` 是单独的 Git 仓库，实际检出的源码主要是 `Co-Simulation/Sumo/` 及 CARLA 仓库顶层说明、构建文件；不是完整 Unreal 编辑器工程。Docker 中的 CARLA 服务使用镜像内的程序，本地修改 Python 桥接脚本无需重新构建镜像。
 
@@ -115,7 +115,7 @@ NPC 由 SUMO 控制，桥接将位置同步到 CARLA；林肯由手动输入或 
 
 | 项目 | 当前配置 |
 |---|---|
-| 项目根目录 | 当前检出的 `Carla/` 目录，下文内部路径均相对此目录 |
+| 项目根目录 | 当前检出的工程目录（目前为 `Autodrive/`），下文内部路径均相对此目录 |
 | CARLA 服务 | `carlasim/carla:0.9.16`，默认 `127.0.0.1:2000` |
 | Python | `~/carla-venv/bin/python`，与服务匹配的 CARLA Python 包 |
 | ROS2 / RViz2 | Jazzy，`/opt/ros/jazzy/setup.bash` |
@@ -130,7 +130,7 @@ NPC 由 SUMO 控制，桥接将位置同步到 CARLA；林肯由手动输入或 
 本文所有项目内部命令均在工程根目录执行，路径不依赖工程位于哪个用户的桌面。`run_lincoln.sh` 会自动切换到自身所在的根目录；代码内部通过脚本位置确定工程根目录后解析资源，避免依赖调用者当前目录。外部 Python/ROS/SUMO 安装路径不属于项目内部路径。
 
 1. 按上方命令启动 CARLA Docker，等待服务就绪。
-2. 在没有运行车辆/桥接时加载 Town04：
+2. 可直接使用 CARLA 当前地图；如需换图，在没有运行车辆/桥接时加载所需地图。下面以 Town04 为例：
 
    ```bash
    ~/carla-venv/bin/python -c "import carla; c=carla.Client('localhost',2000); c.set_timeout(120); c.load_world('Town04')"
@@ -149,7 +149,7 @@ NPC 由 SUMO 控制，桥接将位置同步到 CARLA；林肯由手动输入或 
      -n 100 --sumo-gui --step-length 0.05 --tls-manager carla
    ```
 
-第一条启动请求会创建常驻共享桥，后来请求复用它。默认林肯启动器要求当前地图为 Town04，不负责启动 Docker 或切换地图；独立 NPC 客户端可以针对当前地图生成桥接路网。
+第一条启动请求会创建常驻共享桥，后来请求复用它。林肯启动器不绑定 Town04，使用 CARLA 当前加载的地图，不负责启动 Docker 或切换地图。车辆出生点、RViz 道路数据和新建共享桥的 SUMO 路网都来自当前地图；地图仍需具备可用出生点及可转换的 OpenDRIVE 道路。
 
 重复 `bash run_lincoln.sh` 可以加入多辆林肯。重复 NPC 命令可以加入多个独立批次。`-n` 是请求数量，SUMO 会根据道路空间逐步入场，不保证启动瞬间所有车辆已经进入地图。
 
@@ -222,7 +222,7 @@ Carla/
 
 ### `lincoln/ego_vehicle.py`：一车一客户端
 
-生成 `lincoln_<10位十六进制>` 标识，使用原生 `vehicle.lincoln.mkz_2020` 蓝色车辆及 CARLA 物理。默认从地图 `get_spawn_points()` 选取与现有车辆距离超过 7 米的位置，最终通过 `try_spawn_actor()` 确认能否生成；自定义位置仍需用户确保是可行驶区域。
+生成 `lincoln_<10位十六进制>` 标识，使用原生 `vehicle.lincoln.mkz_2020` 蓝色车辆及 CARLA 物理。默认从当前地图 `get_spawn_points()` 筛选与现有车辆距离超过 7 米的标准出生点，再随机打乱候选顺序，最终通过 `try_spawn_actor()` 确认能否生成；自定义位置仍需用户确保是可行驶区域。
 
 生成 RPC 返回后，等待车辆出现在状态快照且 `is_alive` 为真，避免新 actor 尚未进入客户端快照就被当作已死亡。脚本本身从不调用 `world.tick()`。
 
@@ -299,7 +299,7 @@ CARLA 地图 API 不提供完整 Unreal 场景网格、护栏和材质贴图。T
 
 `free_camera_controls.py` 提供 Tk 面板内相机区域；释放视角后保持原位置，点击区域取得输入焦点。WASD 平移、Q/E 升降、Shift 加速、左键拖动转向、滚轮调速、F 捕获/释放鼠标、Esc 释放、R 重置。此区域内 WASD 操作相机而不是车辆。切回跟随后恢复车后约 8 米、上方 4 米、俯角 15 度。
 
-`carla_window_input.py` 通过 ctypes 调用 X11/Xfixes，仅在自由模式且本客户端有相机控制权时检测活动 CARLA 窗口。点击 CARLA 渲染窗口后可直接用鼠标转向及 WASD/Q/E/Shift 移动；离开窗口、失去控制权或切回跟随后恢复鼠标。依赖 X11，不承诺 Wayland 等环境同样可用；不可用时保留 Tk 面板控制。
+`carla_window_input.py` 通过 ctypes 调用 X11/Xfixes，仅在自由模式且本客户端有相机控制权时检测活动 CARLA 窗口。点击 CARLA 渲染窗口后可直接用鼠标转向及 WASD/Q/E/Shift 移动；滚轮向上加速、向下减速，与面板共用 1～300 m/s 的移动速度，通过 XInput2 监听滚轮事件，不抢占其他窗口输入；离开窗口、失去控制权或切回跟随后恢复鼠标。依赖 X11，不承诺 Wayland 等环境同样可用；不可用时保留 Tk 面板控制。
 
 `camera_ownership.py` 按 CARLA host/port 共用所有权文件，使用 `flock` 锁和 PID＋进程启动时间识别所有者。第一辆自动取得空闲相机，新加入车辆不抢占；明确点击跟随/自由相机操作可接管。写 spectator transform 时也持有同一把跨进程锁，旧客户端失去所有权后停止更新，旧客户端退出不会删除新所有者。异常退出后过期所有权可被后续请求接管。
 

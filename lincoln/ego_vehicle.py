@@ -7,6 +7,7 @@ import json
 import math
 from pathlib import Path
 import queue
+import random
 import re
 import signal
 import subprocess
@@ -182,6 +183,7 @@ class Lincoln(Node):
         else:
             occupied = [a.get_location() for a in self.world.get_actors().filter('vehicle.*')]
             points = [p for p in points if all(p.location.distance(v) > 7 for v in occupied)]
+            random.shuffle(points)
         for transform in points:
             self.car = self.world.try_spawn_actor(bp, transform)
             if self.car:

@@ -35,7 +35,7 @@ class FreeCameraControls:
 
     def refresh(self):
         self.canvas.itemconfigure(self.text, text=('跟随视角已开启' if self.node.follow else
-            '自由视角：点击 CARLA 窗口即可鼠标转向\nWASD 移动  Q/E 升降  Shift 加速\nF/Esc 释放鼠标；也可在此区域拖动、滚轮调速\n'
+            '自由视角：点击 CARLA 窗口即可鼠标转向\nWASD 移动  Q/E 升降  Shift 加速\nF/Esc 释放鼠标；滚轮调速；此区域也可拖动转向\n'
             f'移动速度：{self.speed:.1f} m/s'))
 
     def clear(self):
@@ -132,6 +132,9 @@ class FreeCameraControls:
                 self.node.follow = False
                 self.clear()
         if self.render_input:
+            steps = self.render_input.wheel_steps()
+            if steps:
+                self.wheel(steps)
             self.render_input.update(self.speed)
         now = time.monotonic()
         dt = min(now - self.last_time, .1)

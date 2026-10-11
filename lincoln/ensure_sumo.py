@@ -36,7 +36,7 @@ def bridges(host, port):
 
 def ensure_bridge(host='127.0.0.1', port=2000, npcs=0, stop=False, step_length=.05,
                   sumo_gui=True, tls_manager='carla', sync_vehicle_color=True,
-                  sync_vehicle_lights=False, require_town04=True):
+                  sync_vehicle_lights=False):
     args = argparse.Namespace(host=host, port=port, npcs=npcs, stop=stop)
     if step_length <= 0:
         raise ValueError('step-length must be positive')
@@ -61,8 +61,6 @@ def ensure_bridge(host='127.0.0.1', port=2000, npcs=0, stop=False, step_length=.
         client = carla.Client(args.host, args.port)
         client.set_timeout(10)
         world = client.get_world()
-        if require_town04 and not world.get_map().name.rsplit('/', 1)[-1].startswith('Town04'):
-            raise SystemExit('Please load Town04 first. This command does not change maps.')
         existing = bridges(args.host, args.port)
         if len(existing) > 1:
             raise SystemExit('Multiple SUMO bridges found. Stop duplicate tick owners first.')

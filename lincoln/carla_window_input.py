@@ -7,6 +7,30 @@ import math
 import time
 
 
+class EventCookie(C.Structure):
+    _fields_ = [('type', C.c_int), ('serial', C.c_ulong),
+                ('send_event', C.c_int), ('display', C.c_void_p),
+                ('extension', C.c_int), ('evtype', C.c_int),
+                ('cookie', C.c_uint), ('data', C.c_void_p)]
+
+
+class XEvent(C.Union):
+    _fields_ = [('cookie', EventCookie), ('pad', C.c_long * 24)]
+
+
+class RawButtonEvent(C.Structure):
+    _fields_ = [('type', C.c_int), ('serial', C.c_ulong),
+                ('send_event', C.c_int), ('display', C.c_void_p),
+                ('extension', C.c_int), ('evtype', C.c_int),
+                ('time', C.c_ulong), ('deviceid', C.c_int),
+                ('sourceid', C.c_int), ('detail', C.c_int), ('flags', C.c_int)]
+
+
+class XIEventMask(C.Structure):
+    _fields_ = [('deviceid', C.c_int), ('mask_len', C.c_int),
+                ('mask', C.POINTER(C.c_ubyte))]
+
+
 class CarlaWindowInput:
     def __init__(self, node):
         self.node = node
@@ -29,6 +53,12 @@ class CarlaWindowInput:
                               C.POINTER(C.c_uint)], C.c_int),
             'XWarpPointer': ([ptr, window, window, C.c_int, C.c_int, C.c_uint, C.c_uint, C.c_int, C.c_int], C.c_int),
             'XFlush': ([ptr], C.c_int), 'XQueryKeymap': ([ptr, C.c_void_p], C.c_int),
+            'XPending': ([ptr], C.c_int),
+            'XNextEvent': ([ptr, C.POINTER(XEvent)], C.c_int),
+            'XGetEventData': ([ptr, C.POINTER(EventCookie)], C.c_int),
+            'XFreeEventData': ([ptr, C.POINTER(EventCookie)], None),
+            'XQueryExtension': ([ptr, C.c_char_p, C.POINTER(C.c_int),
+                                  C.POINTER(C.c_int), C.POINTER(C.c_int)], C.c_int),
             'XStringToKeysym': ([C.c_char_p], window), 'XKeysymToKeycode': ([ptr, window], C.c_ubyte),
         }
         for name, (args, result) in signatures.items():
@@ -48,6 +78,56 @@ class CarlaWindowInput:
         self.previous_keys = set()
         self.last_time = time.monotonic()
         self.reset_pose = None
+        self.xi_opcode = None
+        try:
+            self._enable_wheel_events()
+        except (OSError, RuntimeError) as error:
+            self.xi_opcode = None
+            print(f"CARLA-window wheel unavailable; panel wheel remains available: {error}", flush=True)
+
+    def _enable_wheel_events(self):
+        # Observe wheel presses without grabbing buttons from CARLA/other apps.
+        self.xi = C.CDLL('libXi.so.6')
+        self.xi.XIQueryVersion.argtypes = [C.c_void_p, C.POINTER(C.c_int), C.POINTER(C.c_int)]
+        self.xi.XIQueryVersion.restype = C.c_int
+        self.xi.XISelectEvents.argtypes = [C.c_void_p, C.c_ulong, C.POINTER(XIEventMask), C.c_int]
+        self.xi.XISelectEvents.restype = C.c_int
+        opcode, event, error = C.c_int(), C.c_int(), C.c_int()
+        if not self.x.XQueryExtension(self.display, b'XInputExtension', C.byref(opcode),
+                                     C.byref(event), C.byref(error)):
+            raise RuntimeError('XInput2 is unavailable')
+        major, minor = C.c_int(2), C.c_int(0)
+        if self.xi.XIQueryVersion(self.display, C.byref(major), C.byref(minor)) != 0:
+            raise RuntimeError('XInput2 version 2 is unavailable')
+        self.xi_opcode = opcode.value
+        mask = (C.c_ubyte * 2)()
+        mask[15 // 8] |= 1 << (15 % 8)  # XI_RawButtonPress
+        selection = XIEventMask(1, len(mask), mask)  # XIAllMasterDevices
+        if self.xi.XISelectEvents(self.display, self.root, C.byref(selection), 1) != 0:
+            raise RuntimeError("Cannot subscribe to XInput2 wheel events")
+        self.x.XFlush(self.display)
+
+    def wheel_steps(self):
+        if self.xi_opcode is None:
+            return 0
+        enabled = (not self.node.follow and self.node.camera_control_enabled
+                   and bool(self.active_window()))
+        steps = 0
+        while self.x.XPending(self.display):
+            event = XEvent()
+            self.x.XNextEvent(self.display, C.byref(event))
+            cookie = event.cookie
+            if cookie.type != 35 or cookie.extension != self.xi_opcode:
+                continue
+            if not self.x.XGetEventData(self.display, C.byref(cookie)):
+                continue
+            try:
+                if enabled and cookie.evtype == 15:
+                    button = C.cast(cookie.data, C.POINTER(RawButtonEvent)).contents.detail
+                    steps += 1 if button == 4 else (-1 if button == 5 else 0)
+            finally:
+                self.x.XFreeEventData(self.display, C.byref(cookie))
+        return steps
 
     def active_window(self):
         actual, count, remaining = C.c_ulong(), C.c_ulong(), C.c_ulong()
