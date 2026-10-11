@@ -55,7 +55,7 @@ class FreeCameraControls:
 
     def focus(self, event):
         if not self.node.follow:
-            self.node.camera_control_enabled = True
+            self.node.set_camera_mode(False)
             self.canvas.focus_set()
             self.last_mouse = (event.x, event.y)
         return 'break'
@@ -126,6 +126,11 @@ class FreeCameraControls:
         return 'break'
 
     def update(self):
+        with self.node.camera_owner.access() as owned:
+            if not owned:
+                self.node.camera_control_enabled = False
+                self.node.follow = False
+                self.clear()
         if self.render_input:
             self.render_input.update(self.speed)
         now = time.monotonic()

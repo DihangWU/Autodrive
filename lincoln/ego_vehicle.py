@@ -126,6 +126,8 @@ class Lincoln(Node):
         self.camera_lock = threading.RLock()
         self.free_pose = None
         self.camera_control_enabled = False
+        from camera_ownership import CameraOwnership
+        self.camera_owner = CameraOwnership(args.host, args.port, self.uid)
         self.active = None
         self.cruise_speed = None
         self.cruise_integral = 0.
@@ -145,8 +147,7 @@ class Lincoln(Node):
         self.client = carla.Client(args.host, args.port)
         self.client.set_timeout(30)
         self.world = self.client.get_world()
-        self.follow = not any(a.attributes.get('role_name', '').startswith('lincoln_')
-                              for a in self.world.get_actors().filter('vehicle.*'))
+        self.follow = self.camera_owner.claim()
         self.camera_control_enabled = self.follow
         self.dt = self.world.get_settings().fixed_delta_seconds or .05
         try:
@@ -345,8 +346,10 @@ class Lincoln(Node):
             self.mosaic.publish(msg)
             self.last_mosaic = time.monotonic()
 
-    def set_camera_mode(self, follow, acquire=True):
+    def set_camera_mode(self, follow, acquire=True, replace=True):
         with self.camera_lock:
+            if acquire:
+                acquire = self.camera_owner.claim(replace=replace)
             self.camera_control_enabled = acquire
             self.follow = follow
             self.camera_pose = None
@@ -357,11 +360,17 @@ class Lincoln(Node):
                 t = self.spectator.get_transform()
                 self.free_pose = (t.location.x, t.location.y, t.location.z, t.rotation.pitch, t.rotation.yaw)
             else:
-                self._update_camera()
+                self.update_camera()
 
     def update_camera(self, snapshot=None):
         with self.camera_lock:
-            self._update_camera(snapshot)
+            with self.camera_owner.access() as owned:
+                if not owned:
+                    self.camera_control_enabled = False
+                    self.follow = False
+                    return
+                if self.camera_control_enabled:
+                    self._update_camera(snapshot)
 
     def _update_camera(self, snapshot=None):
         # Match the simulation cadence, rather than the unrelated GUI cadence.
@@ -436,6 +445,7 @@ class Lincoln(Node):
             self.car.apply_control(control)
 
     def cleanup(self):
+        self.camera_owner.release()
         if self.autopilot and self.car.is_alive:
             self.set_autopilot(False)
         if self.sensors:
@@ -736,7 +746,7 @@ def main():
             camera_button = tk.Button(window, text='释放视角' if node.follow else '跟随本车',
                                       command=toggle_camera_mode)
             camera_button.pack()
-            node.set_camera_mode(node.follow, acquire=node.follow)
+            node.set_camera_mode(node.follow, acquire=node.follow, replace=False)
             free_camera = FreeCameraControls(window, node)
             free_camera.mode_changed()
             speed = tk.Label(window)
@@ -752,6 +762,7 @@ def main():
                     return
                 node.drive()
                 free_camera.update()
+                camera_button.config(text="释放视角" if node.follow else "跟随本车")
                 autopilot_button.config(text='关闭自动驾驶' if node.autopilot else '开启自动驾驶')
                 velocity = node.car.get_velocity()
                 control = node.car.get_control()
