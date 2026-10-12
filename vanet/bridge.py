@@ -18,6 +18,7 @@ class VanetBridge:
         self.listener.setblocking(False)
         self.peer = None
         self.names = {}
+        self.idle_callback = None
         logging.info('VANET listening on 127.0.0.1:%s', port)
 
     def tick(self, world, step, sumo_ids=None):
@@ -53,6 +54,8 @@ class VanetBridge:
                 try:
                     chunk = self.peer.recv(128)
                 except socket.timeout:
+                    if self.idle_callback:
+                        self.idle_callback()
                     continue
                 if not chunk:
                     raise ConnectionError('network simulator disconnected')

@@ -7,4 +7,4 @@ source "$OMNET_ROOT/setenv" >/dev/null
 export LD_LIBRARY_PATH="$VEINS_ROOT/src:${LD_LIBRARY_PATH:-}"
 cd "$VANET_DIR/omnet"
 mkdir -p results
-exec opp_run -u Qtenv --image-path="$VEINS_ROOT/images" -n ".:$VEINS_ROOT/src/veins" -l "$VEINS_ROOT/src/veins" -l ./town04vanet -c Live "$@"
+exec python3 "$VANET_DIR/omnet_session.py" opp_run -u Qtenv --image-path="$VEINS_ROOT/images" -n ".:$VEINS_ROOT/src/veins" -l "$VEINS_ROOT/src/veins" -l ./town04vanet -c Live "$@"

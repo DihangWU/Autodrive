@@ -40,7 +40,11 @@ bash run_lincoln.sh --pose 235.597504 -172.815598 0.695892 180.326126
 | Lincoln B（车道修正后） | 235.598 / -172.816 | 180.326 |
 | RSU 候选路边位置 | 215.540 / -157.640 | 固定 |
 
-配置种子坐标集中在 town04.json。车辆启动时使用当前 CARLA 驾驶车道 waypoint 修正高度和方向；检查横向偏差不超过 4 米、方向差不超过 35 度且不在路口内部，否则停止。RSU 在 OMNeT++ 中是固定无线节点，不创建 CARLA 实体；候选角落的建筑遮挡尚未验证。
+配置种子坐标集中在 town04.json。车辆启动时使用当前 CARLA 驾驶车道 waypoint 修正高度和方向；检查横向偏差不超过 4 米、方向差不超过 35 度且不在路口内部，否则停止。RSU 在 OMNeT++ 中是固定无线节点；CARLA 同位置显示橙色塔架、青色顶部框和圆环、黄色天线及 `RSU 924` 文字。该标记是世界调试绘图，无实体碰撞，不作为传感器可检测物体；候选角落的建筑遮挡尚未验证。
+
+RSU 的唯一位置定义是 `town04.json` 的 `rsu`，单位为 CARLA 世界坐标米。`bash vanet/run_omnet.sh` 每次启动读取 JSON，自动换算并传入 OMNeT++，将同一配置快照交给共享桥：CARLA 显示塔架，SUMO 显示橙色 RSU 图标。单独启动车辆不会显示 RSU；关闭 OMNeT++ 窗口或在启动终端按 Ctrl+C 后，SUMO 图标移除，CARLA 绘图在恢复推进后的两个步长内消失（默认约 0.1 仿真秒）。暂停 Qtenv 不会移除标记。修改 JSON 后重开 OMNeT++ 即可，运行中的会话不热更新。
+
+显示由现有桥线程统一处理，不再使用独立常驻标记进程；会话进程异常退出也会触发清理。首次升级此功能时，旧共享桥需要重启一次：正常关闭车辆后，在工程根目录执行 `bash run_lincoln.sh --stop-sumo`，再重新运行 VANET 车辆启动器。无需重启 CARLA 或修改地图。
 
 桥传输的 SUMO 坐标使用 x=CARLA.x+503.02、y=-CARLA.y+423.76。OMNeT++ 内统一转换为 x'=x-xMin+40、y'=yMax-y+40，修正 Qtenv 画布 Y 轴向下与 SUMO Y 轴向上的差异；道路、车辆、RSU 和通信连线使用同一坐标系，距离保持不变。
 
@@ -71,7 +75,7 @@ Qtenv 暂停会暂停共享仿真推进，这是同步联仿的预期行为。�
 
 普通 Run 会播放详细动画，实际运行速度可能很慢；Fast 模式适合较快推进。默认 Live 实验在 120 仿真秒结束并释放桥连接，可用 `--sim-time-limit=300s` 覆盖时长。车辆编号按共享桥本次运行的生成顺序递增；销毁后新建车辆会取得新的编号。
 
-OMNET_ROOT、VEINS_ROOT 可覆盖安装路径。VANET 端口由 town04.json 的 network.port 决定；如修改，运行网络时加 --*.manager.port=<端口>。INI 中的 RSU 位置为对应网络坐标，修改 JSON 的 RSU 后需同步改 INI；当前两者已对齐。
+OMNET_ROOT、VEINS_ROOT 可覆盖安装路径。VANET 端口默认自动读取 town04.json 的 network.port。`omnetpp.ini` 不再保存 RSU 坐标，修改位置只改 JSON。CARLA 非默认地址可给网络启动器传 `--carla-host=<地址> --carla-port=<端口>`。
 
 ## 看什么
 
@@ -96,6 +100,8 @@ OMNET_ROOT、VEINS_ROOT 可覆盖安装路径。VANET 端口由 town04.json 的 
 
 Smoke 的第二辆车在 5 秒删除、6 秒重新生成。合成快照测试连接同一个 Python VanetBridge 类，与 OMNeT++ 执行逐帧 ACK，并检查 V2V、V2I、RSU 转发收包；它不会连接 CARLA 或启动 SUMO。
 
+`~/carla-venv/bin/python vanet/test_scene_lifecycle.py` 使用独立的无界面 SUMO 和模拟 CARLA 绘图，验证 JSON 坐标传递、标记创建以及正常关闭、终止和崩溃时的清理。Smoke 配置与合成快照测试不显示真实场景标记；其他自建离线测试可显式传 `--no-scene-markers`。
+
 ## 原工程的接入改动
 
 - run_lincoln.sh：无参数仍随机出生；显式校验并传递 --pose X Y Z YAW。
@@ -103,5 +109,6 @@ Smoke 的第二辆车在 5 秒删除、6 秒重新生成。合成快照测试连
 - lincoln/ego_vehicle.py：使用原有 --pose 接口，无 VANET 专用修改。
 - carla-source/Co-Simulation/Sumo/run_synchronization.py：VANET_PORT 设置时启用本目录 TCP 端点，每步同步完车辆之后发送快照，退出时关闭端点。
 - carla-source/Co-Simulation/Sumo/sumo_integration/sumo_simulation.py：支持按前缀独立编号，Lincoln 映射使用 lincoln0、lincoln1；网络节点沿用该名称。
+- carla-source/Co-Simulation/Sumo/spawn_npc_sumo.py：桥线程检查 OMNeT++ 会话，统一添加和移除 CARLA / SUMO RSU 标记。
 
 其他新实现均在本目录；不启动第二套 SUMO、不建立第二个 TraCI 客户端，也不由 OBU 调用 world.tick()。

@@ -38,7 +38,7 @@ if __name__ == '__main__':
             time.sleep(.001)
     worker=threading.Thread(target=serve,daemon=True)
     worker.start()
-    command=['bash',str(ROOT/'run_omnet.sh'),'-u','Cmdenv','-c','Live','--sim-time-limit=2s',f'--*.manager.port={port}']
+    command=['bash',str(ROOT/'run_omnet.sh'),'--no-scene-markers','-u','Cmdenv','-c','Live','--sim-time-limit=2s',f'--*.manager.port={port}']
     try:
         started=time.time()
         completed=subprocess.run(command,capture_output=True,text=True,timeout=20)

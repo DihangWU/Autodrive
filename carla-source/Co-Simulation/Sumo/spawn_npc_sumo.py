@@ -55,6 +55,8 @@ from util.netconvert_carla import netconvert_carla
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'lincoln'))
 from shared_sumo import RequestService, control_folder, atomic_json, request, identity, alive
 from ensure_sumo import ensure_bridge
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from vanet.scene import SceneMarkers
 
 
 def selected_blueprints(vtypes, filter_pattern, safe):
@@ -171,6 +173,9 @@ def main(args):
     # ---------------
     synchronization = SimulationSynchronization(sumo_simulation, carla_simulation, args.tls_manager,
                                                 args.sync_vehicle_color, args.sync_vehicle_lights)
+    scene = SceneMarkers(world, args.host, args.port)
+    if synchronization.vanet:
+        synchronization.vanet.idle_callback = scene.poll
 
     try:
         # ----------
@@ -225,7 +230,8 @@ def main(args):
                         pending_vehicles=list(traci.simulation.getPendingVehicles()),
                         sumo2carla=dict(synchronization.sumo2carla_ids),
                         carla2sumo=dict(synchronization.carla2sumo_ids),
-                        sessions=list(service.sessions))
+                        sessions=list(service.sessions),
+                        vanet_scene=scene.status())
 
         service = RequestService(args.host, args.port, spawn_batch, remove_batch, status)
         spawn_batch('bridge_' + uuid.uuid4().hex,
@@ -243,6 +249,7 @@ def main(args):
             start = time.time()
 
             service.process()
+            scene.poll()
             synchronization.tick()
 
             # Drop departed vehicles so reused IDs get fresh cached data.
@@ -301,7 +308,10 @@ def main(args):
         ready_file = control_folder(args.host, args.port) / 'ready.json'
         if args.bridge_server and ready_file.exists() and json.loads(ready_file.read_text()).get('pid') == os.getpid():
             ready_file.unlink()
-        synchronization.close()
+        try:
+            scene.clear()
+        finally:
+            synchronization.close()
 
         if os.path.exists(tmpdir):
             shutil.rmtree(tmpdir)
