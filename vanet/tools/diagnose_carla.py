@@ -1,11 +1,12 @@
 """Isolate fixed spawns from SUMO, sensors and spectator control."""
 import sys
 from pathlib import Path
-sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'lincoln'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from vanet.common.paths import LINCOLN_DIR
+sys.path.insert(0, str(LINCOLN_DIR))
 import carla
 from ensure_sumo import bridges
-from vanet.spawn import experiment_points
+from vanet.runtime.spawn import experiment_points
 
 if __name__=='__main__':
     if bridges('127.0.0.1',2000):

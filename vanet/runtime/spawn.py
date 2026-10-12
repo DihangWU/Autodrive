@@ -2,9 +2,8 @@
 import json
 import math
 import fcntl
-from pathlib import Path
+from vanet.common.paths import CONFIG
 
-CONFIG = Path(__file__).with_name('town04.json')
 
 def experiment_points(world, slot=None):
     import carla

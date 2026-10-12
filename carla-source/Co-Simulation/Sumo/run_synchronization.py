@@ -60,7 +60,7 @@ class SimulationSynchronization(object):
         if os.environ.get("VANET_PORT"):
             from pathlib import Path
             sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-            from vanet.bridge import VanetBridge
+            from vanet.runtime.bridge import VanetBridge
             self.vanet = VanetBridge(os.environ["VANET_PORT"])
             # Sensor creation/rendering can exceed the upstream 2-second RPC timeout.
             self.carla.client.set_timeout(30.0)

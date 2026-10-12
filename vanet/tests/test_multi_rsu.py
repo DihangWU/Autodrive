@@ -4,9 +4,11 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
-from config import load_config
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from vanet.common.config import load_config
 
-ROOT = Path(__file__).resolve().parent
+from vanet.common.paths import VANET_DIR as ROOT
 
 
 def main():

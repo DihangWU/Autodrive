@@ -1,0 +1,1 @@
+"""VANET scene package."""

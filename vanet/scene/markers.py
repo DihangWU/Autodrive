@@ -1,13 +1,13 @@
 """Run only on the existing bridge thread: no extra TraCI client or CARLA tick."""
 import json
 import logging
-from pathlib import Path
 import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lincoln'))
+from vanet.common.paths import LINCOLN_DIR, ASSETS_DIR
+sys.path.insert(0, str(LINCOLN_DIR))
 from shared_sumo import alive, atomic_json, control_folder
-from vanet.config import sumo_rsu
-from vanet.rsu_marker import draw_marker
+from vanet.common.config import sumo_rsu
+from vanet.scene.rsu_marker import draw_marker
 
 
 class SceneMarkers:
@@ -63,7 +63,7 @@ class SceneMarkers:
                     base_z = p.get('base_z', waypoint.transform.location.z + .1)
                     traci.poi.add(name, x, y, (255, 130, 0, 255),
                                   poiType='RSU', layer=100, width=8, height=8,
-                                  imgFile=str(Path(__file__).with_name('assets') / 'rsu.png'))
+                                  imgFile=str(ASSETS_DIR / 'rsu.png'))
                     self.markers[name] = (p, base_z)
                     traci.poi.setParameter(name, 'name', name)
                     positions[name] = [x, y]

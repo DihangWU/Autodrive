@@ -4,7 +4,7 @@ import math
 import re
 from pathlib import Path
 
-CONFIG = Path(__file__).with_name('town04.json')
+from vanet.common.paths import CONFIG
 
 
 def load_config(path=CONFIG):

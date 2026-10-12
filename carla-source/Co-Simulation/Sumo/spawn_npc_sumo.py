@@ -56,7 +56,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'lincoln'))
 from shared_sumo import RequestService, control_folder, atomic_json, request, identity, alive
 from ensure_sumo import ensure_bridge
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from vanet.scene import SceneMarkers
+from vanet.scene.markers import SceneMarkers
 
 
 def selected_blueprints(vtypes, filter_pattern, safe):

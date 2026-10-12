@@ -6,11 +6,11 @@ ACK <frame> releases the next CARLA/SUMO step. No second TraCI connection.
 import json
 import logging
 import socket
-from pathlib import Path
+from vanet.common.paths import CONFIG
 
 class VanetBridge:
     def __init__(self, port):
-        self.cfg = json.loads(Path(__file__).with_name('town04.json').read_text())
+        self.cfg = json.loads(CONFIG.read_text())
         self.listener = socket.socket()
         self.listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.listener.bind(('127.0.0.1', int(port)))

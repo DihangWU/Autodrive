@@ -8,9 +8,9 @@ import subprocess
 from pathlib import Path
 import sys
 
-PROJECT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PROJECT/'lincoln'))
-sys.path.insert(0, str(PROJECT))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from vanet.common.paths import PROJECT_DIR as PROJECT, LINCOLN_DIR, CONFIG
+sys.path.insert(0, str(LINCOLN_DIR))
 
 def main():
     p = argparse.ArgumentParser(add_help=False)
@@ -26,12 +26,12 @@ def main():
         os.execvp('bash', ['bash', str(PROJECT/'run_lincoln.sh'), '--help'])
     from ensure_sumo import bridges
     import carla
-    cfg = json.loads(Path(__file__).with_name('town04.json').read_text())
+    cfg = json.loads(CONFIG.read_text())
     os.chdir(PROJECT)
     c = carla.Client(args.host,args.port)
     c.set_timeout(30)
     world = c.get_world()
-    from vanet.spawn import reserve_slot
+    from vanet.runtime.spawn import reserve_slot
     slot_name = 'custom'
     if args.pose is not None:
         position_args = ['--pose', *map(str, args.pose)]

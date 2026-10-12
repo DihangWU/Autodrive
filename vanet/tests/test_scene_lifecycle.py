@@ -9,12 +9,13 @@ import tempfile
 import time
 from types import SimpleNamespace
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path[:0] = [str(ROOT), str(ROOT / 'lincoln'), str(Path(os.environ.get('SUMO_HOME', Path.home() / 'sumo-1.22.0')) / 'tools')]
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from vanet.common.paths import PROJECT_DIR as ROOT, LINCOLN_DIR, VANET_DIR
+sys.path[:0] = [str(LINCOLN_DIR), str(Path(os.environ.get('SUMO_HOME', Path.home() / 'sumo-1.22.0')) / 'tools')]
 import traci
 from shared_sumo import RequestService, control_folder
-from vanet.config import load_config, sumo_rsu, rsu_definitions
-from vanet.scene import SceneMarkers
+from vanet.common.config import load_config, sumo_rsu, rsu_definitions
+from vanet.scene.markers import SceneMarkers
 
 
 class World:
@@ -57,7 +58,7 @@ def main():
                         'Path(sys.argv[1]).write_text(json.dumps(sys.argv[3:]));'
                         '\nwhile not Path(sys.argv[2]).exists(): time.sleep(.05)')
                 log = (tmp / (mode + '.log')).open('w')
-                child = subprocess.Popen([sys.executable, str(ROOT / 'vanet/omnet_session.py'),
+                child = subprocess.Popen([sys.executable, str(VANET_DIR / 'runtime/omnet_session.py'),
                                           '--carla-host', host, '--vanet-config', str(config_path), sys.executable, '-c', code,
                                           str(argv_file), str(exit_file)], stdout=log, stderr=log)
                 def advance():

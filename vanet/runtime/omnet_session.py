@@ -10,11 +10,11 @@ import sys
 import time
 import uuid
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / 'lincoln'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from vanet.common.paths import LINCOLN_DIR
+sys.path.insert(0, str(LINCOLN_DIR))
 from shared_sumo import atomic_json, control_folder, identity, request
-from vanet.config import CONFIG, load_config, rsu_definitions
+from vanet.common.config import CONFIG, load_config, rsu_definitions
 
 
 def main():

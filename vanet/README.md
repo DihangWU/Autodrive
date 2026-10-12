@@ -2,6 +2,51 @@
 
 本目录使用本机 OMNeT++ 6.1 + Veins 5.3.1，不依赖 INET。OBU 是 Veins 802.11p 通信节点，不是 CARLA sensor。原有 SUMO 共享桥仍是唯一仿真推进者和 TraCI 调用者。
 
+## 目录结构
+
+常改配置和常用入口保留在 `vanet/` 顶层，Python 实现按功能归类：
+
+```text
+vanet/
+├── README.md                 # 本目录说明
+├── town04.json               # 出生点、RSU、网络配置
+├── run_lincoln.sh            # 车辆启动入口
+├── run_omnet.sh              # OMNeT++ 启动入口
+├── build.sh                  # OMNeT++ 编译及道路导出入口
+├── runtime/                  # 联仿运行逻辑
+│   ├── launch.py             # 车辆启动与参数处理
+│   ├── spawn.py              # 出生点选择与预留
+│   ├── bridge.py             # TCP 快照及逐帧 ACK
+│   └── omnet_session.py      # OMNeT++ 会话生命周期
+├── scene/                    # RSU 场景显示
+│   ├── markers.py            # SUMO/CARLA 标记创建与清理
+│   └── rsu_marker.py         # CARLA 中绘制 RSU
+├── common/                   # 公共配置与资源路径
+│   ├── config.py             # 读取与校验 town04.json
+│   └── paths.py              # 工程、配置、图片等路径
+├── sumo_gui/                 # SUMO 双坐标显示与复制菜单
+│   ├── build.py              # 工程内 GUI 构建
+│   ├── build/                # 临时编译产物，Git 忽略
+│   └── bin/                  # 编译后的 GUI，Git 忽略
+├── omnet/                    # NED/C++ 模型、无线配置、道路背景
+├── tools/                    # 导出与诊断工具
+│   ├── export_roads.py
+│   └── diagnose_carla.py
+├── tests/                    # 通信、多 RSU、场景生命周期测试
+├── assets/                   # RSU 图片等静态资源
+└── validation/               # 已保存的验证记录
+```
+
+顶层的 `__init__.py` 和 `.gitignore` 用于 Python 包和 Git 管理。配置仍只需修改 `town04.json`；公共路径由 `common/paths.py` 按文件位置解析，不依赖终端当前目录。本文相对命令均从工程根目录执行，原有入口不变：
+
+```bash
+bash vanet/run_lincoln.sh
+bash vanet/run_omnet.sh
+bash vanet/build.sh
+```
+
+工具可单独运行，例如 `python3 vanet/tools/export_roads.py`。`~/carla-venv/bin/python vanet/tools/diagnose_carla.py` 会独占 CARLA 时钟，仅用于已停止共享桥的隔离诊断，不与日常联仿同时运行。测试命令见下方“验证”。
+
 ## 当前状态
 
 已通过两辆真实 Lincoln + 一个 RSU 的 CARLA / SUMO / Veins 联调，每辆保留原有 31 个传感器。SUMO 车辆和 OMNeT++ OBU 统一命名为 `lincoln0`、`lincoln1`。两车在不同入口，实测间距约 48.1 米；5 秒仿真内，两车双向直达各成功接收 5 包，RSU 分别收到两车各 5 包，两车也均收到 RSU 广播及转发。结果保存在 `validation/live-smoke.json`。Qtenv 已检查实际收包气泡和通信连线。
@@ -54,7 +99,7 @@ RSU 的唯一位置定义是 `town04.json` 的 `rsus` 列表，单位为 CARLA �
 
 桥传输的 SUMO 坐标使用 x=CARLA.x+503.02、y=-CARLA.y+423.76。OMNeT++ 内统一转换为 x'=x-xMin+40、y'=yMax-y+40，修正 Qtenv 画布 Y 轴向下与 SUMO Y 轴向上的差异；道路、车辆、RSU 和通信连线使用同一坐标系，距离保持不变。
 
-roads.txt 包含 `carla-source/Co-Simulation/Sumo/examples/net/Town04.net.xml` 的全部 632 条车道及路口内部连接。`build.sh` 自动调用 `export_roads.py` 生成该文件，首行记录源路网边界。它是全图静态道路背景，车辆位置实时更新；Qtenv 使用 Ctrl + 鼠标滚轮缩放，通过滚动条移动视野以寻找路口。第一版信道仅包含路径损耗和噪声，不自动导入 CARLA 建筑物。
+roads.txt 包含 `carla-source/Co-Simulation/Sumo/examples/net/Town04.net.xml` 的全部 632 条车道及路口内部连接。`build.sh` 自动调用 `tools/export_roads.py` 生成该文件，首行记录源路网边界。它是全图静态道路背景，车辆位置实时更新；Qtenv 使用 Ctrl + 鼠标滚轮缩放，通过滚动条移动视野以寻找路口。第一版信道仅包含路径损耗和噪声，不自动导入 CARLA 建筑物。
 
 RSU 当前基座绝对高度为 0.39 米，主体顶部/通信节点绝对高度为 60 米，装饰天线和光环最高约 68 米。顶部光环半径为 5 米，用于远处识别；每个列表项的 `base_z`、`beacon_radius` 控制这些显示尺寸。建筑和树木仍可能遮挡个别视角。
 
@@ -141,16 +186,16 @@ OMNET_ROOT、VEINS_ROOT 可覆盖安装路径。VANET 端口默认自动读取 t
 
 真实 TCP 桥协议与合成车辆快照测试：
 
-   python3 vanet/test_transport.py
+   python3 vanet/tests/test_transport.py
 
 Smoke 的第二辆车在 5 秒删除、6 秒重新生成。合成快照测试连接同一个 Python VanetBridge 类，与 OMNeT++ 执行逐帧 ACK，并检查 V2V、V2I、RSU 转发收包；它不会连接 CARLA 或启动 SUMO。
 
-`~/carla-venv/bin/python vanet/test_scene_lifecycle.py` 使用独立的无界面 SUMO 和模拟 CARLA 绘图，验证 JSON 坐标传递、标记创建以及正常关闭、终止和崩溃时的清理。Smoke 配置与合成快照测试不显示真实场景标记；其他自建离线测试可显式传 `--no-scene-markers`。
+`~/carla-venv/bin/python vanet/tests/test_scene_lifecycle.py` 使用独立的无界面 SUMO 和模拟 CARLA 绘图，验证 JSON 坐标传递、标记创建以及正常关闭、终止和崩溃时的清理。Smoke 配置与合成快照测试不显示真实场景标记；其他自建离线测试可显式传 `--no-scene-markers`。
 
 ## 原工程的接入改动
 
 - run_lincoln.sh：无参数仍随机出生；显式校验并传递 --pose X Y Z YAW。
-- vanet/launch.py：将实验车位转换为 --pose 后调用根启动器，SUMO 就绪检查只由根启动器执行一次；释放查询客户端后用关闭继承文件描述符的子进程启动车辆，父进程保持车位预留。
+- vanet/runtime/launch.py：将实验车位转换为 --pose 后调用根启动器，SUMO 就绪检查只由根启动器执行一次；释放查询客户端后用关闭继承文件描述符的子进程启动车辆，父进程保持车位预留。
 - lincoln/ego_vehicle.py：使用原有 --pose 接口，无 VANET 专用修改。
 - carla-source/Co-Simulation/Sumo/run_synchronization.py：VANET_PORT 设置时启用本目录 TCP 端点，每步同步完车辆之后发送快照，退出时关闭端点。
 - carla-source/Co-Simulation/Sumo/sumo_integration/sumo_simulation.py：支持按前缀独立编号，Lincoln 映射使用 lincoln0、lincoln1；网络节点沿用该名称。
@@ -158,4 +203,4 @@ Smoke 的第二辆车在 5 秒删除、6 秒重新生成。合成快照测试连
 
 其他新实现均在本目录；不启动第二套 SUMO、不建立第二个 TraCI 客户端，也不由 OBU 调用 world.tick()。
 
-多 RSU 回归：`python3 vanet/test_multi_rsu.py` 验证两节点无线收发、空列表及无效配置；`~/carla-venv/bin/python vanet/test_scene_lifecycle.py` 验证两个标记同时创建和清理。测试结果使用独立临时目录。
+多 RSU 回归：`python3 vanet/tests/test_multi_rsu.py` 验证两节点无线收发、空列表及无效配置；`~/carla-venv/bin/python vanet/tests/test_scene_lifecycle.py` 验证两个标记同时创建和清理。测试结果使用独立临时目录。
