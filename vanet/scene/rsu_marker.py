@@ -1,5 +1,6 @@
 """Short-lived CARLA RSU drawing, owned by the OMNeT++ scene session."""
 import math
+from vanet.scene.rsu_label import draw_label
 
 
 def draw_marker(world, rsu, base_z, lifetime=.1, label="RSU"):
@@ -42,6 +43,5 @@ def draw_marker(world, rsu, base_z, lifetime=.1, label="RSU"):
             a, b = i * math.tau / 32, (i + 1) * math.tau / 32
             line(loc(r * math.cos(a), r * math.sin(a), z),
                  loc(r * math.cos(b), r * math.sin(b), z), color, .25)
-    world.debug.draw_string(loc(z=top + mast + 1), label, draw_shadow=True,
-                            color=yellow, **options)
+    draw_label(world, x, y, top + mast + 5, label, lifetime=lifetime)
 
