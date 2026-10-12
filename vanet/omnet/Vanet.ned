@@ -4,6 +4,36 @@ import org.car2x.veins.base.modules.BaseWorldUtility;
 import org.car2x.veins.base.connectionManager.ConnectionManager;
 import org.car2x.veins.modules.world.annotations.AnnotationManager;
 import org.car2x.veins.modules.application.ieee80211p.DemoBaseApplLayer;
+import org.car2x.veins.modules.phy.PhyLayer80211p;
+import org.car2x.veins.modules.mac.ieee80211p.Mac1609_4;
+import org.car2x.veins.modules.nic.INic80211p;
+
+simple RangePhy80211p extends PhyLayer80211p {
+    parameters: @class(RangePhy80211p);
+}
+module RangeNic80211p like INic80211p {
+    parameters:
+        string connectionManagerName = default("connectionManager");
+    gates:
+        input upperLayerIn;
+        output upperLayerOut;
+        output upperControlOut;
+        input upperControlIn;
+        input radioIn;
+    submodules:
+        phy80211p: RangePhy80211p { @display("p=69,218;i=block/process_s"); }
+        mac1609_4: Mac1609_4 { @display("p=69,82"); }
+    connections:
+        radioIn --> phy80211p.radioIn;
+        mac1609_4.lowerControlOut --> phy80211p.upperControlIn;
+        mac1609_4.lowerLayerOut --> phy80211p.upperLayerIn;
+        phy80211p.upperLayerOut --> mac1609_4.lowerLayerIn;
+        phy80211p.upperControlOut --> mac1609_4.lowerControlIn;
+        mac1609_4.upperControlIn <-- upperControlIn;
+        mac1609_4.upperLayerIn <-- upperLayerIn;
+        mac1609_4.upperLayerOut --> upperLayerOut;
+        mac1609_4.upperControlOut --> upperControlOut;
+}
 
 simple ExternalMobility extends BaseMobility { parameters: @class(ExternalMobility); }
 simple ConnectivityApp extends DemoBaseApplLayer {
@@ -17,6 +47,7 @@ simple ConnectivityApp extends DemoBaseApplLayer {
 module Obu extends Car {
     parameters:
         applType = "ConnectivityApp";
+        nicType = "RangeNic80211p";
         veinsmobilityType = "ExternalMobility";
         @display("i=veins/node/car;is=s;t=OBU");
 }
@@ -32,6 +63,8 @@ network Town04Vanet {
         double playgroundSizeX @unit(m) = default(1200m);
         double playgroundSizeY @unit(m) = default(1200m);
         double playgroundSizeZ @unit(m) = default(100m);
+        double vehicleRange @unit(m) = default(40m);
+        double rsuRange @unit(m) = default(220m);
         @display("bgb=1200,1200");
     submodules:
         world: BaseWorldUtility {

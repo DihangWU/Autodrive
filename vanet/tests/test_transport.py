@@ -22,7 +22,7 @@ class World:
     def get_snapshot(self):
         self.frame += 1
         def find(actor):
-            x,y = (196.82,-204.60) if actor==101 else (235.62,-176.69)
+            x,y = (196.82,-204.60) if actor==101 else (216.82,-194.60)
             return SimpleNamespace(get_transform=lambda: SimpleNamespace(location=SimpleNamespace(x=x,y=y,z=.2)))
         return SimpleNamespace(frame=self.frame,find=find)
     def get_actors(self):

@@ -31,6 +31,8 @@ vanet/
 │   ├── build/                # 临时编译产物，Git 忽略
 │   └── bin/                  # 编译后的 GUI，Git 忽略
 ├── omnet/                    # NED/C++ 模型、无线配置、道路背景
+│   ├── RangePhy.cc           # 越界无线信号阻断
+│   └── RadioRange.h          # V2V / RSU 共用半径规则
 ├── tools/                    # 导出与诊断工具
 │   ├── export_roads.py
 │   └── diagnose_carla.py
@@ -51,7 +53,7 @@ bash vanet/build.sh
 
 ## 当前状态
 
-已通过两辆真实 Lincoln + 一个 RSU 的 CARLA / SUMO / Veins 联调，每辆保留原有 31 个传感器。SUMO 车辆和 OMNeT++ OBU 统一命名为 `lincoln0`、`lincoln1`。两车在不同入口，实测间距约 48.1 米；5 秒仿真内，两车双向直达各成功接收 5 包，RSU 分别收到两车各 5 包，两车也均收到 RSU 广播及转发。结果保存在 `validation/live-smoke.json`。Qtenv 已检查实际收包气泡和通信连线。
+早期未设置硬通信半径时，已通过两辆真实 Lincoln + 一个 RSU 的 CARLA / SUMO / Veins 联调，每辆保留原有 31 个传感器。SUMO 车辆和 OMNeT++ OBU 统一命名为 `lincoln0`、`lincoln1`。两车在不同入口，实测间距约 48.1 米；5 秒仿真内，两车双向直达各成功接收 5 包，RSU 分别收到两车各 5 包，两车也均收到 RSU 广播及转发。结果保存在 `validation/live-smoke.json`。Qtenv 已检查实际收包气泡和通信连线。
 
 无线独立测试、真实 TCP 握手与合成快照中的节点生成/销毁测试也已通过。移动过程、真实车辆销毁/重生后的完整联调和大规模指标分析仍待后续验证。
 
@@ -173,10 +175,27 @@ Qtenv 暂停会暂停共享仿真推进，这是同步联仿的预期行为。�
 
 OMNET_ROOT、VEINS_ROOT 可覆盖安装路径。VANET 端口默认自动读取 town04.json 的 network.port。`omnetpp.ini` 不再保存 RSU 坐标，修改位置只改 JSON。CARLA 非默认地址可给网络启动器传 `--carla-host=<地址> --carla-port=<端口>`。
 
+## 通信范围与车辆接入
+
+每辆通过现有启动器加入的 Lincoln 都会独立创建 OBU，不需要等第二辆车或 RSU 加入。无线范围按地图平面 x/y 距离计算，高度仍参与原有 Veins 路径损耗：
+
+| 链路 | 最大平面距离 | 行为 |
+|---|---|---|
+| 车辆 ↔ 车辆 | 40 米 | 范围内可双向直连，与有无 RSU 无关 |
+| 车辆 ↔ RSU | 220 米 | 双向使用同一个 RSU 覆盖半径 |
+| RSU ↔ RSU | 220 米 | 可接收广播，仍不转发其他 RSU 的转发包 |
+
+边界计入范围，超出半径的无线信号在本工程的 `RangePhy80211p` 中归零，不能收包或造成干扰。范围内仍使用真实 Veins 802.11p MAC/PHY，因此碰撞或信道噪声可能造成个别丢包。两个车只要都在同一 RSU 的 220 米范围内，即使彼此超过 40 米，也能经该 RSU 转发；两车相距不超过 40 米时，直连和 RSU 转发同时保留。未加入车辆间多跳转发或跨 RSU 路由。
+
+无需 RSU 时，将 `town04.json` 的 `rsus` 设为 `[]` 后重新打开 OMNeT++。现有两个固定出生点相距约 48 米，在新规则下不会显示 V2V 直连；驶入 40 米内即可直连，或保持双方处于同一 RSU 覆盖范围内经 RSU 通信。车辆和 RSU 位置无需为此次范围修改而改变。
+
+半径配置位于 `omnet/omnetpp.ini` 的 `*.vehicleRange = 40m` 和 `*.rsuRange = 220m`，修改后重开 OMNeT++。本次实现已经编译，重新执行 `bash vanet/run_omnet.sh` 即加载新无线模型，无需为该项改动重启共享桥。
+
 ## 看什么
 
 每个节点约每秒发送一个广播 probe；RSU 收到车辆原始 probe 后只转发一次。这里是应用层广播连通性测试，尚未实现 MAC 单播、IP 路由、跨 RSU 或接入切换。
 
+- 范围内的节点持续显示虚线：蓝色为 V2V，紫色为涉及 RSU 的链路。每个 CARLA 快照更新位置，驶出范围或车辆销毁后删除，驶入范围或加入新车后自动建立。虚线表示范围内可尝试通信，不代表每个数据包都投递成功。
 - 发送/接收节点显示 TX/RX 气泡。
 - **实际收包成功**时画绿色直达连线；经 RSU 转发的接收画橙色连线，0.25 仿真秒后消失。未收到的包不会画成功连线。
 - CSV 在 omnet/results/，包含发送方、接收方、原始来源、序号、仿真时间、端到端延迟及 direct/relay。
@@ -193,6 +212,8 @@ OMNET_ROOT、VEINS_ROOT 可覆盖安装路径。VANET 端口默认自动读取 t
 真实 TCP 桥协议与合成车辆快照测试：
 
    python3 vanet/tests/test_transport.py
+
+通信范围回归：`python3 vanet/tests/test_radio_range.py` 使用真实 Veins MAC/PHY 和隔离的 TCP 合成快照，验证无 RSU 的 V2V、单车与 RSU、40/220 米边界、越界阻断、RSU 转发、直连与转发并存、三车独立接入及移动时连线断开/恢复。不连接真实 CARLA，也不接管共享桥。
 
 Smoke 的第二辆车在 5 秒删除、6 秒重新生成。合成快照测试连接同一个 Python VanetBridge 类，与 OMNeT++ 执行逐帧 ACK，并检查 V2V、V2I、RSU 转发收包；它不会连接 CARLA 或启动 SUMO。
 

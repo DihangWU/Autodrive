@@ -38,6 +38,8 @@ def main():
                 assert any(r['event'] == 'RX' and r['sender'] == p['id'] and r['receiver'].startswith('lincoln') and r['path'] == 'relay' for r in rows), p['id'] + ' relay reception missing'
             if not rsus:
                 assert not list(results.glob('rsu*.csv'))
+                assert any(r['event'] == 'RX' and r['sender'].startswith('lincoln')
+                           and r['receiver'].startswith('lincoln') for r in rows), 'No V2V without RSUs'
             print('PASS:', name, 'RSU configuration; separate nodes and wireless results.')
         for invalid in ([config['rsus'][0], config['rsus'][0]],
                         [dict(config['rsus'][0], id='lincoln0')],

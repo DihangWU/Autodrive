@@ -5,12 +5,15 @@
 #include <sstream>
 #include <fstream>
 #include <string>
+#include <vector>
+#include <cmath>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
 #include "veins/base/modules/BaseMobility.h"
 #include "veins/base/connectionManager/BaseConnectionManager.h"
 #include "veins/modules/application/ieee80211p/DemoBaseApplLayer.h"
+#include "RadioRange.h"
 using namespace omnetpp;
 using namespace veins;
 
@@ -104,6 +107,10 @@ protected:
     }
     void onWSM(BaseFrame1609_4* p) override {
         if (!p->hasPar("origin")) return;
+        auto* sender = getParentModule()->getParentModule()->getSubmodule(p->par("source").stringValue());
+        if (!sender) return; // The source may have been removed in a CARLA snapshot.
+        auto* senderMobility = check_and_cast<ExternalMobility*>(sender->getSubmodule("veinsmobility"));
+        if (!withinRange(sender, senderMobility->getPositionAt(simTime()), getParentModule(), position())) return;
         ++rx;
         double d = originalToDelay(p);
         delay.record(d);
@@ -138,8 +145,48 @@ class CarlaManager : public cSimpleModule {
     int fd = -1;
     cMessage* tick = nullptr;
     std::map<long,cModule*> nodes;
+    std::vector<cModule*> rsus;
+    cGroupFigure* links = nullptr;
+    std::map<std::string,cLineFigure*> rangeLinks;
     long frame = 0;
     double step = .05;
+    void updateLinks() {
+        std::vector<cModule*> all = rsus;
+        for (auto& entry : nodes) all.push_back(entry.second);
+        std::set<std::string> present;
+        for (size_t i=0; i<all.size(); ++i) {
+            auto* a = all[i];
+            Coord pa = check_and_cast<ExternalMobility*>(a->getSubmodule("veinsmobility"))->getPositionAt(simTime());
+            for (size_t j=i+1; j<all.size(); ++j) {
+                auto* b = all[j];
+                Coord pb = check_and_cast<ExternalMobility*>(b->getSubmodule("veinsmobility"))->getPositionAt(simTime());
+                if (!withinRange(a,pa,b,pb)) continue;
+                std::string key = std::to_string(a->getId()) + "_" + std::to_string(b->getId());
+                present.insert(key);
+                if (!rangeLinks.count(key)) {
+                    auto* line = new cLineFigure(("link_" + key).c_str());
+                    line->setLineColor(cFigure::Color(isRsuNode(a) || isRsuNode(b) ? "purple" : "steelblue"));
+                    line->setLineStyle(cFigure::LINE_DASHED);
+                    line->setLineWidth(1.5);
+                    std::string tooltip = std::string(a->getName()) + " <-> " + b->getName() +
+                                          " (coverage " + std::to_string(int(linkRange(a,b))) + "m)";
+                    line->setTooltip(tooltip.c_str());
+                    links->addFigure(line);
+                    rangeLinks[key] = line;
+                    EV_INFO << "COVERAGE LINK CREATED " << a->getName() << " <-> " << b->getName() << endl;
+                }
+                rangeLinks[key]->setStart(cFigure::Point(pa.x,pa.y));
+                rangeLinks[key]->setEnd(cFigure::Point(pb.x,pb.y));
+            }
+        }
+        for (auto it=rangeLinks.begin(); it!=rangeLinks.end();) {
+            if (!present.count(it->first)) {
+                EV_INFO << "COVERAGE LINK REMOVED " << it->second->getTooltip() << endl;
+                delete links->removeFigure(it->second);
+                it = rangeLinks.erase(it);
+            } else ++it;
+        }
+    }
     std::string readLine() {
         std::string line; char ch;
         while (true) {
@@ -167,7 +214,7 @@ class CarlaManager : public cSimpleModule {
         if(par("smoke").boolValue()) {
             frame++; step=.05;
             update(101,"lincoln0",700+simTime().dbl(),625,2); present.insert(101);
-            if(simTime()<5 || simTime()>=6) { update(102,"lincoln1",745,600+simTime().dbl(),2); present.insert(102); }
+            if(simTime()<5 || simTime()>=6) { update(102,"lincoln1",725,600+simTime().dbl(),2); present.insert(102); }
         } else {
             std::istringstream header(readLine()); std::string tag; int count;
             if(!(header>>tag>>frame>>step>>count) || tag!="FRAME" || step<=0 || count<0 || count>10000) throw cRuntimeError("Invalid VANET frame header");
@@ -181,6 +228,7 @@ class CarlaManager : public cSimpleModule {
             if(!present.count(it->first)) { EV_INFO << "OBU DELETED actor=" << it->first << endl; check_and_cast<BaseConnectionManager*>(getParentModule()->getSubmodule("connectionManager"))->unregisterNic(it->second->getSubmodule("nic")); it->second->callFinish(); it->second->deleteModule(); it=nodes.erase(it); }
             else ++it;
         }
+        updateLinks();
     }
 protected:
     int numInitStages() const override { return 2; }
@@ -200,11 +248,16 @@ protected:
                 rsu->getDisplayString().setTagArg("t",0,name.c_str());
                 check_and_cast<ExternalMobility*>(rsu->getSubmodule("veinsmobility"))->setStartPosition(Coord(x,y,z));
                 rsu->scheduleStart(simTime()); rsu->callInitialize();
+                rsus.push_back(rsu);
                 EV_INFO << "RSU CREATED " << name << " SUMO=" << x << "," << y << "," << z << endl;
             }
             return;
         }
         const auto& coordinates = mapCoordinates();
+        for (const char* name : {"vehicleRange", "rsuRange"}) {
+            double radius = getParentModule()->par(name).doubleValue();
+            if (!std::isfinite(radius) || radius <= 0) throw cRuntimeError("%s must be positive and finite",name);
+        }
         auto* roads = new cGroupFigure("Town04 roads");
         getParentModule()->getCanvas()->addFigure(roads,0);
         std::ifstream roadfile("roads.txt");
@@ -220,6 +273,8 @@ protected:
             road->setLineColor(cFigure::Color(100,100,100)); road->setLineWidth(width);
             roads->addFigure(road);
         }
+        links = new cGroupFigure("Communication links");
+        getParentModule()->getCanvas()->addFigure(links,1);
         if(!par("smoke").boolValue()) {
             fd=socket(AF_INET,SOCK_STREAM,0);
             timeval timeout{10,0}; setsockopt(fd,SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof(timeout));
