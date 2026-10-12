@@ -161,13 +161,22 @@ def main():
             self.winId()  # Create the native window before setting transient ownership.
             self.target, self.foreign = None, None
             self.segments, self.camera = [], None
+            self.state_signature, self.state = None, None
+            self.last_geometry = None
             self.timer = QTimer(self)
             self.timer.timeout.connect(self.refresh)
             self.timer.start(33)
 
         def refresh(self):
             try:
-                state = json.loads(args.state.read_text())
+                stat = args.state.stat()
+                signature = (stat.st_mtime_ns, stat.st_size)
+                state_changed = signature != self.state_signature
+                if state_changed:
+                    self.state = json.loads(args.state.read_text())
+                    self.state_signature = signature
+                    self.segments = list(colored_segments(self.state['links'], self.state['nodes']))
+                state = self.state
                 if not alive(state.get('owner')):
                     app.quit()
                     return
@@ -177,7 +186,6 @@ def main():
                         self.foreign = QWindow.fromWinId(self.target)
                         self.windowHandle().setTransientParent(self.foreign)
                 geometry = native.geometry(self.target) if self.target else None
-                self.segments = list(colored_segments(state['links'],state['nodes']))
                 if geometry is None or not self.segments:
                     self.hide()
                     if geometry is None:
@@ -186,14 +194,22 @@ def main():
                 transform = spectator.get_transform()
                 def vector(v):
                     return [v.x,v.y,v.z]
-                self.camera = dict(location=vector(transform.location),
+                camera = dict(location=vector(transform.location),
                                    forward=vector(transform.get_forward_vector()),
                                    right=vector(transform.get_right_vector()),
                                    up=vector(transform.get_up_vector()))
-                self.setGeometry(*geometry)
+                changed = state_changed or camera != self.camera or geometry != self.last_geometry
+                self.camera = camera
+                if geometry != self.last_geometry:
+                    self.setGeometry(*geometry)
+                    self.last_geometry = geometry
                 if not self.isVisible():
                     self.show()
-                self.update()
+                    changed = True
+                # Keep polling the spectator so mouse movement still works
+                # while paused, but do not repaint an unchanged scene at 30 Hz.
+                if changed:
+                    self.update()
             except FileNotFoundError:
                 app.quit()
             except (OSError,ValueError,RuntimeError):

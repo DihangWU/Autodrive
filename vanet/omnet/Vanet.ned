@@ -9,7 +9,9 @@ import org.car2x.veins.modules.mac.ieee80211p.Mac1609_4;
 import org.car2x.veins.modules.nic.INic80211p;
 
 simple RangePhy80211p extends PhyLayer80211p {
-    parameters: @class(RangePhy80211p);
+    parameters:
+        @class(RangePhy80211p);
+        bool earlyRangeFilter = default(true);
 }
 module RangeNic80211p like INic80211p {
     parameters:
@@ -62,6 +64,9 @@ simple CarlaManager {
         bool smoke = default(false);
         string rsuDefinitions = default("");
         double activityWindow @unit(s) = default(350ms);
+        // Detailed packet lines/bubbles for small scenes; persistent coverage
+        // and CARLA feedback remain enabled at every scale. -1 means unlimited.
+        int packetAnimationLimit = default(20);
 }
 network Town04Vanet {
     parameters:

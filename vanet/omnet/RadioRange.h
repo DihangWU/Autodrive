@@ -13,9 +13,12 @@ inline double nodeRange(omnetpp::cModule* node) {
     double radius = node->par("communicationRange").doubleValue();
     return radius > 0 ? radius : node->getParentModule()->par(isRsuNode(node) ? "rsuRange" : "vehicleRange").doubleValue();
 }
+inline double linkRange(bool aRsu, double aRadius, bool bRsu, double bRadius) {
+    if (aRsu != bRsu) return aRsu ? aRadius : bRadius;
+    return std::min(aRadius,bRadius);
+}
 inline double linkRange(omnetpp::cModule* a, omnetpp::cModule* b) {
-    if (isRsuNode(a) != isRsuNode(b)) return nodeRange(isRsuNode(a) ? a : b);
-    return std::min(nodeRange(a), nodeRange(b));
+    return linkRange(isRsuNode(a),nodeRange(a),isRsuNode(b),nodeRange(b));
 }
 inline bool withinRange(omnetpp::cModule* a, const veins::Coord& pa,
                         omnetpp::cModule* b, const veins::Coord& pb) {

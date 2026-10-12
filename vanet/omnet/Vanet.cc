@@ -64,6 +64,7 @@ class ConnectivityApp : public DemoBaseApplLayer {
     int seq = 0;
     cOutVector delay;
     std::ofstream csv;
+    bool detailedAnimations = false;
     std::set<BaseFrame1609_4*> pendingRelays;
     std::set<BaseFrame1609_4*> pendingHandshakeAcks;
     struct Peer { simtime_t ack = -1; simtime_t received = -1; };
@@ -81,7 +82,7 @@ class ConnectivityApp : public DemoBaseApplLayer {
         p->addPar("nonce") = hello ? hello->par("nonce").longValue() : ++helloNonce;
         p->addPar("targetId") = hello ? hello->par("sourceId").longValue() : -1;
         csv << simTime() << (hello ? ",ACK_TX," : ",HELLO_TX,") << getParentModule()->getName()
-            << "," << (hello ? hello->par("source").stringValue() : "*") << ",,0,0,handshake" << std::endl;
+            << "," << (hello ? hello->par("source").stringValue() : "*") << ",,0,0,handshake" << '\n';
         sendDown(p);
     }
     void sendProbe(BaseFrame1609_4* original = nullptr) {
@@ -97,8 +98,8 @@ class ConnectivityApp : public DemoBaseApplLayer {
         p->addPar("relay") = original != nullptr;
         p->addPar("rsu") = isRsu();
         ++tx;
-        csv << simTime() << ",TX," << p->par("source").stringValue() << ",*," << p->par("origin").stringValue() << "," << p->par("sequence").longValue() << "," << originalToDelay(p) << "," << (original ? "relay" : "direct") << std::endl;
-        getParentModule()->bubble(original ? "RSU forwarding" : "TX probe");
+        csv << simTime() << ",TX," << p->par("source").stringValue() << ",*," << p->par("origin").stringValue() << "," << p->par("sequence").longValue() << "," << originalToDelay(p) << "," << (original ? "relay" : "direct") << '\n';
+        if (detailedAnimations) getParentModule()->bubble(original ? "RSU forwarding" : "TX probe");
         sendDown(p);
     }
     double originalToDelay(BaseFrame1609_4* p) { return simTime().dbl()-p->par("sentAt").doubleValue(); }
@@ -110,7 +111,7 @@ protected:
             std::string name = std::string(par("csvDir").stringValue()) + "/" + getParentModule()->getName() + "-" + std::to_string(getParentModule()->getId()) + ".csv";
             csv.open(name);
             if (!csv) throw cRuntimeError("Cannot open packet CSV: %s", name.c_str());
-            csv << "time,event,sender,receiver,origin,sequence,delay,path" << std::endl;
+            csv << "time,event,sender,receiver,origin,sequence,delay,path" << '\n';
         } else if (stage == 1) {
             timer = new cMessage("probe timer");
             scheduleAt(simTime()+uniform(.15,.25), timer);
@@ -143,6 +144,7 @@ protected:
         }
         if (msg != timer) { DemoBaseApplLayer::handleSelfMsg(msg); return; }
         if (par("sendProbes").boolValue()) sendProbe();
+        csv.flush(); // Batch writes once per probe interval, never per packet.
         for (auto it=peers.begin(); it!=peers.end();) {
             if (simTime() - std::max(it->second.ack,it->second.received) > par("handshakeTimeout").doubleValue()) it=peers.erase(it);
             else ++it;
@@ -159,7 +161,7 @@ protected:
         if (p->hasPar("kind")) {
             std::string kind = p->par("kind").stringValue();
             if (kind=="hello") {
-                csv << simTime() << ",HELLO_RX," << sender->getName() << "," << getParentModule()->getName() << ",,0,0,handshake" << std::endl;
+                csv << simTime() << ",HELLO_RX," << sender->getName() << "," << getParentModule()->getName() << ",,0,0,handshake" << '\n';
                 // Vehicles outside V2V range cannot hear one another's CCA.
                 // Spread their HELLO responses to avoid hidden-terminal ACK
                 // collisions at a shared RSU.
@@ -169,7 +171,7 @@ protected:
             } else if (kind=="helloAck" && p->par("targetId").longValue()==getParentModule()->getId()
                        && p->par("nonce").longValue()==helloNonce && helloNonce>0) {
                 peers[sender->getId()].ack = simTime();
-                csv << simTime() << ",ACK_RX," << sender->getName() << "," << getParentModule()->getName() << ",,0,0,handshake" << std::endl;
+                csv << simTime() << ",ACK_RX," << sender->getName() << "," << getParentModule()->getName() << ",,0,0,handshake" << '\n';
             }
             return; // Handshake packets neither tint the link nor get relayed.
         }
@@ -179,12 +181,14 @@ protected:
         double d = originalToDelay(p);
         delay.record(d);
         bool relay = p->par("relay").boolValue();
-        csv << simTime() << ",RX," << p->par("source").stringValue() << "," << getParentModule()->getName() << "," << p->par("origin").stringValue() << "," << p->par("sequence").longValue() << "," << d << "," << (relay ? "relay" : "direct") << std::endl;
+        csv << simTime() << ",RX," << p->par("source").stringValue() << "," << getParentModule()->getName() << "," << p->par("origin").stringValue() << "," << p->par("sequence").longValue() << "," << d << "," << (relay ? "relay" : "direct") << '\n';
         EV_INFO << "RX " << p->par("source").stringValue() << " -> " << getParentModule()->getName() << " seq=" << p->par("sequence").longValue() << " delay=" << d << " relay=" << relay << endl;
-        Coord from(p->par("sx").doubleValue(),p->par("sy").doubleValue(),p->par("sz").doubleValue());
-        auto* line = annotations->drawLine(from, position(), relay ? "orange" : "green");
-        annotations->scheduleErase(.25, line);
-        getParentModule()->bubble(relay ? "RX via RSU" : "RX direct");
+        if (detailedAnimations) {
+            Coord from(p->par("sx").doubleValue(),p->par("sy").doubleValue(),p->par("sz").doubleValue());
+            auto* line = annotations->drawLine(from, position(), relay ? "orange" : "green");
+            annotations->scheduleErase(.25, line);
+            getParentModule()->bubble(relay ? "RX via RSU" : "RX direct");
+        }
         if (isRsu() && !relay && !p->par("rsu").boolValue()) {
             // Separate RSUs can receive the same broadcast almost simultaneously.
             // Jitter avoids deterministic collisions between their immediate replies.
@@ -195,9 +199,11 @@ protected:
     }
     void finish() override {
         DemoBaseApplLayer::finish();
+        csv.flush();
         recordScalar("probeTx",tx); recordScalar("probeRx",rx); recordScalar("relayTx",relayed);
     }
 public:
+    void setDetailedAnimations(bool enabled) { detailedAnimations = enabled && getEnvir()->isGUI(); }
     bool handshakeWith(cModule* peer) const {
         auto it=peers.find(peer->getId());
         return it!=peers.end() && it->second.ack>=0 && simTime()-it->second.ack<=par("handshakeTimeout").doubleValue();
@@ -228,66 +234,83 @@ class CarlaManager : public cSimpleModule {
     std::string receiveBuffer;
     std::deque<std::string> frameLines;
     size_t expectedLines = 0;
+    // Positions are held fixed between bridge snapshots. Cache node metadata
+    // and in-range pairs once per frame; feedback uses those same pairs after
+    // the wireless events finish, without another quadratic module lookup pass.
+    struct NodeView {
+        cModule* module;
+        ConnectivityApp* app;
+        Coord position;
+        bool rsu;
+        double radius;
+    };
+    std::vector<NodeView> views;
+    std::vector<std::pair<size_t,size_t>> coveredPairs;
     std::string feedback() {
-        std::vector<cModule*> all;
-        for (auto& entry: rsus) all.push_back(entry.second);
-        for (auto& entry: nodes) all.push_back(entry.second);
         std::ostringstream rows;
         int count=0;
-        for (size_t i=0;i<all.size();++i) {
-            auto* a=all[i];
-            auto* aa=check_and_cast<ConnectivityApp*>(a->getSubmodule("appl"));
-            Coord pa=check_and_cast<ExternalMobility*>(a->getSubmodule("veinsmobility"))->getPositionAt(simTime());
-            for (size_t j=i+1;j<all.size();++j) {
-                auto* b=all[j];
-                auto* ba=check_and_cast<ConnectivityApp*>(b->getSubmodule("appl"));
-                Coord pb=check_and_cast<ExternalMobility*>(b->getSubmodule("veinsmobility"))->getPositionAt(simTime());
-                if (!withinRange(a,pa,b,pb) || !aa->handshakeWith(b) || !ba->handshakeWith(a)) continue;
-                int directions=(ba->receivedFrom(a,par("activityWindow").doubleValue()) ? 1 : 0)
-                             | (aa->receivedFrom(b,par("activityWindow").doubleValue()) ? 2 : 0);
-                rows << a->getName() << ' ' << b->getName() << ' ' << directions << '\n';
-                ++count;
-            }
+        const double window=par("activityWindow").doubleValue();
+        for (const auto& pair: coveredPairs) {
+            const auto& a=views[pair.first];
+            const auto& b=views[pair.second];
+            if (!a.app->handshakeWith(b.module) || !b.app->handshakeWith(a.module)) continue;
+            int directions=(b.app->receivedFrom(a.module,window) ? 1 : 0)
+                         | (a.app->receivedFrom(b.module,window) ? 2 : 0);
+            rows << a.module->getName() << ' ' << b.module->getName() << ' ' << directions << '\n';
+            ++count;
         }
         std::ostringstream header;
         header << "VIS " << frame << ' ' << simTime() << ' ' << count << '\n';
         return header.str()+rows.str()+"ACK "+std::to_string(frame)+"\n";
     }
     void updateLinks() {
-        std::vector<cModule*> all;
-        for (auto& entry : rsus) all.push_back(entry.second);
-        for (auto& entry : nodes) all.push_back(entry.second);
+        views.clear();
+        coveredPairs.clear();
+        auto append = [this](cModule* node) {
+            views.push_back({node,check_and_cast<ConnectivityApp*>(node->getSubmodule("appl")),
+                check_and_cast<ExternalMobility*>(node->getSubmodule("veinsmobility"))->getPositionAt(simTime()),
+                isRsuNode(node),nodeRange(node)});
+        };
+        for (auto& entry: rsus) append(entry.second);
+        for (auto& entry: nodes) append(entry.second);
+        const int limit=par("packetAnimationLimit").intValue();
+        const bool detailed=limit<0 || views.size()<=size_t(limit);
+        for (auto& view: views) view.app->setDetailedAnimations(detailed);
         std::set<std::string> present;
-        for (size_t i=0; i<all.size(); ++i) {
-            auto* a = all[i];
-            Coord pa = check_and_cast<ExternalMobility*>(a->getSubmodule("veinsmobility"))->getPositionAt(simTime());
-            for (size_t j=i+1; j<all.size(); ++j) {
-                auto* b = all[j];
-                Coord pb = check_and_cast<ExternalMobility*>(b->getSubmodule("veinsmobility"))->getPositionAt(simTime());
-                if (!withinRange(a,pa,b,pb)) continue;
-                std::string key = std::to_string(a->getId()) + "_" + std::to_string(b->getId());
+        for (size_t i=0; i<views.size(); ++i) {
+            const auto& a=views[i];
+            for (size_t j=i+1; j<views.size(); ++j) {
+                const auto& b=views[j];
+                const double radius=linkRange(a.rsu,a.radius,b.rsu,b.radius);
+                const double dx=a.position.x-b.position.x, dy=a.position.y-b.position.y;
+                if (dx*dx+dy*dy>radius*radius+1e-8) continue;
+                coveredPairs.emplace_back(i,j);
+                std::string key=std::to_string(a.module->getId())+"_"+std::to_string(b.module->getId());
                 present.insert(key);
-                if (!rangeLinks.count(key)) {
-                    auto* line = new cLineFigure(("link_" + key).c_str());
-                    line->setLineColor(cFigure::Color(isRsuNode(a) || isRsuNode(b) ? "purple" : "steelblue"));
+                auto it=rangeLinks.find(key);
+                if (it==rangeLinks.end()) {
+                    auto* line=new cLineFigure(("link_"+key).c_str());
+                    line->setLineColor(cFigure::Color(a.rsu || b.rsu ? "purple" : "steelblue"));
                     line->setLineStyle(cFigure::LINE_DASHED);
                     line->setLineWidth(1.5);
-                    std::string tooltip = std::string(a->getName()) + " <-> " + b->getName() +
-                                          " (coverage " + std::to_string(int(linkRange(a,b))) + "m)";
+                    std::string tooltip=std::string(a.module->getName())+" <-> "+b.module->getName()+
+                                        " (coverage "+std::to_string(int(radius))+"m)";
                     line->setTooltip(tooltip.c_str());
                     links->addFigure(line);
-                    rangeLinks[key] = line;
-                    EV_INFO << "COVERAGE LINK CREATED " << a->getName() << " <-> " << b->getName() << endl;
+                    it=rangeLinks.emplace(key,line).first;
+                    EV_INFO << "COVERAGE LINK CREATED " << a.module->getName() << " <-> " << b.module->getName() << endl;
                 }
-                rangeLinks[key]->setStart(cFigure::Point(pa.x,pa.y));
-                rangeLinks[key]->setEnd(cFigure::Point(pb.x,pb.y));
+                const cFigure::Point start(a.position.x,a.position.y), end(b.position.x,b.position.y);
+                // Avoid dirtying Qtenv's canvas for stationary nodes.
+                if (!(it->second->getStart()==start)) it->second->setStart(start);
+                if (!(it->second->getEnd()==end)) it->second->setEnd(end);
             }
         }
         for (auto it=rangeLinks.begin(); it!=rangeLinks.end();) {
             if (!present.count(it->first)) {
                 EV_INFO << "COVERAGE LINK REMOVED " << it->second->getTooltip() << endl;
                 delete links->removeFigure(it->second);
-                it = rangeLinks.erase(it);
+                it=rangeLinks.erase(it);
             } else ++it;
         }
     }
