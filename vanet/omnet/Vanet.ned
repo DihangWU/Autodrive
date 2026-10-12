@@ -49,6 +49,7 @@ simple ConnectivityApp extends DemoBaseApplLayer {
 }
 module Obu extends Car {
     parameters:
+        double communicationRange @unit(m) = default(-1m);
         applType = "ConnectivityApp";
         nicType = "RangeNic80211p";
         veinsmobilityType = "ExternalMobility";
@@ -67,8 +68,8 @@ network Town04Vanet {
         double playgroundSizeX @unit(m) = default(1200m);
         double playgroundSizeY @unit(m) = default(1200m);
         double playgroundSizeZ @unit(m) = default(100m);
-        double vehicleRange @unit(m) = default(40m);
-        double rsuRange @unit(m) = default(220m);
+        double vehicleRange @unit(m);
+        double rsuRange @unit(m);
         @display("bgb=1200,1200");
     submodules:
         world: BaseWorldUtility {

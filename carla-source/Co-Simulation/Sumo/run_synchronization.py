@@ -56,14 +56,14 @@ class SimulationSynchronization(object):
 
         self.sumo = sumo_simulation
         self.carla = carla_simulation
-        self.vanet = None
-        if os.environ.get("VANET_PORT"):
-            from pathlib import Path
-            sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-            from vanet.runtime.bridge import VanetBridge
-            self.vanet = VanetBridge(os.environ["VANET_PORT"])
-            # Sensor creation/rendering can exceed the upstream 2-second RPC timeout.
-            self.carla.client.set_timeout(30.0)
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+        from vanet.runtime.bridge import VanetBridge
+        from vanet.common.config import load_config
+        self.vanet = VanetBridge(os.environ.get('VANET_PORT') or load_config()['network']['port'])
+        # NPC-first and Lincoln-first launches expose the same optional client
+        # endpoint. Without OMNeT++ connected, the bridge never waits for ACK.
+        self.carla.client.set_timeout(30.0)
 
         self.tls_manager = tls_manager
         self.sync_vehicle_color = sync_vehicle_color
@@ -210,7 +210,9 @@ class SimulationSynchronization(object):
                 self.sumo.synchronize_traffic_light(landmark_id, sumo_tl_state)
 
         if self.vanet:
-            self.vanet.tick(self.carla.world, self.carla.step_length, self.carla2sumo_ids)
+            vehicle_names = dict(self.carla2sumo_ids)
+            vehicle_names.update((carla_id, sumo_id) for sumo_id, carla_id in self.sumo2carla_ids.items())
+            self.vanet.tick(self.carla.world, self.carla.step_length, vehicle_names)
 
     def close(self):
         """

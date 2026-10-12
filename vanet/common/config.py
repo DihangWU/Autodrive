@@ -1,4 +1,4 @@
-"""RSU list shared by the OMNeT++ launcher and scene markers."""
+"""Shared scene and radio configuration for all VANET entry points."""
 import json
 import math
 import re
@@ -18,6 +18,22 @@ def load_config(path=CONFIG):
     def number(value, name):
         if isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value):
             raise ValueError(f'{path}: {name} must be a finite number')
+    radio = cfg.get('communication')
+    if not isinstance(radio, dict):
+        raise ValueError('communication must define vehicle_range and rsu_range in meters')
+    for name in ('vehicle_range', 'rsu_range'):
+        number(radio.get(name), 'communication.' + name)
+        if radio[name] <= 0:
+            raise ValueError('communication.' + name + ' must be positive')
+    overrides = radio.setdefault('range_overrides', {})
+    if not isinstance(overrides, dict):
+        raise ValueError('communication.range_overrides must map node names to meters')
+    for name, radius in overrides.items():
+        if not isinstance(name, str) or not re.fullmatch(r'(?:lincoln|npc|carla|rsu)[A-Za-z0-9_]*', name):
+            raise ValueError('Range override must use an exact vehicle/RSU node name: ' + str(name))
+        number(radius, 'communication.range_overrides.' + name)
+        if radius <= 0:
+            raise ValueError('Range override must be positive: ' + name)
     for name in ('offset_x', 'offset_y'):
         number(cfg['network'][name], 'network.' + name)
     ids = set()
@@ -45,3 +61,17 @@ def sumo_rsu(cfg, p):
 
 def rsu_definitions(cfg):
     return '\n'.join(p['id'] + ' ' + ' '.join(map(str, sumo_rsu(cfg, p))) for p in cfg['rsus'])
+
+
+def radio_arguments(cfg):
+    """The JSON is the sole source of radio defaults and per-node overrides."""
+    radio = cfg['communication']
+    overrides = radio['range_overrides']
+    maximum = max(radio['vehicle_range'], radio['rsu_range'], *overrides.values())
+    # Veins' neighbor prefilter uses 3D distance; hard ranges use XY distance.
+    # Cover the entire configured 100m altitude span as well as antenna offsets.
+    interference = math.hypot(maximum, 100) + 5
+    return [f'--*.vehicleRange={radio["vehicle_range"]}m',
+            f'--*.rsuRange={radio["rsu_range"]}m',
+            f'--*.connectionManager.maxInterfDist={interference}m',
+            *[f'--*.{name}.communicationRange={radius}m' for name, radius in overrides.items()]]

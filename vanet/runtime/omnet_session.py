@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from vanet.common.paths import LINCOLN_DIR
 sys.path.insert(0, str(LINCOLN_DIR))
 from shared_sumo import control_folder, request
-from vanet.common.config import CONFIG, load_config, rsu_definitions
+from vanet.common.config import CONFIG, load_config, rsu_definitions, radio_arguments
 
 
 def main():
@@ -25,6 +25,10 @@ def main():
     cfg = load_config(args.vanet_config)
     if any(arg.startswith(('--*.rsu', '--*.manager.rsuDefinitions=')) for arg in command):
         raise SystemExit('RSU coordinates must be changed in vanet/town04.json.')
+    if any(arg.startswith('--') and any(name in arg.split('=', 1)[0] for name in
+           ('vehicleRange', 'rsuRange', 'communicationRange', 'maxInterfDist')) for arg in command):
+        raise SystemExit('Radio ranges must be changed in the JSON communication configuration.')
+    command.extend(radio_arguments(cfg))
     configs = [command[i + 1] for i, arg in enumerate(command[:-1]) if arg in ('-c', '--config-name')]
     offline = args.no_scene_markers or (configs and configs[-1] == 'Smoke') or any(a in command for a in ('-h', '--help', '-v'))
     # Synthetic/offline tests can still supply static nodes. Normal live runs
@@ -43,7 +47,7 @@ def main():
             except BlockingIOError:
                 raise RuntimeError('Another OMNeT++ session is already running.')
             status = request(args.carla_host, args.carla_port, {'action': 'status'}, timeout=8)
-            if status.get('vanet_scene', {}).get('protocol') != 4:
+            if status.get('vanet_scene', {}).get('protocol') != 5:
                 raise RuntimeError('共享 SUMO 桥仍是旧版本。请正常关闭车辆后，执行 bash run_lincoln.sh --stop-sumo，再重新启动车辆。')
             print('Live RSUs are controlled independently by bash vanet/run_rsu.sh.', flush=True)
         child = subprocess.Popen(command, close_fds=True, start_new_session=True)

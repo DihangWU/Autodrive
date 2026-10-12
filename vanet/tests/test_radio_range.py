@@ -17,9 +17,10 @@ from vanet.runtime.bridge import VanetBridge
 
 
 class World:
-    def __init__(self, cfg, positions):
+    def __init__(self, cfg, positions, roles=None):
         self.frame = 0
         self.cfg, self.positions = cfg, positions
+        self.roles = roles
 
     def get_snapshot(self):
         self.frame += 1
@@ -32,19 +33,19 @@ class World:
         return SimpleNamespace(frame=self.frame, find=find)
 
     def get_actors(self):
-        actors = [SimpleNamespace(id=101 + i, attributes={'role_name': f'lincoln_range_{i}'})
+        actors = [SimpleNamespace(id=101 + i, attributes={'role_name': self.roles[i] if self.roles else f'lincoln_range_{i}'})
                   for i in range(len(self.positions(self.frame)))]
         return SimpleNamespace(filter=lambda _: actors)
 
 
 def run_case(tmp, name, cfg, positions, duration=6, rsu_provider=None,
-             extra_args=None, visualization=None):
+             extra_args=None, visualization=None, roles=None, vehicle_names=None, timeout=30):
     results = tmp / name
     results.mkdir()
     config = results / 'config.json'
     config.write_text(json.dumps(cfg))
     bridge = VanetBridge(0)
-    world = World(cfg, positions)
+    world = World(cfg, positions, roles)
     if rsu_provider is not None:
         bridge.rsu_provider = lambda: rsu_provider(world.frame)
     if visualization is not None:
@@ -54,7 +55,7 @@ def run_case(tmp, name, cfg, positions, duration=6, rsu_provider=None,
     def serve():
         try:
             while not stop.is_set():
-                bridge.tick(world, .05)
+                bridge.tick(world, .05, vehicle_names)
                 time.sleep(.001)
         except Exception as error:
             errors.append(error)
@@ -68,7 +69,7 @@ def run_case(tmp, name, cfg, positions, duration=6, rsu_provider=None,
                '--result-dir=' + str(results), '--**.appl.csvDir=' + json.dumps(str(results))]
     command.extend(extra_args or [])
     try:
-        run = subprocess.run(command, capture_output=True, text=True, timeout=30)
+        run = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
         assert run.returncode == 0, run.stdout + run.stderr
         assert not errors, errors
         rows = []

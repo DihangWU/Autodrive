@@ -30,6 +30,11 @@
       "yaw": -179.6682664
     }
   ],
+  "communication": {
+    "vehicle_range": 40.0,
+    "rsu_range": 220.0,
+    "range_overrides": {}
+  },
   "network": {
     "offset_x": 503.02,
     "offset_y": 423.76,

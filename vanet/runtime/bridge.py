@@ -1,19 +1,18 @@
 """Optional loopback lockstep endpoint owned by the existing SUMO bridge.
 
 Wire protocol: FRAME2 <frame> <step> <vehicle-count> <rsu-count>, then
-ID NAME X Y Z per Lincoln and NAME X Y Z per live RSU.
+ID NAME X Y Z per synchronized vehicle and NAME X Y Z per live RSU.
 Legacy FRAME is retained for synthetic tests with static RSU definitions.
 ACK <frame> releases the next CARLA/SUMO step. No second TraCI connection.
 """
-import json
 import logging
 import math
 import socket
-from vanet.common.paths import CONFIG
+from vanet.common.config import load_config
 
 class VanetBridge:
     def __init__(self, port):
-        self.cfg = json.loads(CONFIG.read_text())
+        self.cfg = load_config()
         self.listener = socket.socket()
         self.listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.listener.bind(('127.0.0.1', int(port)))
@@ -21,6 +20,7 @@ class VanetBridge:
         self.listener.setblocking(False)
         self.peer = None
         self.names = {}
+        self.next_name = {'lincoln': 0, 'npc': 0}
         self.idle_callback = None
         self.rsu_provider = None
         self.visualization_callback = None
@@ -38,19 +38,7 @@ class VanetBridge:
             except BlockingIOError:
                 return
         snap = world.get_snapshot()
-        vehicles = []
-        for a in world.get_actors().filter('vehicle.*'):
-            if not a.attributes.get('role_name', '').startswith('lincoln_'):
-                continue
-            state = snap.find(a.id)
-            if state is None:
-                continue
-            p = state.get_transform().location
-            name = (sumo_ids or {}).get(a.id)
-            if name is None:
-                name = self.names.setdefault(a.id, 'lincoln' + str(len(self.names)))
-            vehicles.append((a.id, name, p.x+self.cfg['network']['offset_x'],
-                             -p.y+self.cfg['network']['offset_y'], p.z+1.8))
+        vehicles = self.vehicle_nodes(world, snap, sumo_ids)
         rsus = self.rsu_provider() if self.rsu_provider is not None else None
         payload = (f'FRAME {snap.frame} {step:.9f} {len(vehicles)}\n' if rsus is None else
                    f'FRAME2 {snap.frame} {step:.9f} {len(vehicles)} {len(rsus)}\n')
@@ -70,6 +58,30 @@ class VanetBridge:
         except (OSError, ConnectionError, UnicodeError, ValueError) as e:
             logging.warning('VANET detached: %s; SUMO/CARLA continue', e)
             self.detach()
+
+    def vehicle_nodes(self, world, snap, sumo_ids=None):
+        vehicles = []
+        for actor in world.get_actors().filter('vehicle.*'):
+            # Both CARLA-controlled and SUMO-controlled vehicles are included.
+            # In live mode wait for a mapping, avoiding a temporary second name
+            # while SUMO is still inserting a vehicle into CARLA.
+            if sumo_ids is not None and actor.id not in sumo_ids:
+                continue
+            state = snap.find(actor.id)
+            if state is None:
+                continue
+            p = state.get_transform().location
+            if sumo_ids is not None:
+                name = sumo_ids[actor.id]
+            else:
+                if actor.id not in self.names:
+                    prefix = 'lincoln' if actor.attributes.get('role_name', '').startswith('lincoln_') else 'npc'
+                    self.names[actor.id] = prefix + str(self.next_name[prefix])
+                    self.next_name[prefix] += 1
+                name = self.names[actor.id]
+            vehicles.append((actor.id, name, p.x+self.cfg['network']['offset_x'],
+                             -p.y+self.cfg['network']['offset_y'], p.z+1.8))
+        return vehicles
 
     def receive_line(self):
         # Keep leftovers: a VIS block and its ACK can span arbitrary TCP reads.

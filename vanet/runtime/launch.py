@@ -45,9 +45,11 @@ def main():
                          str(transform.location.z), str(transform.rotation.yaw)]
     os.environ['VANET_PORT'] = str(cfg['network']['port'])
     active = bridges(args.host, args.port)
-    expected = ('VANET_PORT=' + str(cfg['network']['port'])).encode()
-    if active and expected not in Path('/proc', str(active[0]), 'environ').read_bytes().split(b'\0'):
-        raise SystemExit('Existing SUMO bridge has no matching VANET endpoint. Close vehicle clients, then run bash run_lincoln.sh --stop-sumo and retry. No bridge was stopped automatically.')
+    if active:
+        from shared_sumo import request
+        status = request(args.host, args.port, dict(action='status'), timeout=8)
+        if status.get('vanet_scene', {}).get('protocol') != 5 or status.get('vanet_port') != cfg['network']['port']:
+            raise SystemExit('Existing SUMO bridge needs the current VANET endpoint. Close vehicle/NPC/RSU clients and OMNeT++, then run bash run_lincoln.sh --stop-sumo and retry.')
     print(f'VANET junction 924, slot={slot_name}, position={position_args}; OBU name follows SUMO lincoln ID.', flush=True)
     # CARLA's C++ sockets must not survive an exec into the vehicle process.
     # Release the query client, then use close_fds in the child. This parent

@@ -78,6 +78,10 @@ def npc_client(args):
     ready = ensure_bridge(host=args.host, port=args.port, step_length=args.step_length,
                           sumo_gui=args.sumo_gui, tls_manager=args.tls_manager,
                           sync_vehicle_color=True, sync_vehicle_lights=args.sync_vehicle_lights)
+    status = request(args.host, args.port, dict(action='status'), timeout=8)
+    if status.get('vanet_scene', {}).get('protocol') != 5:
+        raise ValueError('共享桥仍是旧版本，不能接入 NPC 通信。请正常关闭车辆、NPC、RSU 和 OMNeT++，'
+                         '执行 bash run_lincoln.sh --stop-sumo 后重新启动。')
     if abs(ready['step_length'] - args.step_length) > 1e-8 or ready['tls_manager'] != args.tls_manager:
         logging.warning('Using existing bridge settings: step=%s, tls=%s; not changing the running simulation.',
                         ready['step_length'], ready['tls_manager'])
@@ -241,6 +245,7 @@ def main(args):
                         sumo2carla=dict(synchronization.sumo2carla_ids),
                         carla2sumo=dict(synchronization.carla2sumo_ids),
                         sessions=list(service.sessions),
+                        vanet_port=synchronization.vanet.listener.getsockname()[1],
                         vanet_scene=scene.status())
 
         service = RequestService(args.host, args.port, spawn_batch, remove_batch, status)
