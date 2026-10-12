@@ -65,6 +65,7 @@
 7. 添加一辆高配传感器的 lincoln 轿车
     ```shell
     bash run_lincoln.sh
+        # bash run_lincoln.sh --pose 199.390472 -204.544281 0.519592 91.314423
     ```
 
 8. 在连接了 CARLA 的 Python 脚本中，用这一行把所有交通信号灯设为红灯：
