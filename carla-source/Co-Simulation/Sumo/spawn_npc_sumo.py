@@ -160,6 +160,9 @@ def main(args):
     write_sumocfg_xml(cfg_file, net_file, vtypes_file, viewsettings_file, args.additional_traci_clients)
 
     sumo_net = sumolib.net.readNet(net_file)
+    if args.sumo_gui:
+        from vanet.sumo_gui.build import ensure_gui
+        os.environ['GUISIM_BINARY'] = str(ensure_gui())
     sumo_simulation = SumoSimulation(cfg_file,
                                      args.step_length,
                                      host=args.sumo_host,

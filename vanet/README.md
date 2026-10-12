@@ -32,6 +32,12 @@ bash run_lincoln.sh --pose 235.597504 -172.815598 0.695892 180.326126
 
 ## 路口与位置
 
+SUMO 状态栏在原 x/y 位置同时显示 `SUMO x/y | CARLA x/y`。右键菜单的 `Copy SUMO coordinates` 和 `Copy CARLA coordinates` 分别复制右键落点的两种坐标，格式为 `x, y`，保留六位小数。高度 z 和朝向 yaw 需另行确定。
+
+显示与复制直接使用当前加载路网的 `netOffset` 换算：`CARLA.x = SUMO.x - offset.x`、`CARLA.y = offset.y - SUMO.y`。此功能仅增加界面文字和菜单，不翻转地图，也不改变路网、车辆或 OMNeT++ 的坐标逻辑。SUMO 的鼠标落点与车辆中心、车头参考点是不同概念。
+
+实现放在 `vanet/sumo_gui/`，生成本工程专用的 `bin/sumo-gui`，不修改系统 SUMO。首次启动带 GUI 的共享桥时自动构建并启用，也可预先执行 `python3 vanet/sumo_gui/build.py`；复用本机 SUMO 1.22.0 源码和 CMake 编译库，可用 `SUMO_HOME` / `SUMO_BUILD_DIR` 指定目录。已运行的旧窗口需先正常退出车辆及 OMNeT++，执行 `bash run_lincoln.sh --stop-sumo`，再重新启动车辆后生效。
+
 候选为工程示例 Town04 路网的十字路口 **924**。四条入口为 -17.0.00、10.0.00、18.0.00、-9.0.00，入口长度约 36–69 米，适合小范围相遇测试。车位沿两个垂直入口向上游取 25 米。
 
 | 对象 | CARLA x / y（米） | yaw（度） |
