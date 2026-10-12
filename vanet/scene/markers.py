@@ -8,6 +8,7 @@ sys.path.insert(0, str(LINCOLN_DIR))
 from shared_sumo import alive, atomic_json, control_folder
 from vanet.common.config import sumo_rsu
 from vanet.scene.rsu_marker import draw_marker
+from vanet.scene.rsu_body import RsuBody
 
 
 class SceneMarkers:
@@ -21,18 +22,28 @@ class SceneMarkers:
         self.last_frame = None
         self.error = None
         self.markers = {}
+        self.bodies = {}
 
     def status(self):
         return dict(protocol=2, session=self.session, error=self.error, rsus=list(self.markers))
 
     def clear(self):
         import traci
-        existing = set(traci.poi.getIDList()) if self.markers else set()
-        for name in self.markers:
-            if name in existing:
-                traci.poi.remove(name, layer=100)
-        self.markers.clear()
-        self.session = self.config = None
+        try:
+            existing = set(traci.poi.getIDList()) if self.markers else set()
+            for name in list(self.markers):
+                if name in existing:
+                    traci.poi.remove(name, layer=100)
+                del self.markers[name]
+        finally:
+            # A broken TraCI connection must not strand CARLA collision actors.
+            for name, body in list(self.bodies.items()):
+                try:
+                    body.destroy()
+                    del self.bodies[name]
+                except Exception as error:
+                    logging.warning('%s', error)  # Keep ownership for a retry.
+            self.session = self.config = None
         # CARLA lines have a two-tick lifetime, and expire as the bridge resumes.
 
     def poll(self):
@@ -50,6 +61,8 @@ class SceneMarkers:
             self.clear()
             try:
                 cfg = lease['config']  # Immutable snapshot read from town04.json by run_omnet.sh.
+                if self.bodies:
+                    raise RuntimeError('Previous RSU actors could not be cleaned up')
                 town = self.world.get_map()
                 if town.name.rsplit('/', 1)[-1] != cfg['map']:
                     raise ValueError('RSU scene markers require ' + cfg['map'])
@@ -60,7 +73,13 @@ class SceneMarkers:
                     if name in traci.poi.getIDList():
                         raise ValueError('SUMO POI already exists: ' + name)
                     waypoint = town.get_waypoint(carla.Location(x=p['x'], y=p['y']), project_to_road=True)
-                    base_z = p.get('base_z', waypoint.transform.location.z + .1)
+                    base_z = p.get('base_z')
+                    if base_z is None:
+                        if waypoint is None:
+                            raise ValueError(name + ': specify base_z; no nearby road found')
+                        base_z = waypoint.transform.location.z + .1
+                    body = self.bodies[name] = RsuBody()
+                    body.spawn(self.world, p, base_z)
                     traci.poi.add(name, x, y, (255, 130, 0, 255),
                                   poiType='RSU', layer=100, width=8, height=8,
                                   imgFile=str(ASSETS_DIR / 'rsu.png'))
