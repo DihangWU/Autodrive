@@ -13,6 +13,14 @@ def load_config():
             value = cfg[section][name]
             if isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value):
                 raise ValueError(f'{CONFIG}: {section}.{name} must be a finite number')
+    for name in ('base_z', 'beacon_radius'):
+        value = cfg['rsu'].get(name, 0)
+        if isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value):
+            raise ValueError(f'{CONFIG}: rsu.{name} must be a finite number')
+    if cfg['rsu'].get('beacon_radius', 1) <= 0:
+        raise ValueError('rsu.beacon_radius must be positive')
+    if 'base_z' in cfg['rsu'] and cfg['rsu']['z'] <= cfg['rsu']['base_z']:
+        raise ValueError('rsu.z must be above rsu.base_z')
     return cfg
 
 

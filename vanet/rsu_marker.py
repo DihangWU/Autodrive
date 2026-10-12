@@ -5,6 +5,10 @@ import math
 def draw_marker(world, rsu, base_z, lifetime=.1, label="RSU"):
     import carla
     x, y, top = rsu['x'], rsu['y'], rsu['z']
+    base_z = rsu.get('base_z', base_z)
+    radius = rsu.get('beacon_radius', 1.6)
+    crown = radius * .6
+    mast = max(2, radius * 1.6)
     orange = carla.Color(255, 100, 0)
     cyan = carla.Color(0, 255, 255)
     yellow = carla.Color(255, 255, 0)
@@ -13,26 +17,31 @@ def draw_marker(world, rsu, base_z, lifetime=.1, label="RSU"):
     def loc(dx=0, dy=0, z=top):
         return carla.Location(x=x + dx, y=y + dy, z=z)
 
-    def line(a, b, color=orange, thickness=.12):
+    def line(a, b, color=orange, thickness=.20):
         world.debug.draw_line(a, b, thickness=thickness, color=color, **options)
 
-    # Four bright legs and cross braces form a conspicuous 5 m tower.
-    for dx, dy in ((-.5, -.5), (-.5, .5), (.5, .5), (.5, -.5)):
+    # Keep the footprint inside the grass island; height follows the RSU z.
+    for dx, dy in ((-.6, -.6), (-.6, .6), (.6, .6), (.6, -.6)):
         line(loc(dx, dy, base_z), loc(dx, dy, top))
-    for z in (base_z + .15, (base_z + top) / 2, top - .35):
-        world.debug.draw_box(carla.BoundingBox(loc(z=z), carla.Vector3D(.6, .6, .08)),
-                             carla.Rotation(), thickness=.10, color=orange, **options)
-    line(loc(-.5, -.5, base_z), loc(.5, -.5, top))
-    line(loc(.5, -.5, base_z), loc(-.5, -.5, top))
-    world.debug.draw_box(carla.BoundingBox(loc(), carla.Vector3D(1.1, 1.1, .55)),
-                         carla.Rotation(), thickness=.18, color=cyan, **options)
-    line(loc(z=top + .55), loc(z=top + 2), yellow, .18)
-    # Two horizontal rings make the location easy to pick out from above.
-    for radius, z, color in ((2.2, base_z + .2, orange), (1.6, top + 1.0, cyan)):
-        for i in range(24):
-            a, b = i * math.tau / 24, (i + 1) * math.tau / 24
-            line(loc(radius * math.cos(a), radius * math.sin(a), z),
-                 loc(radius * math.cos(b), radius * math.sin(b), z), color, .1)
-    world.debug.draw_string(loc(z=top + 2.3), label, draw_shadow=True,
+    levels = max(1, math.ceil((top - base_z) / 10))
+    for i in range(levels):
+        low = base_z + (top - base_z) * i / levels
+        high = base_z + (top - base_z) * (i + 1) / levels
+        world.debug.draw_box(carla.BoundingBox(loc(z=low + .1), carla.Vector3D(.7, .7, .08)),
+                             carla.Rotation(), thickness=.16, color=orange, **options)
+        for side in (-.6, .6):
+            line(loc(-.6, side, low), loc(.6, side, high), thickness=.12)
+            line(loc(.6, side, low), loc(-.6, side, high), thickness=.12)
+    world.debug.draw_box(carla.BoundingBox(loc(), carla.Vector3D(crown, crown, crown * .6)),
+                         carla.Rotation(), thickness=.35, color=cyan, **options)
+    line(loc(z=top), loc(z=top + mast), yellow, .35)
+    # Large aerial beacon, with a small ground ring that fits before the wall.
+    for r, z, color in ((1.0, base_z + .15, orange), (radius, top + crown, cyan),
+                        (radius * .7, top + mast, yellow)):
+        for i in range(32):
+            a, b = i * math.tau / 32, (i + 1) * math.tau / 32
+            line(loc(r * math.cos(a), r * math.sin(a), z),
+                 loc(r * math.cos(b), r * math.sin(b), z), color, .25)
+    world.debug.draw_string(loc(z=top + mast + 1), label, draw_shadow=True,
                             color=yellow, **options)
 

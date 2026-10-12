@@ -61,7 +61,7 @@ class SceneMarkers:
                 traci.poi.setParameter(self.POI, 'name', 'RSU ' + str(cfg['junction']))
                 p = cfg['rsu']
                 waypoint = town.get_waypoint(carla.Location(x=p['x'], y=p['y']), project_to_road=True)
-                self.base_z = waypoint.transform.location.z + .1
+                self.base_z = p.get('base_z', waypoint.transform.location.z + .1)
                 self.config, self.session = cfg, session
                 self.last_frame, self.error = None, None
                 atomic_json(self.reply, dict(session=session, ok=True, sumo_position=[x, y]))
