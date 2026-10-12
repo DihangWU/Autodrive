@@ -56,7 +56,7 @@
     ```shell
     ~/carla-venv/bin/python \
     carla-source/Co-Simulation/Sumo/spawn_npc_sumo.py \
-    -n 100 \
+    -n 200 \
     --sumo-gui \
     --step-length 0.05 \
     --tls-manager carla
