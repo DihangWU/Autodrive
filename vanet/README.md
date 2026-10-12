@@ -183,6 +183,8 @@ RSU 当前基座绝对高度为 0.39 米，主体顶部/通信节点绝对高度
 
 Qtenv 暂停会暂停共享仿真推进，这是同步联仿的预期行为。退出网络界面后，Python 桥检测断开，车辆仿真恢复独立推进。CARLA/桥停止时网络接口会报错，需重新启动网络实验。启动新车辆前请保持 Qtenv 正在运行，原共享桥就绪检查需要看到帧推进。
 
+等待共享桥下一帧时，OMNeT++ 会继续处理界面操作，Stop 可以暂停等待，Run/Fast 从同一个同步边界恢复。收到完整快照后才更新车辆和 RSU，暂停不会重复发送 ACK；场景清理较慢时也不会因旧的 10 秒接收超时而终止网络。本次同步等待修复只需重新打开 OMNeT++ 即可加载。删除 RSU 后，若两车仍相距超过 40 米，无通信连线是预期行为，仿真时间仍应继续前进。
+
 普通 Run 会播放详细动画，实际运行速度可能很慢；Fast 模式适合较快推进。默认 Live 实验没有仿真时长限制，可以常开；若需要固定时长，可传 `--sim-time-limit=300s`。车辆编号按共享桥本次运行的生成顺序递增；销毁后新建车辆会取得新的编号。
 
 OMNET_ROOT、VEINS_ROOT 可覆盖安装路径。VANET 端口默认自动读取 town04.json 的 network.port。`omnetpp.ini` 不再保存 RSU 坐标，修改位置只改 JSON。CARLA 非默认地址可给网络启动器传 `--carla-host=<地址> --carla-port=<端口>`。
@@ -242,6 +244,8 @@ OMNET_ROOT、VEINS_ROOT 可覆盖安装路径。VANET 端口默认自动读取 t
 真实 TCP 桥协议与合成车辆快照测试：
 
    python3 vanet/tests/test_transport.py
+
+慢速同步回归：`python3 vanet/tests/test_transport_wait.py` 将 RSU 删除快照分段发送，并在中途延迟 11 秒；验证同一次 OMNeT++ 运行继续完成删除、重新添加与再次删除，V2V 保持通信，每帧恰好一个 ACK，仿真时间不跳步。Qtenv 另已实测在部分快照到达时 Stop，补齐数据后保持暂停，再 Run/Fast 正常恢复。
 
 通信范围回归：`python3 vanet/tests/test_radio_range.py` 使用真实 Veins MAC/PHY 和隔离的 TCP 合成快照，验证无 RSU 的 V2V、单车与 RSU、40/220 米边界、越界阻断、RSU 转发、直连与转发并存、三车独立接入及移动时连线断开/恢复。不连接真实 CARLA，也不接管共享桥。
 

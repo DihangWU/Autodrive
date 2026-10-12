@@ -8,6 +8,9 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
+#include <deque>
+#include <cerrno>
+#include <poll.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
@@ -221,6 +224,10 @@ class CarlaManager : public cSimpleModule {
     std::map<std::string,cLineFigure*> rangeLinks;
     long frame = 0;
     double step = .05;
+    bool waitingForFrame = false;
+    std::string receiveBuffer;
+    std::deque<std::string> frameLines;
+    size_t expectedLines = 0;
     std::string feedback() {
         std::vector<cModule*> all;
         for (auto& entry: rsus) all.push_back(entry.second);
@@ -284,15 +291,45 @@ class CarlaManager : public cSimpleModule {
             } else ++it;
         }
     }
-    std::string readLine() {
-        std::string line; char ch;
+    bool receiveFrame() {
+        // A scene update may take longer than one CARLA step. Keep Qtenv
+        // responsive while waiting, without advancing simulation time or
+        // applying a partially received snapshot. Stop/Run resumes this frame.
         while (true) {
-            ssize_t n=recv(fd,&ch,1,0);
-            if (n!=1) throw cRuntimeError("VANET socket closed; stop experiment or reconnect by restarting OMNeT++");
-            if(ch=='\n') return line;
-            line += ch;
-            if(line.size()>4096) throw cRuntimeError("Oversized VANET frame");
+            size_t newline;
+            while ((newline=receiveBuffer.find('\n'))!=std::string::npos) {
+                if (newline>4096) throw cRuntimeError("Oversized VANET frame line");
+                frameLines.push_back(receiveBuffer.substr(0,newline));
+                receiveBuffer.erase(0,newline+1);
+                if (frameLines.size()==1) {
+                    std::istringstream header(frameLines.front());
+                    std::string tag; long nextFrame; double nextStep; int count,rsuCount=0;
+                    if (!(header>>tag>>nextFrame>>nextStep>>count) ||
+                        (tag!="FRAME" && tag!="FRAME2") || !std::isfinite(nextStep) || nextStep<=0 || count<0 || count>10000)
+                        throw cRuntimeError("Invalid VANET frame header");
+                    if (tag=="FRAME2" && (!(header>>rsuCount) || rsuCount<0 || rsuCount>10000))
+                        throw cRuntimeError("Invalid VANET RSU count");
+                    expectedLines=1+count+rsuCount;
+                }
+                if (frameLines.size()==expectedLines) return true;
+            }
+            if (receiveBuffer.size()>4096) throw cRuntimeError("Oversized VANET frame line");
+            char buffer[4096];
+            ssize_t n=recv(fd,buffer,sizeof(buffer),MSG_DONTWAIT);
+            if (n>0) { receiveBuffer.append(buffer,size_t(n)); continue; }
+            if (n==0) throw cRuntimeError("VANET bridge disconnected");
+            if (errno==EINTR) continue;
+            if (errno!=EAGAIN && errno!=EWOULDBLOCK) throw cRuntimeError("VANET socket receive failed");
+            pollfd socket{fd,POLLIN,0};
+            if (::poll(&socket,1,20)<0 && errno!=EINTR) throw cRuntimeError("VANET socket poll failed");
+            if (getEnvir()->idle()) return false;
         }
+    }
+    std::string readLine() {
+        if (frameLines.empty()) throw cRuntimeError("Incomplete VANET snapshot");
+        std::string line=std::move(frameLines.front());
+        frameLines.pop_front();
+        return line;
     }
     void update(long id,const std::string& name,double x,double y,double z) {
         cModule* m;
@@ -405,7 +442,6 @@ protected:
         getParentModule()->getCanvas()->addFigure(links,1);
         if(!par("smoke").boolValue()) {
             fd=socket(AF_INET,SOCK_STREAM,0);
-            timeval timeout{10,0}; setsockopt(fd,SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof(timeout));
             sockaddr_in a{};a.sin_family=AF_INET;a.sin_port=htons(par("port").intValue());a.sin_addr.s_addr=htonl(INADDR_LOOPBACK);
             if(connect(fd,reinterpret_cast<sockaddr*>(&a),sizeof(a))) throw cRuntimeError("Cannot connect to shared VANET bridge on loopback; start vanet/run_lincoln.sh first");
         }
@@ -414,7 +450,7 @@ protected:
         scheduleAt(simTime(),tick);
     }
     void handleMessage(cMessage*) override {
-        if(frame && fd>=0) {
+        if(frame && fd>=0 && !waitingForFrame) {
             std::string ack=feedback();
             size_t written=0;
             while (written<ack.size()) {
@@ -423,7 +459,18 @@ protected:
                 written+=size_t(n);
             }
         }
+        if (fd>=0) {
+            waitingForFrame=true;
+            if (!receiveFrame()) {
+                // Stop is handled by Qtenv after this event returns. Resume
+                // at the same boundary, with no duplicate ACK or radio step.
+                scheduleAt(simTime(),tick);
+                return;
+            }
+        }
         apply();
+        waitingForFrame=false;
+        expectedLines=0;
         scheduleAt(simTime()+step,tick);
     }
     void finish() override {
