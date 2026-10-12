@@ -56,6 +56,14 @@ class SimulationSynchronization(object):
 
         self.sumo = sumo_simulation
         self.carla = carla_simulation
+        self.vanet = None
+        if os.environ.get("VANET_PORT"):
+            from pathlib import Path
+            sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+            from vanet.bridge import VanetBridge
+            self.vanet = VanetBridge(os.environ["VANET_PORT"])
+            # Sensor creation/rendering can exceed the upstream 2-second RPC timeout.
+            self.carla.client.set_timeout(30.0)
 
         self.tls_manager = tls_manager
         self.sync_vehicle_color = sync_vehicle_color
@@ -154,7 +162,8 @@ class SimulationSynchronization(object):
             type_id = BridgeHelper.get_sumo_vtype(carla_actor)
             color = carla_actor.attributes.get('color', None) if self.sync_vehicle_color else None
             if type_id is not None:
-                sumo_actor_id = self.sumo.spawn_actor(type_id, color)
+                prefix = 'lincoln' if carla_actor.attributes.get('role_name', '').startswith('lincoln_') else 'carla'
+                sumo_actor_id = self.sumo.spawn_actor(type_id, color, id_prefix=prefix)
                 if sumo_actor_id != INVALID_ACTOR_ID:
                     self.carla2sumo_ids[carla_actor_id] = sumo_actor_id
                     if carla_actor.attributes.get('role_name', '').startswith('lincoln_'):
@@ -200,10 +209,16 @@ class SimulationSynchronization(object):
                 # Updates all the sumo links related to this landmark.
                 self.sumo.synchronize_traffic_light(landmark_id, sumo_tl_state)
 
+        if self.vanet:
+            self.vanet.tick(self.carla.world, self.carla.step_length, self.carla2sumo_ids)
+
     def close(self):
         """
         Cleans synchronization.
         """
+        if self.vanet:
+            self.vanet.close()
+
         # Configuring carla simulation in async mode.
         settings = self.carla.world.get_settings()
         settings.synchronous_mode = False

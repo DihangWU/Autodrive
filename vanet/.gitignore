@@ -1,0 +1,5 @@
+omnet/Makefile
+omnet/out/
+omnet/*.so
+omnet/results/
+__pycache__/
