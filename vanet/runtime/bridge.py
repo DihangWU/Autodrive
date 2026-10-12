@@ -7,6 +7,7 @@ ACK <frame> releases the next CARLA/SUMO step. No second TraCI connection.
 """
 import json
 import logging
+import math
 import socket
 from vanet.common.paths import CONFIG
 
@@ -22,6 +23,9 @@ class VanetBridge:
         self.names = {}
         self.idle_callback = None
         self.rsu_provider = None
+        self.visualization_callback = None
+        self.last_visualization = None
+        self.receive_buffer = bytearray()
         logging.info('VANET listening on 127.0.0.1:%s', port)
 
     def tick(self, world, step, sumo_ids=None):
@@ -55,30 +59,69 @@ class VanetBridge:
             payload += ''.join(f'{name} {x:.9f} {y:.9f} {z:.9f}\n' for name,x,y,z in rsus)
         try:
             self.peer.sendall(payload.encode('ascii'))
-            # recv directly rather than a timed-out buffered makefile.
-            data = bytearray()
-            while b'\n' not in data:
-                try:
-                    chunk = self.peer.recv(128)
-                except socket.timeout:
-                    if self.idle_callback:
-                        self.idle_callback()
-                    continue
-                if not chunk:
-                    raise ConnectionError('network simulator disconnected')
-                data.extend(chunk)
-                if len(data)>128:
-                    raise ConnectionError('oversized ACK')
-            if data.decode('ascii').strip() != f'ACK {snap.frame}':
-                raise ConnectionError('unexpected frame ACK')
-        except (OSError, ConnectionError, UnicodeError) as e:
+            state = self.receive_feedback(snap.frame)
+            if state is not None:
+                ox, oy = self.cfg['network']['offset_x'], self.cfg['network']['offset_y']
+                state['nodes'] = {name: [x-ox, oy-y, z] for _,name,x,y,z in vehicles}
+                state['nodes'].update({name: [x-ox, oy-y, z] for name,x,y,z in (rsus or [])})
+                self.last_visualization = state
+                if self.visualization_callback:
+                    self.visualization_callback(state)
+        except (OSError, ConnectionError, UnicodeError, ValueError) as e:
             logging.warning('VANET detached: %s; SUMO/CARLA continue', e)
             self.detach()
+
+    def receive_line(self):
+        # Keep leftovers: a VIS block and its ACK can span arbitrary TCP reads.
+        # Never use a makefile whose buffer becomes unusable after a timeout.
+        while b'\n' not in self.receive_buffer:
+            try:
+                chunk = self.peer.recv(4096)
+            except socket.timeout:
+                if self.idle_callback:
+                    self.idle_callback()
+                continue
+            if not chunk:
+                raise ConnectionError('network simulator disconnected')
+            self.receive_buffer.extend(chunk)
+            if len(self.receive_buffer) > 8192:
+                raise ConnectionError('oversized VANET response line')
+        line, _, rest = self.receive_buffer.partition(b'\n')
+        self.receive_buffer = bytearray(rest)
+        if len(line)>512:
+            raise ConnectionError('oversized VANET response line')
+        return line.decode('ascii')
+
+    def receive_feedback(self, frame):
+        line = self.receive_line()
+        state = None
+        if line.startswith('VIS '):
+            fields = line.split()
+            if len(fields)!=4 or int(fields[1])!=frame:
+                raise ConnectionError('invalid visualization frame')
+            timestamp, count = float(fields[2]), int(fields[3])
+            if not math.isfinite(timestamp) or timestamp<0 or not 0<=count<=50000:
+                raise ConnectionError('invalid visualization size/time')
+            links = []
+            for _ in range(count):
+                row = self.receive_line().split()
+                if len(row)!=3 or int(row[2]) not in (0,1,2,3) or row[0]==row[1]:
+                    raise ConnectionError('invalid visualization link')
+                links.append([row[0], row[1], int(row[2])])
+            state = dict(frame=frame, time=timestamp, links=links)
+            line = self.receive_line()
+        if line != f'ACK {frame}':
+            raise ConnectionError('unexpected frame ACK')
+        return state
 
     def detach(self):
         if self.peer:
             self.peer.close()
         self.peer = None
+        self.receive_buffer.clear()
+        self.last_visualization = None
+        if self.visualization_callback:
+            self.visualization_callback(None)
 
     def close(self):
         self.detach()

@@ -57,6 +57,7 @@ from shared_sumo import RequestService, control_folder, atomic_json, request, id
 from ensure_sumo import ensure_bridge
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from vanet.scene.markers import SceneMarkers
+from vanet.scene.communication import CommunicationView
 
 
 def selected_blueprints(vtypes, filter_pattern, safe):
@@ -177,12 +178,14 @@ def main(args):
     synchronization = SimulationSynchronization(sumo_simulation, carla_simulation, args.tls_manager,
                                                 args.sync_vehicle_color, args.sync_vehicle_lights)
     scene = SceneMarkers(world, args.host, args.port)
+    communication = CommunicationView(args.host, args.port)
     if synchronization.vanet:
         def poll_idle():
             service.process()
             scene.poll()
         synchronization.vanet.idle_callback = poll_idle
         synchronization.vanet.rsu_provider = scene.network_nodes
+        synchronization.vanet.visualization_callback = communication.update
 
     try:
         # ----------
@@ -316,6 +319,7 @@ def main(args):
         if args.bridge_server and ready_file.exists() and json.loads(ready_file.read_text()).get('pid') == os.getpid():
             ready_file.unlink()
         try:
+            communication.close()
             scene.clear()
         finally:
             synchronization.close()

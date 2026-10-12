@@ -20,8 +20,10 @@ vanet/
 │   ├── bridge.py             # TCP 快照及逐帧 ACK
 │   ├── omnet_session.py      # OMNeT++ 会话生命周期
 │   └── rsu_session.py        # 独立 RSU 会话生命周期
-├── scene/                    # RSU 场景显示
+├── scene/                    # RSU 场景与通信显示
 │   ├── markers.py            # SUMO/CARLA 标记创建与清理
+│   ├── communication.py      # 通信覆盖层启动、状态与清理
+│   ├── communication_overlay.py # CARLA 主窗口透明连线
 │   ├── rsu_marker.py         # CARLA 彩色高塔标识
 │   ├── rsu_label.py          # 巨大洋红色 RSU 名称
 │   └── rsu_body.py           # CARLA 实体塔身与碰撞几何
@@ -203,7 +205,7 @@ OMNET_ROOT、VEINS_ROOT 可覆盖安装路径。VANET 端口默认自动读取 t
 
 ## 看什么
 
-每个节点约每秒发送一个广播 probe；RSU 收到车辆原始 probe 后只转发一次。这里是应用层广播连通性测试，尚未实现 MAC 单播、IP 路由、跨 RSU 或接入切换。
+每个节点约每秒发送一个广播 probe；RSU 收到车辆原始 probe 后只转发一次。节点另发送 HELLO 广播，并以 MAC 单播 ACK 确认邻居。业务数据仍是应用层广播连通性测试，尚未实现业务单播路由、IP 路由、跨 RSU 或接入切换。
 
 - 范围内的节点持续显示虚线：蓝色为 V2V，紫色为涉及 RSU 的链路。每个 CARLA 快照更新位置，驶出范围或车辆销毁后删除，驶入范围或加入新车后自动建立。虚线表示范围内可尝试通信，不代表每个数据包都投递成功。
 - 发送/接收节点显示 TX/RX 气泡。
@@ -212,6 +214,24 @@ OMNET_ROOT、VEINS_ROOT 可覆盖安装路径。VANET 端口默认自动读取 t
 - .vec/.sca 记录收发计数、转发计数与延迟；.elog 支持事件回放。
 
 转发报文保留原始序号和发送时间。发送方可能收到自己的 RSU 转发副本，分析时按 origin 排除；direct/relay 要分别计算，不能把所有 RX 相加当成投递率。CSV 每个模块实例独立文件，同一运行配置重跑会覆盖同名输出，重要结果先复制保存。
+
+## CARLA 中的通信连线
+
+启动 OMNeT++ 并点击 Run/Fast 后，CARLA 主窗口会自动显示已完成双向 HELLO/ACK 握手的节点连线，包括车辆与车辆、车辆与 RSU。沿用上述 40 / 220 米范围；超出范围或节点删除立即移除连线，握手连续 3 仿真秒未更新也会失效。无需另外运行显示命令。
+
+| 状态 | 半透明连线颜色 |
+|---|---|
+| 已握手，近期无业务收包 | 整条灰色 |
+| 单向业务传递成功 | 发信端到世界坐标中点为蓝色，中点到收信端为黄色 |
+| 两方向均有业务传递成功 | 整条绿色 |
+
+颜色按真实 Veins 成功收包反馈更新，每次业务收包保留 350 毫秒**仿真时间**，随后恢复灰色；在这段时间内两个方向均有成功收包即显示绿色。HELLO/ACK 控制包不会触发业务颜色，也不计入 probe 收发统计。它们在 CSV 中另记为 `HELLO_TX / HELLO_RX / ACK_TX / ACK_RX`，`path=handshake`，分析业务投递率时排除。实际 RSU 转发按车辆—RSU 的各段链路显示，不画超过直连范围的车辆间虚拟链路。
+
+线宽约 1.5 像素，灰线 Alpha 约 43%，彩色线约 49%。位置随节点和 CARLA 观察视角更新，车辆端在车顶附近，RSU 端在配置的通信节点高度 `z`。连线通过跟随 CARLA 游戏窗口的 Qt/X11 透明覆盖层绘制，鼠标操作穿透；没有创建世界几何或传感器可探测实体。因此 CARLA 主窗口可见，车辆的 Camera、LiDAR、Radar 及传感器录制数据中均没有这些线。覆盖层不增加 TraCI 客户端，也不推进 CARLA 时钟；退出 OMNeT++ 后自动清理。
+
+当前 CARLA Shipping 包的原生 HUD 绘线会将亮度和 Alpha 同时放大，无法保留所需半透明效果，因此使用本工程覆盖层，未修改 CARLA 系统文件（见 [CARLA 0.9.16 HUD 绘制源码](https://github.com/carla-simulator/carla/blob/0.9.16/Unreal/CarlaUE4/Plugins/Carla/Source/Carla/Util/DebugShapeDrawer.cpp)）。覆盖层使用本机已有 PyQt5 和 X11，适用于当前有界面的 CARLA 主窗口；不用于无窗口渲染或其他远程视频窗口。状态及错误日志位于共享桥控制目录的 `vanet-communication.json / vanet-communication.log`。
+
+**已有旧共享桥首次升级时**：正常退出 OMNeT++、RSU 命令及车辆，执行 `bash run_lincoln.sh --stop-sumo`，再重新启动车辆和 OMNeT++，可选启动 RSU。此版本需要共享桥加载新的通信反馈协议；无需重启 CARLA。之后沿用原来的启动命令即可。
 
 ## 验证
 
@@ -226,6 +246,8 @@ OMNET_ROOT、VEINS_ROOT 可覆盖安装路径。VANET 端口默认自动读取 t
 通信范围回归：`python3 vanet/tests/test_radio_range.py` 使用真实 Veins MAC/PHY 和隔离的 TCP 合成快照，验证无 RSU 的 V2V、单车与 RSU、40/220 米边界、越界阻断、RSU 转发、直连与转发并存、三车独立接入及移动时连线断开/恢复。不连接真实 CARLA，也不接管共享桥。
 
 动态 RSU 回归：`python3 vanet/tests/test_dynamic_rsu.py` 在同一个真实 Veins 运行中，验证无 RSU 开始、动态添加/删除、同名重新加入、多个 RSU 和位置变化；所有阶段均保留 V2V 收包，不重启网络。
+
+CARLA 连线状态回归：`python3 vanet/tests/test_communication.py` 用真实 Veins HELLO/ACK 和 TCP 反馈验证灰色、两个单向方向、双向绿色、未完成握手不画线、越界和动态 RSU；同时检查世界坐标中点、半透明颜色及视角投影。CARLA 主窗口显示已用临时 RGB 相机实测，桌面连线可见而传感器图像没有对应线条；测试相机和覆盖层随后清理。
 
 Smoke 的第二辆车在 5 秒删除、6 秒重新生成。合成快照测试连接同一个 Python VanetBridge 类，与 OMNeT++ 执行逐帧 ACK，并检查 V2V、V2I、RSU 转发收包；它不会连接 CARLA 或启动 SUMO。
 

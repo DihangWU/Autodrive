@@ -41,6 +41,9 @@ simple ConnectivityApp extends DemoBaseApplLayer {
         @class(ConnectivityApp);
         bool isRsu = default(false);
         double interval @unit(s) = default(1s);
+        bool sendProbes = default(true);
+        bool sendHello = default(true);
+        double handshakeTimeout @unit(s) = default(3s);
         string csvDir = default("results");
         double relayJitter @unit(s) = default(20ms);
 }
@@ -57,6 +60,7 @@ simple CarlaManager {
         int port = default(9998);
         bool smoke = default(false);
         string rsuDefinitions = default("");
+        double activityWindow @unit(s) = default(350ms);
 }
 network Town04Vanet {
     parameters:

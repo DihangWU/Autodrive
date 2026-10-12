@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include <cmath>
+#include <algorithm>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
@@ -55,19 +56,38 @@ Define_Module(ExternalMobility);
 
 class ConnectivityApp : public DemoBaseApplLayer {
     cMessage* timer = nullptr;
+    cMessage* helloTimer = nullptr;
     long tx = 0, rx = 0, relayed = 0;
     int seq = 0;
     cOutVector delay;
     std::ofstream csv;
     std::set<BaseFrame1609_4*> pendingRelays;
+    std::set<BaseFrame1609_4*> pendingHandshakeAcks;
+    struct Peer { simtime_t ack = -1; simtime_t received = -1; };
+    std::map<int,Peer> peers;
+    long helloNonce = 0;
     bool isRsu() const { return par("isRsu").boolValue(); }
     Coord position() { return check_and_cast<ExternalMobility*>(getParentModule()->getSubmodule("veinsmobility"))->getPositionAt(simTime()); }
+    void sendHandshake(BaseFrame1609_4* hello = nullptr) {
+        auto* p = new BaseFrame1609_4(hello ? "link HELLO ACK" : "link HELLO");
+        populateWSM(p,hello ? hello->par("address").longValue() : LAddress::L2BROADCAST());
+        p->addPar("kind") = hello ? "helloAck" : "hello";
+        p->addPar("source") = getParentModule()->getName();
+        p->addPar("sourceId") = getParentModule()->getId();
+        p->addPar("address") = long(myId);
+        p->addPar("nonce") = hello ? hello->par("nonce").longValue() : ++helloNonce;
+        p->addPar("targetId") = hello ? hello->par("sourceId").longValue() : -1;
+        csv << simTime() << (hello ? ",ACK_TX," : ",HELLO_TX,") << getParentModule()->getName()
+            << "," << (hello ? hello->par("source").stringValue() : "*") << ",,0,0,handshake" << std::endl;
+        sendDown(p);
+    }
     void sendProbe(BaseFrame1609_4* original = nullptr) {
         auto* p = new BaseFrame1609_4(original ? "RSU relay" : "connectivity probe");
         populateWSM(p);
         Coord pos = position();
         p->addPar("sx") = pos.x; p->addPar("sy") = pos.y; p->addPar("sz") = pos.z;
         p->addPar("source") = getParentModule()->getName();
+        p->addPar("sourceId") = getParentModule()->getId();
         p->addPar("origin") = original ? original->par("origin").stringValue() : getParentModule()->getName();
         p->addPar("sequence") = original ? original->par("sequence").longValue() : ++seq;
         p->addPar("sentAt") = original ? original->par("sentAt").doubleValue() : simTime().dbl();
@@ -90,27 +110,68 @@ protected:
             csv << "time,event,sender,receiver,origin,sequence,delay,path" << std::endl;
         } else if (stage == 1) {
             timer = new cMessage("probe timer");
-            scheduleAt(simTime()+uniform(.05,.15), timer);
+            scheduleAt(simTime()+uniform(.15,.25), timer);
+            if (par("sendHello").boolValue()) {
+                helloTimer = new cMessage("HELLO timer");
+                scheduleAt(simTime()+uniform(.01,.03),helloTimer);
+            }
         }
     }
     void handleSelfMsg(cMessage* msg) override {
         if (auto* original = dynamic_cast<BaseFrame1609_4*>(msg)) {
+            if (original->hasPar("kind")) {
+                pendingHandshakeAcks.erase(original);
+                sendHandshake(original);
+                delete original;
+                return;
+            }
             pendingRelays.erase(original);
             ++relayed;
             sendProbe(original);
             delete original;
             return;
         }
+        if (msg == helloTimer) {
+            sendHandshake();
+            // Keep HELLO/ACK exchanges separate from data and de-synchronize
+            // retries, avoiding repeatable half-duplex collisions.
+            scheduleAt(simTime()+par("interval").doubleValue()*(1+uniform(-.15,.15)),helloTimer);
+            return;
+        }
         if (msg != timer) { DemoBaseApplLayer::handleSelfMsg(msg); return; }
-        sendProbe();
+        if (par("sendProbes").boolValue()) sendProbe();
+        for (auto it=peers.begin(); it!=peers.end();) {
+            if (simTime() - std::max(it->second.ack,it->second.received) > par("handshakeTimeout").doubleValue()) it=peers.erase(it);
+            else ++it;
+        }
         scheduleAt(simTime()+par("interval").doubleValue(), timer);
     }
     void onWSM(BaseFrame1609_4* p) override {
-        if (!p->hasPar("origin")) return;
+        if (!p->hasPar("source")) return;
         auto* sender = getParentModule()->getParentModule()->getSubmodule(p->par("source").stringValue());
         if (!sender) return; // The source may have been removed in a CARLA snapshot.
+        if (!p->hasPar("sourceId") || sender->getId()!=p->par("sourceId").longValue()) return;
         auto* senderMobility = check_and_cast<ExternalMobility*>(sender->getSubmodule("veinsmobility"));
         if (!withinRange(sender, senderMobility->getPositionAt(simTime()), getParentModule(), position())) return;
+        if (p->hasPar("kind")) {
+            std::string kind = p->par("kind").stringValue();
+            if (kind=="hello") {
+                csv << simTime() << ",HELLO_RX," << sender->getName() << "," << getParentModule()->getName() << ",,0,0,handshake" << std::endl;
+                // Vehicles outside V2V range cannot hear one another's CCA.
+                // Spread their HELLO responses to avoid hidden-terminal ACK
+                // collisions at a shared RSU.
+                auto* hello = p->dup();
+                pendingHandshakeAcks.insert(hello);
+                scheduleAt(simTime()+uniform(0,.02),hello);
+            } else if (kind=="helloAck" && p->par("targetId").longValue()==getParentModule()->getId()
+                       && p->par("nonce").longValue()==helloNonce && helloNonce>0) {
+                peers[sender->getId()].ack = simTime();
+                csv << simTime() << ",ACK_RX," << sender->getName() << "," << getParentModule()->getName() << ",,0,0,handshake" << std::endl;
+            }
+            return; // Handshake packets neither tint the link nor get relayed.
+        }
+        if (!p->hasPar("origin")) return;
+        peers[sender->getId()].received = simTime();
         ++rx;
         double d = originalToDelay(p);
         delay.record(d);
@@ -134,9 +195,19 @@ protected:
         recordScalar("probeTx",tx); recordScalar("probeRx",rx); recordScalar("relayTx",relayed);
     }
 public:
+    bool handshakeWith(cModule* peer) const {
+        auto it=peers.find(peer->getId());
+        return it!=peers.end() && it->second.ack>=0 && simTime()-it->second.ack<=par("handshakeTimeout").doubleValue();
+    }
+    bool receivedFrom(cModule* peer, double window) const {
+        auto it=peers.find(peer->getId());
+        return it!=peers.end() && it->second.received>=0 && simTime()-it->second.received<=window;
+    }
     ~ConnectivityApp() override {
         if (timer) cancelAndDelete(timer);
+        if (helloTimer) cancelAndDelete(helloTimer);
         for (auto* original : pendingRelays) cancelAndDelete(original);
+        for (auto* hello : pendingHandshakeAcks) cancelAndDelete(hello);
     }
 };
 Define_Module(ConnectivityApp);
@@ -150,6 +221,31 @@ class CarlaManager : public cSimpleModule {
     std::map<std::string,cLineFigure*> rangeLinks;
     long frame = 0;
     double step = .05;
+    std::string feedback() {
+        std::vector<cModule*> all;
+        for (auto& entry: rsus) all.push_back(entry.second);
+        for (auto& entry: nodes) all.push_back(entry.second);
+        std::ostringstream rows;
+        int count=0;
+        for (size_t i=0;i<all.size();++i) {
+            auto* a=all[i];
+            auto* aa=check_and_cast<ConnectivityApp*>(a->getSubmodule("appl"));
+            Coord pa=check_and_cast<ExternalMobility*>(a->getSubmodule("veinsmobility"))->getPositionAt(simTime());
+            for (size_t j=i+1;j<all.size();++j) {
+                auto* b=all[j];
+                auto* ba=check_and_cast<ConnectivityApp*>(b->getSubmodule("appl"));
+                Coord pb=check_and_cast<ExternalMobility*>(b->getSubmodule("veinsmobility"))->getPositionAt(simTime());
+                if (!withinRange(a,pa,b,pb) || !aa->handshakeWith(b) || !ba->handshakeWith(a)) continue;
+                int directions=(ba->receivedFrom(a,par("activityWindow").doubleValue()) ? 1 : 0)
+                             | (aa->receivedFrom(b,par("activityWindow").doubleValue()) ? 2 : 0);
+                rows << a->getName() << ' ' << b->getName() << ' ' << directions << '\n';
+                ++count;
+            }
+        }
+        std::ostringstream header;
+        header << "VIS " << frame << ' ' << simTime() << ' ' << count << '\n';
+        return header.str()+rows.str()+"ACK "+std::to_string(frame)+"\n";
+    }
     void updateLinks() {
         std::vector<cModule*> all;
         for (auto& entry : rsus) all.push_back(entry.second);
@@ -319,8 +415,13 @@ protected:
     }
     void handleMessage(cMessage*) override {
         if(frame && fd>=0) {
-            std::string ack="ACK "+std::to_string(frame)+"\n";
-            if(::send(fd,ack.c_str(),ack.size(),MSG_NOSIGNAL)!=static_cast<ssize_t>(ack.size())) throw cRuntimeError("Failed VANET ACK");
+            std::string ack=feedback();
+            size_t written=0;
+            while (written<ack.size()) {
+                ssize_t n=::send(fd,ack.data()+written,ack.size()-written,MSG_NOSIGNAL);
+                if(n<=0) throw cRuntimeError("Failed VANET visualization/ACK");
+                written+=size_t(n);
+            }
         }
         apply();
         scheduleAt(simTime()+step,tick);

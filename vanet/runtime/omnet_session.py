@@ -43,7 +43,7 @@ def main():
             except BlockingIOError:
                 raise RuntimeError('Another OMNeT++ session is already running.')
             status = request(args.carla_host, args.carla_port, {'action': 'status'}, timeout=8)
-            if status.get('vanet_scene', {}).get('protocol') != 3:
+            if status.get('vanet_scene', {}).get('protocol') != 4:
                 raise RuntimeError('共享 SUMO 桥仍是旧版本。请正常关闭车辆后，执行 bash run_lincoln.sh --stop-sumo，再重新启动车辆。')
             print('Live RSUs are controlled independently by bash vanet/run_rsu.sh.', flush=True)
         child = subprocess.Popen(command, close_fds=True, start_new_session=True)

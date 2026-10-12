@@ -25,7 +25,7 @@ class SceneMarkers:
         self.bodies = {}
 
     def status(self):
-        return dict(protocol=3, session=self.session, error=self.error, rsus=list(self.markers))
+        return dict(protocol=4, session=self.session, error=self.error, rsus=list(self.markers))
 
     def network_nodes(self):
         if self.config is None:

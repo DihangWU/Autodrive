@@ -37,7 +37,7 @@ def main():
         except BlockingIOError:
             raise RuntimeError('RSU 命令已在运行；请先在原终端按 Ctrl+C 退出。')
         status = request(args.carla_host, args.carla_port, {'action': 'status'}, timeout=8)
-        if status.get('vanet_scene', {}).get('protocol') != 3:
+        if status.get('vanet_scene', {}).get('protocol') != 4:
             raise RuntimeError('共享 SUMO 桥仍是旧版本。请正常关闭车辆后，执行 bash run_lincoln.sh --stop-sumo，再重新启动车辆。')
         try:
             atomic_json(lease, dict(session=session, owner=identity(), config=cfg))

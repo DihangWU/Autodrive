@@ -37,7 +37,8 @@ class World:
         return SimpleNamespace(filter=lambda _: actors)
 
 
-def run_case(tmp, name, cfg, positions, duration=6, rsu_provider=None):
+def run_case(tmp, name, cfg, positions, duration=6, rsu_provider=None,
+             extra_args=None, visualization=None):
     results = tmp / name
     results.mkdir()
     config = results / 'config.json'
@@ -46,6 +47,8 @@ def run_case(tmp, name, cfg, positions, duration=6, rsu_provider=None):
     world = World(cfg, positions)
     if rsu_provider is not None:
         bridge.rsu_provider = lambda: rsu_provider(world.frame)
+    if visualization is not None:
+        bridge.visualization_callback = lambda state: visualization.append(state) if state is not None else None
     stop = threading.Event()
     errors = []
     def serve():
@@ -63,6 +66,7 @@ def run_case(tmp, name, cfg, positions, duration=6, rsu_provider=None):
                f'--sim-time-limit={duration}s',
                f'--*.manager.port={bridge.listener.getsockname()[1]}',
                '--result-dir=' + str(results), '--**.appl.csvDir=' + json.dumps(str(results))]
+    command.extend(extra_args or [])
     try:
         run = subprocess.run(command, capture_output=True, text=True, timeout=30)
         assert run.returncode == 0, run.stdout + run.stderr
