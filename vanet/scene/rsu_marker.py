@@ -1,4 +1,4 @@
-"""Short-lived CARLA RSU drawing, owned by the OMNeT++ scene session."""
+"""Short-lived CARLA RSU drawing, owned by the independent RSU command."""
 import math
 from vanet.scene.rsu_label import draw_label
 

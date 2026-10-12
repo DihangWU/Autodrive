@@ -11,13 +11,15 @@ vanet/
 ├── README.md                 # 本目录说明
 ├── town04.json               # 出生点、RSU、网络配置
 ├── run_lincoln.sh            # 车辆启动入口
-├── run_omnet.sh              # OMNeT++ 启动入口
+├── run_omnet.sh              # OMNeT++ 启动入口（不自动创建 RSU）
+├── run_rsu.sh                # 独立 RSU 创建/清理入口
 ├── build.sh                  # OMNeT++ 编译及道路导出入口
 ├── runtime/                  # 联仿运行逻辑
 │   ├── launch.py             # 车辆启动与参数处理
 │   ├── spawn.py              # 出生点选择与预留
 │   ├── bridge.py             # TCP 快照及逐帧 ACK
-│   └── omnet_session.py      # OMNeT++ 会话生命周期
+│   ├── omnet_session.py      # OMNeT++ 会话生命周期
+│   └── rsu_session.py        # 独立 RSU 会话生命周期
 ├── scene/                    # RSU 场景显示
 │   ├── markers.py            # SUMO/CARLA 标记创建与清理
 │   ├── rsu_marker.py         # CARLA 彩色高塔标识
@@ -46,6 +48,7 @@ vanet/
 ```bash
 bash vanet/run_lincoln.sh
 bash vanet/run_omnet.sh
+bash vanet/run_rsu.sh   # 可选；不运行时只观察车辆通信
 bash vanet/build.sh
 ```
 
@@ -97,17 +100,19 @@ SUMO 状态栏在原 x/y 位置同时显示 `SUMO x/y | CARLA x/y`。右键菜�
 
 配置种子坐标集中在 town04.json。车辆启动时使用当前 CARLA 驾驶车道 waypoint 修正高度和方向；检查横向偏差不超过 4 米、方向差不超过 35 度且不在路口内部，否则停止。RSU 在 OMNeT++ 中是固定无线节点；CARLA 同位置显示橙色塔架、青色顶部框和圆环、黄色天线及巨大洋红色 RSU 名称（如 `rsu0`）。彩色标识仍使用世界调试绘图；同位置另有带碰撞的实体塔身，供 LiDAR / Radar 探测。当前基座已核对位于原路口对角的草地、红砖墙前；四个城区道路采样点到塔顶的视线检测无障碍，约 211 米外实景可见顶部标识。
 
-RSU 的唯一位置定义是 `town04.json` 的 `rsus` 列表，单位为 CARLA 世界坐标米。`bash vanet/run_omnet.sh` 每次启动读取 JSON，自动换算并传入 OMNeT++，将同一配置快照交给共享桥：CARLA 创建实体塔身和塔架标识，SUMO 显示橙色 RSU 图标。单独启动车辆不会显示 RSU；关闭 OMNeT++ 窗口或在启动终端按 Ctrl+C 后，SUMO 图标和 CARLA 实体移除，CARLA 调试绘图在恢复推进后的两个步长内消失（默认约 0.1 仿真秒）。暂停 Qtenv 不会移除标记。修改 JSON 后重开 OMNeT++ 即可，运行中的会话不热更新。
+RSU 的唯一位置定义是 `town04.json` 的 `rsus` 列表，单位为 CARLA 世界坐标米。独立命令 `bash vanet/run_rsu.sh` 每次启动读取 JSON，将配置快照交给共享桥：CARLA 创建实体塔身和标识，SUMO 显示图标，已运行的 OMNeT++ 在下一帧创建对应无线节点。单独启动车辆或 OMNeT++ 都不会生成 RSU。
 
-显示由现有桥线程统一处理，不再使用独立常驻标记进程；会话进程异常退出也会触发清理。首次升级此功能时，旧共享桥需要重启一次：正常关闭车辆后，在工程根目录执行 `bash run_lincoln.sh --stop-sumo`，再重新运行 VANET 车辆启动器。无需重启 CARLA 或修改地图。
+在 RSU 命令终端按 Ctrl+C，实体和 SUMO 图标由共享桥移除，OMNeT++ 在下一帧删除 RSU 节点及连线，继续车辆之间的通信。关闭 OMNeT++ 不会关闭独立 RSU 命令；之后重新打开 OMNeT++ 也会接入仍在运行的 RSU。绘图在恢复推进后的两个步长内消失（默认约 0.1 仿真秒）。Qtenv 暂停时可执行 RSU 创建/清理，网络节点和绘图的仿真更新需恢复 Run/Fast 后显示。修改 JSON 后重启 RSU 命令即可，OMNeT++ 可以保持打开。
+
+所有实体和图标操作仍由现有桥线程执行，不增加 TraCI 客户端或 CARLA 时钟拥有者；RSU 命令终止或崩溃也会触发清理。首次升级独立 RSU 功能时，需要正常关闭 OMNeT++、RSU 命令和车辆，执行 `bash run_lincoln.sh --stop-sumo`，再重新启动车辆及 OMNeT++，使共享桥加载新协议。无需重启 CARLA 或修改地图。
 
 桥传输的 SUMO 坐标使用 x=CARLA.x+503.02、y=-CARLA.y+423.76。OMNeT++ 内统一转换为 x'=x-xMin+40、y'=yMax-y+40，修正 Qtenv 画布 Y 轴向下与 SUMO Y 轴向上的差异；道路、车辆、RSU 和通信连线使用同一坐标系，距离保持不变。
 
 roads.txt 包含 `carla-source/Co-Simulation/Sumo/examples/net/Town04.net.xml` 的全部 632 条车道及路口内部连接。`build.sh` 自动调用 `tools/export_roads.py` 生成该文件，首行记录源路网边界。它是全图静态道路背景，车辆位置实时更新；Qtenv 使用 Ctrl + 鼠标滚轮缩放，通过滚动条移动视野以寻找路口。第一版信道仅包含路径损耗和噪声，不自动导入 CARLA 建筑物。
 
-实体塔身使用 CARLA 自带的 `/Engine/BasicShapes/Cylinder.Cylinder` 静态网格，从 `base_z` 连续覆盖到 `z`，直径不超过 1.2 米。由于运行时网格仅支持等比缩放，塔身由多个相接圆柱构成（当前约 60 米塔身为 50 段），关闭物理运动和重力、开启碰撞。它是可见实体，会遮挡传感器射线，也会阻挡车辆；顶部彩色框、光环和天线仍是辅助绘图，没有碰撞。不会修改 CARLA 系统地图文件。实体由 OMNeT++ 会话管理，正常退出、终止或会话进程崩溃均由共享桥清理，部分创建失败会回滚已生成部件。
+实体塔身使用 CARLA 自带的 `/Engine/BasicShapes/Cylinder.Cylinder` 静态网格，从 `base_z` 连续覆盖到 `z`，直径不超过 1.2 米。由于运行时网格仅支持等比缩放，塔身由多个相接圆柱构成（当前约 60 米塔身为 50 段），关闭物理运动和重力、开启碰撞。它是可见实体，会遮挡传感器射线，也会阻挡车辆；顶部彩色框、光环和天线仍是辅助绘图，没有碰撞。不会修改 CARLA 系统地图文件。实体由独立 RSU 命令管理，命令正常退出、终止或崩溃均由共享桥清理，部分创建失败会回滚已生成部件。
 
-升级实体功能后需正常关闭 OMNeT++ 和车辆，执行 `bash run_lincoln.sh --stop-sumo`，再重新启动车辆和 OMNeT++，使共享桥加载新代码。之后修改 RSU 坐标只需重开 OMNeT++。传感器有回波仍要求实体在量程和视场内、且未被其他物体遮挡；点云中可见不等于感知算法会将其识别为“RSU”。
+修改 RSU 坐标后只需在 RSU 终端按 Ctrl+C，再执行 `bash vanet/run_rsu.sh`；OMNeT++ 无需重启。传感器有回波仍要求实体在量程和视场内、且未被其他物体遮挡；点云中可见不等于感知算法会将其识别为“RSU”。
 
 RSU 当前基座绝对高度为 0.39 米，主体顶部/通信节点绝对高度为 60 米，装饰天线和光环最高约 68 米。名称用约 8 米高的世界空间字体向四面绘制，放在黄色天线顶部上方 5 米处，与灯光分开；名称绘图的最高处约 81 米。顶部光环半径为 5 米，用于远处识别；每个列表项的 `base_z`、`beacon_radius` 控制这些显示尺寸。建筑和树木仍可能遮挡个别视角。
 
@@ -119,7 +124,7 @@ RSU 当前基座绝对高度为 0.39 米，主体顶部/通信节点绝对高度
 
 - 将 `id` 改为唯一名称，如 `rsu1`。
 - 修改 `x、y、z` 及塔脚高度 `base_z`。
-- 保存后重新打开 OMNeT++，OMNeT++、CARLA、SUMO 三个界面会统一创建；关闭 OMNeT++ 后全部清理。
+- 保存后重新运行 `bash vanet/run_rsu.sh`，OMNeT++、CARLA、SUMO 三个界面会统一创建；退出该 RSU 命令后全部清理，OMNeT++ 继续运行。
 
 例如下面的第二项（坐标为格式示例，请按目标地点替换）：
 
@@ -142,11 +147,11 @@ RSU 当前基座绝对高度为 0.39 米，主体顶部/通信节点绝对高度
 - `x/y/z` 是 CARLA 世界绝对坐标（米），`z` 为通信节点及主体顶部高度；当前网络高度范围为 0–100 米。
 - `base_z` 为可选的塔脚绝对高度，省略时使用邻近车道高度估算；放在坡地上建议明确填写。
 - `beacon_radius` 为可选的顶部光环半径，省略时为 1.6 米。
-- 保存后关闭并重新执行 `bash vanet/run_omnet.sh`，不必重新编译。删除列表项后重开即可移除对应 RSU；空列表 `[]` 表示不创建 RSU。
+- 保存后在 RSU 终端按 Ctrl+C，重新执行 `bash vanet/run_rsu.sh`，不必重新编译或关闭 OMNeT++。删除列表项后重启 RSU 命令即可移除对应 RSU；空列表 `[]` 表示没有可生成的 RSU，命令会直接提示退出。
 
 多个 RSU 分别使用真实 Veins 无线收发，均可转发收到的车辆原始广播；转发前随机等待 0–20 毫秒，减少同时收到同一包后同步发送造成的碰撞。不会继续转发其他 RSU 的转发包，避免循环。当前功能不包含跨 RSU 单播路由或接入切换。
 
-首次升级列表功能，需要正常退出 OMNeT++ 和车辆，再在工程根目录执行 `bash run_lincoln.sh --stop-sumo`，重新启动车辆加载新桥；后续单纯修改列表无需重启车辆/桥。
+单纯修改 RSU 列表无需重启车辆或共享桥，重启 RSU 命令即可。
 
 ## 启动
 
@@ -167,11 +172,16 @@ RSU 当前基座绝对高度为 0.39 米，主体顶部/通信节点绝对高度
 
    bash vanet/run_omnet.sh
 
-   在 Qtenv 点 Run（F5），展开 Town04Vanet，找到 rsu0、lincoln0、lincoln1。先观察静止通信，再用现有 Lincoln 面板低速驾驶。新车加入时也会自动创建 OBU。首次接入之后，每个 CARLA 步长内的网络事件处理完成才 ACK 放行下一步。
+   在 Qtenv 点 Run（F5），展开 Town04Vanet，观察 lincoln0、lincoln1。此时不创建 RSU；两车需要相距不超过 40 米才能直连，可用现有 Lincoln 面板低速靠近。新车加入时也会自动创建 OBU。首次接入之后，每个 CARLA 步长内的网络事件处理完成才 ACK 放行下一步。
+6. 需要观察 RSU 转发时，在另一个终端运行：
+
+   bash vanet/run_rsu.sh
+
+   RSU 会同时加入 CARLA、SUMO 和已经运行的 OMNeT++。在该终端按 Ctrl+C 移除，车辆和 OMNeT++ 保持运行。也可以先运行 RSU 命令，再打开 OMNeT++。
 
 Qtenv 暂停会暂停共享仿真推进，这是同步联仿的预期行为。退出网络界面后，Python 桥检测断开，车辆仿真恢复独立推进。CARLA/桥停止时网络接口会报错，需重新启动网络实验。启动新车辆前请保持 Qtenv 正在运行，原共享桥就绪检查需要看到帧推进。
 
-普通 Run 会播放详细动画，实际运行速度可能很慢；Fast 模式适合较快推进。默认 Live 实验在 120 仿真秒结束并释放桥连接，可用 `--sim-time-limit=300s` 覆盖时长。车辆编号按共享桥本次运行的生成顺序递增；销毁后新建车辆会取得新的编号。
+普通 Run 会播放详细动画，实际运行速度可能很慢；Fast 模式适合较快推进。默认 Live 实验没有仿真时长限制，可以常开；若需要固定时长，可传 `--sim-time-limit=300s`。车辆编号按共享桥本次运行的生成顺序递增；销毁后新建车辆会取得新的编号。
 
 OMNET_ROOT、VEINS_ROOT 可覆盖安装路径。VANET 端口默认自动读取 town04.json 的 network.port。`omnetpp.ini` 不再保存 RSU 坐标，修改位置只改 JSON。CARLA 非默认地址可给网络启动器传 `--carla-host=<地址> --carla-port=<端口>`。
 
@@ -187,9 +197,9 @@ OMNET_ROOT、VEINS_ROOT 可覆盖安装路径。VANET 端口默认自动读取 t
 
 边界计入范围，超出半径的无线信号在本工程的 `RangePhy80211p` 中归零，不能收包或造成干扰。范围内仍使用真实 Veins 802.11p MAC/PHY，因此碰撞或信道噪声可能造成个别丢包。两个车只要都在同一 RSU 的 220 米范围内，即使彼此超过 40 米，也能经该 RSU 转发；两车相距不超过 40 米时，直连和 RSU 转发同时保留。未加入车辆间多跳转发或跨 RSU 路由。
 
-无需 RSU 时，将 `town04.json` 的 `rsus` 设为 `[]` 后重新打开 OMNeT++。现有两个固定出生点相距约 48 米，在新规则下不会显示 V2V 直连；驶入 40 米内即可直连，或保持双方处于同一 RSU 覆盖范围内经 RSU 通信。车辆和 RSU 位置无需为此次范围修改而改变。
+无需 RSU 时，只运行车辆和 OMNeT++，不运行 `run_rsu.sh`；若 RSU 命令已运行，在该终端按 Ctrl+C 即可，不需要修改 JSON 或关闭 OMNeT++。现有两个固定出生点相距约 48 米，在新规则下不会显示 V2V 直连；驶入 40 米内即可直连，或保持双方处于同一 RSU 覆盖范围内经 RSU 通信。车辆和 RSU 位置无需为此次范围修改而改变。
 
-半径配置位于 `omnet/omnetpp.ini` 的 `*.vehicleRange = 40m` 和 `*.rsuRange = 220m`，修改后重开 OMNeT++。本次实现已经编译，重新执行 `bash vanet/run_omnet.sh` 即加载新无线模型，无需为该项改动重启共享桥。
+半径配置位于 `omnet/omnetpp.ini` 的 `*.vehicleRange = 40m` 和 `*.rsuRange = 220m`，修改后重开 OMNeT++。半径参数变化只需重开 OMNeT++；RSU 的增删和位置变化则只需操作独立 RSU 命令。
 
 ## 看什么
 
@@ -215,11 +225,13 @@ OMNET_ROOT、VEINS_ROOT 可覆盖安装路径。VANET 端口默认自动读取 t
 
 通信范围回归：`python3 vanet/tests/test_radio_range.py` 使用真实 Veins MAC/PHY 和隔离的 TCP 合成快照，验证无 RSU 的 V2V、单车与 RSU、40/220 米边界、越界阻断、RSU 转发、直连与转发并存、三车独立接入及移动时连线断开/恢复。不连接真实 CARLA，也不接管共享桥。
 
+动态 RSU 回归：`python3 vanet/tests/test_dynamic_rsu.py` 在同一个真实 Veins 运行中，验证无 RSU 开始、动态添加/删除、同名重新加入、多个 RSU 和位置变化；所有阶段均保留 V2V 收包，不重启网络。
+
 Smoke 的第二辆车在 5 秒删除、6 秒重新生成。合成快照测试连接同一个 Python VanetBridge 类，与 OMNeT++ 执行逐帧 ACK，并检查 V2V、V2I、RSU 转发收包；它不会连接 CARLA 或启动 SUMO。
 
-`~/carla-venv/bin/python vanet/tests/test_scene_lifecycle.py` 使用独立的无界面 SUMO 和模拟 CARLA，验证 JSON 坐标传递、实体/标记创建以及正常关闭、终止、崩溃和部分创建失败时的清理。Smoke 配置与合成快照测试不显示真实场景标记；其他自建离线测试可显式传 `--no-scene-markers`。
+`~/carla-venv/bin/python vanet/tests/test_scene_lifecycle.py` 使用独立的无界面 SUMO 和模拟 CARLA，验证 JSON 坐标传递、独立 RSU 命令的实体/标记创建、Ctrl+C/终止/崩溃及部分创建失败时的清理，并检查 RSU 与 OMNeT++ 生命周期互不关闭。Smoke 配置与合成快照测试不显示真实场景标记；其他自建离线测试可显式传 `--no-scene-markers`。
 
-真实传感器验证：关闭 OMNeT++，保持共享桥正常推进，运行 `~/carla-venv/bin/python vanet/tests/test_rsu_sensors.py`。脚本在当前默认 `rsu0` 位置短暂生成实体塔身，并从 10 米外用语义 LiDAR 的 Actor ID 和 Radar 距离验证回波，随后清理自己的实体和传感器；不接管仿真时钟。其他 RSU 位置可能需要调整测试视点以避开遮挡。
+真实传感器验证：关闭 OMNeT++ 和 RSU 命令，保持共享桥正常推进，运行 `~/carla-venv/bin/python vanet/tests/test_rsu_sensors.py`。脚本在当前默认 `rsu0` 位置短暂生成实体塔身，并从 10 米外用语义 LiDAR 的 Actor ID 和 Radar 距离验证回波，随后清理自己的实体和传感器；不接管仿真时钟。其他 RSU 位置可能需要调整测试视点以避开遮挡。
 
 ## 原工程的接入改动
 
@@ -228,7 +240,7 @@ Smoke 的第二辆车在 5 秒删除、6 秒重新生成。合成快照测试连
 - lincoln/ego_vehicle.py：使用原有 --pose 接口，无 VANET 专用修改。
 - carla-source/Co-Simulation/Sumo/run_synchronization.py：VANET_PORT 设置时启用本目录 TCP 端点，每步同步完车辆之后发送快照，退出时关闭端点。
 - carla-source/Co-Simulation/Sumo/sumo_integration/sumo_simulation.py：支持按前缀独立编号，Lincoln 映射使用 lincoln0、lincoln1；网络节点沿用该名称。
-- carla-source/Co-Simulation/Sumo/spawn_npc_sumo.py：桥线程检查 OMNeT++ 会话，统一添加和移除 CARLA / SUMO RSU 标记。
+- carla-source/Co-Simulation/Sumo/spawn_npc_sumo.py：桥线程检查独立 RSU 会话，统一添加和移除 CARLA / SUMO RSU 实体与标记，并将实际 RSU 列表加入网络快照；Qtenv 暂停等待 ACK 时也处理控制请求和 RSU 清理。
 
 其他新实现均在本目录；不启动第二套 SUMO、不建立第二个 TraCI 客户端，也不由 OBU 调用 world.tick()。
 

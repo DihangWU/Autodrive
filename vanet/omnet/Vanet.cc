@@ -145,13 +145,14 @@ class CarlaManager : public cSimpleModule {
     int fd = -1;
     cMessage* tick = nullptr;
     std::map<long,cModule*> nodes;
-    std::vector<cModule*> rsus;
+    std::map<std::string,cModule*> rsus;
     cGroupFigure* links = nullptr;
     std::map<std::string,cLineFigure*> rangeLinks;
     long frame = 0;
     double step = .05;
     void updateLinks() {
-        std::vector<cModule*> all = rsus;
+        std::vector<cModule*> all;
+        for (auto& entry : rsus) all.push_back(entry.second);
         for (auto& entry : nodes) all.push_back(entry.second);
         std::set<std::string> present;
         for (size_t i=0; i<all.size(); ++i) {
@@ -209,6 +210,28 @@ class CarlaManager : public cSimpleModule {
         } else m=nodes[id];
         check_and_cast<ExternalMobility*>(m->getSubmodule("veinsmobility"))->setPosition(x,y,z);
     }
+    void updateRsu(const std::string& name,double x,double y,double z) {
+        cModule* rsu;
+        if (!rsus.count(name)) {
+            if (getParentModule()->getSubmodule(name.c_str())) throw cRuntimeError("Duplicate RSU: %s",name.c_str());
+            rsu=cModuleType::get("Obu")->create(name.c_str(),getParentModule());
+            rsu->finalizeParameters(); rsu->buildInside();
+            // *.rsu*.appl.isRsu is finalized by the configuration when the
+            // module is built; non-mutable parameters cannot be set later.
+            rsu->getDisplayString().setTagArg("i",0,"device/antennatower");
+            rsu->getDisplayString().setTagArg("t",0,name.c_str());
+            check_and_cast<ExternalMobility*>(rsu->getSubmodule("veinsmobility"))->setStartPosition(Coord(x,y,z));
+            rsu->scheduleStart(simTime()); rsu->callInitialize();
+            rsus[name] = rsu;
+            EV_INFO << "RSU CREATED " << name << " SUMO=" << x << "," << y << "," << z << endl;
+        } else rsu = rsus[name];
+        check_and_cast<ExternalMobility*>(rsu->getSubmodule("veinsmobility"))->setPosition(x,y,z);
+    }
+    void deleteNode(cModule* node) {
+        check_and_cast<BaseConnectionManager*>(getParentModule()->getSubmodule("connectionManager"))->unregisterNic(node->getSubmodule("nic"));
+        node->callFinish();
+        node->deleteModule();
+    }
     void apply() {
         std::set<long> present;
         if(par("smoke").boolValue()) {
@@ -216,16 +239,33 @@ class CarlaManager : public cSimpleModule {
             update(101,"lincoln0",700+simTime().dbl(),625,2); present.insert(101);
             if(simTime()<5 || simTime()>=6) { update(102,"lincoln1",725,600+simTime().dbl(),2); present.insert(102); }
         } else {
-            std::istringstream header(readLine()); std::string tag; int count;
-            if(!(header>>tag>>frame>>step>>count) || tag!="FRAME" || step<=0 || count<0 || count>10000) throw cRuntimeError("Invalid VANET frame header");
+            std::istringstream header(readLine()); std::string tag; int count,rsuCount=0;
+            if(!(header>>tag>>frame>>step>>count) || (tag!="FRAME" && tag!="FRAME2") || step<=0 || count<0 || count>10000) throw cRuntimeError("Invalid VANET frame header");
+            if(tag=="FRAME2" && (!(header>>rsuCount) || rsuCount<0 || rsuCount>10000)) throw cRuntimeError("Invalid VANET RSU count");
             for(int i=0;i<count;++i) {
                 long id;std::string name;double x,y,z;std::istringstream row(readLine());
                 if(!(row>>id>>name>>x>>y>>z)) throw cRuntimeError("Invalid VANET vehicle row");
                 update(id,name,x,y,z); present.insert(id);
             }
+            if (tag=="FRAME2") {
+                std::set<std::string> presentRsus;
+                for (int i=0;i<rsuCount;++i) {
+                    std::string name; double x,y,z; std::istringstream row(readLine());
+                    if (!(row>>name>>x>>y>>z) || name.rfind("rsu",0)!=0 || !presentRsus.insert(name).second)
+                        throw cRuntimeError("Invalid VANET RSU row");
+                    updateRsu(name,x,y,z);
+                }
+                for (auto it=rsus.begin();it!=rsus.end();) {
+                    if (!presentRsus.count(it->first)) {
+                        EV_INFO << "RSU DELETED " << it->first << endl;
+                        deleteNode(it->second);
+                        it=rsus.erase(it);
+                    } else ++it;
+                }
+            }
         }
         for(auto it=nodes.begin();it!=nodes.end();) {
-            if(!present.count(it->first)) { EV_INFO << "OBU DELETED actor=" << it->first << endl; check_and_cast<BaseConnectionManager*>(getParentModule()->getSubmodule("connectionManager"))->unregisterNic(it->second->getSubmodule("nic")); it->second->callFinish(); it->second->deleteModule(); it=nodes.erase(it); }
+            if(!present.count(it->first)) { EV_INFO << "OBU DELETED actor=" << it->first << endl; deleteNode(it->second); it=nodes.erase(it); }
             else ++it;
         }
         updateLinks();
@@ -241,15 +281,7 @@ protected:
                 std::istringstream input(row);
                 std::string name; double x,y,z;
                 if (!(input >> name >> x >> y >> z)) throw cRuntimeError("Invalid RSU definition");
-                if (getParentModule()->getSubmodule(name.c_str())) throw cRuntimeError("Duplicate RSU: %s",name.c_str());
-                auto* rsu=cModuleType::get("Obu")->create(name.c_str(),getParentModule());
-                rsu->finalizeParameters(); rsu->buildInside();
-                rsu->getDisplayString().setTagArg("i",0,"device/antennatower");
-                rsu->getDisplayString().setTagArg("t",0,name.c_str());
-                check_and_cast<ExternalMobility*>(rsu->getSubmodule("veinsmobility"))->setStartPosition(Coord(x,y,z));
-                rsu->scheduleStart(simTime()); rsu->callInitialize();
-                rsus.push_back(rsu);
-                EV_INFO << "RSU CREATED " << name << " SUMO=" << x << "," << y << "," << z << endl;
+                updateRsu(name,x,y,z);
             }
             return;
         }

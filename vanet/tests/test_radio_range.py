@@ -37,13 +37,15 @@ class World:
         return SimpleNamespace(filter=lambda _: actors)
 
 
-def run_case(tmp, name, cfg, positions, duration=6):
+def run_case(tmp, name, cfg, positions, duration=6, rsu_provider=None):
     results = tmp / name
     results.mkdir()
     config = results / 'config.json'
     config.write_text(json.dumps(cfg))
     bridge = VanetBridge(0)
     world = World(cfg, positions)
+    if rsu_provider is not None:
+        bridge.rsu_provider = lambda: rsu_provider(world.frame)
     stop = threading.Event()
     errors = []
     def serve():

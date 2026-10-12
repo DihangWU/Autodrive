@@ -15,8 +15,8 @@ class SceneMarkers:
     def __init__(self, world, host, port):
         self.world = world
         folder = control_folder(host, port)
-        self.lease = folder / 'vanet-scene.json'
-        self.reply = folder / 'vanet-scene-status.json'
+        self.lease = folder / 'vanet-rsu.json'
+        self.reply = folder / 'vanet-rsu-status.json'
         self.session = None
         self.config = None
         self.last_frame = None
@@ -25,10 +25,16 @@ class SceneMarkers:
         self.bodies = {}
 
     def status(self):
-        return dict(protocol=2, session=self.session, error=self.error, rsus=list(self.markers))
+        return dict(protocol=3, session=self.session, error=self.error, rsus=list(self.markers))
+
+    def network_nodes(self):
+        if self.config is None:
+            return []
+        return [(name, *sumo_rsu(self.config, p)) for name, (p, _) in self.markers.items()]
 
     def clear(self):
         import traci
+        had_scene = bool(self.session or self.markers or self.bodies)
         try:
             existing = set(traci.poi.getIDList()) if self.markers else set()
             for name in list(self.markers):
@@ -44,6 +50,8 @@ class SceneMarkers:
                 except Exception as error:
                     logging.warning('%s', error)  # Keep ownership for a retry.
             self.session = self.config = None
+            if had_scene:
+                atomic_json(self.reply, dict(session=None, ok=not self.bodies, rsus=[]))
         # CARLA lines have a two-tick lifetime, and expire as the bridge resumes.
 
     def poll(self):
@@ -53,14 +61,14 @@ class SceneMarkers:
             lease = json.loads(self.lease.read_text())
         except FileNotFoundError:
             lease = None
-        if not lease or not lease.get('owner') or not lease.get('child') or not alive(lease['owner']) or not alive(lease['child']):
+        if not lease or not lease.get('owner') or not alive(lease['owner']):
             self.clear()
             return
         session = lease['session']
         if self.session != session:
             self.clear()
             try:
-                cfg = lease['config']  # Immutable snapshot read from town04.json by run_omnet.sh.
+                cfg = lease['config']  # Immutable snapshot owned by run_rsu.sh.
                 if self.bodies:
                     raise RuntimeError('Previous RSU actors could not be cleaned up')
                 town = self.world.get_map()

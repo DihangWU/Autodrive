@@ -1,6 +1,8 @@
 """Optional loopback lockstep endpoint owned by the existing SUMO bridge.
 
-Wire protocol: FRAME <frame> <step> <count>, then ID NAME X Y Z per Lincoln.
+Wire protocol: FRAME2 <frame> <step> <vehicle-count> <rsu-count>, then
+ID NAME X Y Z per Lincoln and NAME X Y Z per live RSU.
+Legacy FRAME is retained for synthetic tests with static RSU definitions.
 ACK <frame> releases the next CARLA/SUMO step. No second TraCI connection.
 """
 import json
@@ -19,6 +21,7 @@ class VanetBridge:
         self.peer = None
         self.names = {}
         self.idle_callback = None
+        self.rsu_provider = None
         logging.info('VANET listening on 127.0.0.1:%s', port)
 
     def tick(self, world, step, sumo_ids=None):
@@ -44,8 +47,12 @@ class VanetBridge:
                 name = self.names.setdefault(a.id, 'lincoln' + str(len(self.names)))
             vehicles.append((a.id, name, p.x+self.cfg['network']['offset_x'],
                              -p.y+self.cfg['network']['offset_y'], p.z+1.8))
-        payload = f'FRAME {snap.frame} {step:.9f} {len(vehicles)}\n'
+        rsus = self.rsu_provider() if self.rsu_provider is not None else None
+        payload = (f'FRAME {snap.frame} {step:.9f} {len(vehicles)}\n' if rsus is None else
+                   f'FRAME2 {snap.frame} {step:.9f} {len(vehicles)} {len(rsus)}\n')
         payload += ''.join(f'{i} {name} {x:.9f} {y:.9f} {z:.9f}\n' for i,name,x,y,z in vehicles)
+        if rsus is not None:
+            payload += ''.join(f'{name} {x:.9f} {y:.9f} {z:.9f}\n' for name,x,y,z in rsus)
         try:
             self.peer.sendall(payload.encode('ascii'))
             # recv directly rather than a timed-out buffered makefile.

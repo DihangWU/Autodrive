@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from vanet.common.paths import PROJECT_DIR as ROOT, LINCOLN_DIR, VANET_DIR
 sys.path[:0] = [str(LINCOLN_DIR), str(Path(os.environ.get('SUMO_HOME', Path.home() / 'sumo-1.22.0')) / 'tools')]
 import traci
-from shared_sumo import RequestService, control_folder
+from shared_sumo import RequestService, control_folder, atomic_json, identity
 from vanet.common.config import load_config, sumo_rsu, rsu_definitions
 from vanet.scene.markers import SceneMarkers
 
@@ -76,35 +76,53 @@ def main():
     traci.start([str(binary), '-n', str(ROOT / 'carla-source/Co-Simulation/Sumo/examples/net/Town04.net.xml'),
                  '--no-step-log', 'true', '--step-length', '.05'])
     child = None
-    orphan = None
+    omnet = None
+    atomic_json(folder / 'ready.json', dict(owner=identity()))
     try:
         with tempfile.TemporaryDirectory(prefix='vanet-scene-test-') as tmp:
             tmp = Path(tmp)
             config_path = tmp / 'two-rsus.json'
             config_path.write_text(json.dumps(cfg))
-            for mode in ('normal', 'terminate', 'crash'):
-                argv_file, exit_file = tmp / (mode + '.json'), tmp / (mode + '.exit')
-                code = ('import json,sys,time;from pathlib import Path;'
-                        'Path(sys.argv[1]).write_text(json.dumps(sys.argv[3:]));'
-                        '\nwhile not Path(sys.argv[2]).exists(): time.sleep(.05)')
+            def advance():
+                service.process()
+                scene.poll()
+                traci.simulationStep()
+                world.frame += 1
+                time.sleep(.01)
+
+            argv_file, exit_file = tmp / 'omnet-argv.json', tmp / 'omnet-exit'
+            code = ('import json,sys,time;from pathlib import Path;'
+                    'Path(sys.argv[1]).write_text(json.dumps(sys.argv[3:]));'
+                    '\nwhile not Path(sys.argv[2]).exists(): time.sleep(.05)')
+            omnet_log = (tmp / 'omnet.log').open('w')
+            omnet = subprocess.Popen([sys.executable, str(VANET_DIR / 'runtime/omnet_session.py'),
+                                      '--carla-host', host, '--vanet-config', str(config_path),
+                                      sys.executable, '-c', code, str(argv_file), str(exit_file)],
+                                     stdout=omnet_log, stderr=omnet_log)
+            deadline = time.monotonic() + 10
+            while not argv_file.exists():
+                advance()
+                assert omnet.poll() is None, (tmp / 'omnet.log').read_text()
+                assert time.monotonic() < deadline
+            passed = json.loads(argv_file.read_text())
+            assert '--*.manager.rsuDefinitions=' + json.dumps('') in passed
+            assert not scene.markers and not scene.lease.exists()
+            print('PASS: opening OMNeT++ alone creates no RSU.')
+
+            for mode in ('interrupt', 'terminate', 'crash'):
                 log = (tmp / (mode + '.log')).open('w')
-                child = subprocess.Popen([sys.executable, str(VANET_DIR / 'runtime/omnet_session.py'),
-                                          '--carla-host', host, '--vanet-config', str(config_path), sys.executable, '-c', code,
-                                          str(argv_file), str(exit_file)], stdout=log, stderr=log)
-                def advance():
-                    service.process()
-                    scene.poll()
-                    traci.simulationStep()
-                    world.frame += 1
-                    time.sleep(.01)
+                command = [sys.executable, str(VANET_DIR / 'runtime/rsu_session.py'),
+                           '--carla-host', host, '--vanet-config', str(config_path)]
+                child = subprocess.Popen(command, stdout=log, stderr=log)
                 deadline = time.monotonic() + 10
-                while scene.session is None or not argv_file.exists():
+                while scene.session is None:
                     advance()
                     assert child.poll() is None, (tmp / (mode + '.log')).read_text()
-                    assert time.monotonic() < deadline, 'Marker creation timeout'
+                    assert time.monotonic() < deadline, 'RSU creation timeout'
                 for p in cfg['rsus']:
                     assert traci.poi.getPosition(p['id']) == sumo_rsu(cfg, p)[:2]
                     assert traci.poi.getType(p['id']) == 'RSU'
+                assert scene.network_nodes() == [(p['id'], *sumo_rsu(cfg, p)) for p in cfg['rsus']]
                 assert len(scene.markers) == 2
                 assert set(scene.bodies) == {p['id'] for p in cfg['rsus']}
                 for p in cfg['rsus']:
@@ -113,36 +131,43 @@ def main():
                     bottom, top = actors[0], actors[-1]
                     assert abs(bottom.transform.location.z - bottom.bounding_box.extent.z - p['base_z']) < 1e-5
                     assert abs(top.transform.location.z + top.bounding_box.extent.z - p['z']) < 1e-5
-                passed = json.loads(argv_file.read_text())
-                assert '--*.manager.rsuDefinitions=' + json.dumps(rsu_definitions(cfg)) in passed
                 assert world.draws and all(d['life_time'] == .1 for d in world.draws)
-                count = len(world.draws)
-                scene.poll()  # One new frame since last advance; subsequent same-frame calls don't redraw.
+                scene.poll()
                 count = len(world.draws)
                 scene.poll()
                 assert len(world.draws) == count
-                if mode == 'normal':
+                duplicate = subprocess.run(command, capture_output=True, text=True, timeout=3)
+                assert duplicate.returncode != 0 and 'RSU 命令已在运行' in duplicate.stderr
+                if mode == 'terminate':
+                    # OMNeT++ exits while the independent RSU command stays alive.
                     exit_file.touch()
+                    omnet.wait(timeout=3)
+                    advance()
+                    assert len(scene.markers) == 2 and child.poll() is None
+                    print('PASS: closing OMNeT++ does not remove independently owned RSUs.')
+                if mode == 'interrupt':
+                    child.send_signal(signal.SIGINT)
                 elif mode == 'terminate':
                     child.send_signal(signal.SIGTERM)
                 else:
-                    orphan = json.loads(scene.lease.read_text())['child']['pid']
                     child.kill()
-                child.wait(timeout=5)
+                deadline = time.monotonic() + 8
+                while child.poll() is None:
+                    advance()
+                    assert time.monotonic() < deadline, 'RSU command cleanup timeout'
                 scene.poll()
                 assert not set(p['id'] for p in cfg['rsus']).intersection(traci.poi.getIDList()), f'{mode}: stale SUMO POI'
-                assert scene.session is None
+                assert scene.session is None and not scene.network_nodes()
                 assert not scene.bodies and not any(a.is_alive for a in world.actors)
-                if orphan:
-                    os.kill(orphan, signal.SIGTERM)
-                    orphan = None
+                if mode == 'interrupt':
+                    assert omnet.poll() is None, 'RSU stop unexpectedly closes OMNeT++'
                 log.close()
-                print(f'PASS: {mode} exit removes both RSUs; JSON coordinates agree across launcher / SUMO / CARLA drawing.')
+                print(f'PASS: {mode} exit removes both RSUs independently of OMNeT++.')
+            omnet_log.close()
             # Fail halfway through building a mast: previously spawned pieces
             # must be removed, and the launcher must receive a failure reply.
-            from shared_sumo import identity
             lease = dict(session='partial-failure', owner=identity(os.getpid()),
-                         child=identity(os.getpid()), config=cfg)
+                         config=cfg)
             scene.lease.write_text(json.dumps(lease))
             world.fail_after = len(world.actors) + 2
             scene.poll()
@@ -155,8 +180,9 @@ def main():
         if child and child.poll() is None:
             child.kill()
             child.wait()
-        if orphan:
-            os.kill(orphan, signal.SIGTERM)
+        if omnet and omnet.poll() is None:
+            omnet.terminate()
+            omnet.wait()
         scene.clear()
         traci.close()
         for path in folder.iterdir():

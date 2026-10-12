@@ -178,7 +178,11 @@ def main(args):
                                                 args.sync_vehicle_color, args.sync_vehicle_lights)
     scene = SceneMarkers(world, args.host, args.port)
     if synchronization.vanet:
-        synchronization.vanet.idle_callback = scene.poll
+        def poll_idle():
+            service.process()
+            scene.poll()
+        synchronization.vanet.idle_callback = poll_idle
+        synchronization.vanet.rsu_provider = scene.network_nodes
 
     try:
         # ----------
