@@ -6,6 +6,8 @@ import logging
 from pathlib import Path
 import subprocess
 import threading
+import tempfile
+import json
 import time
 from types import SimpleNamespace
 from bridge import VanetBridge
@@ -38,7 +40,9 @@ if __name__ == '__main__':
             time.sleep(.001)
     worker=threading.Thread(target=serve,daemon=True)
     worker.start()
-    command=['bash',str(ROOT/'run_omnet.sh'),'--no-scene-markers','-u','Cmdenv','-c','Live','--sim-time-limit=2s',f'--*.manager.port={port}']
+    output=tempfile.TemporaryDirectory(prefix='vanet-transport-')
+    command=['bash',str(ROOT/'run_omnet.sh'),'--no-scene-markers','-u','Cmdenv','-c','Live','--sim-time-limit=2s',f'--*.manager.port={port}',
+             '--result-dir='+output.name, '--**.appl.csvDir='+json.dumps(output.name)]
     try:
         started=time.time()
         completed=subprocess.run(command,capture_output=True,text=True,timeout=20)
@@ -46,11 +50,11 @@ if __name__ == '__main__':
             raise RuntimeError(completed.stdout+completed.stderr)
         assert world.frame>=35, world.frame
         rows=[]
-        files=[f for f in (ROOT/'omnet/results').glob('*.csv') if f.stat().st_mtime>=started]
+        files=[f for f in Path(output.name).glob('*.csv') if f.stat().st_mtime>=started]
         assert len([f for f in files if f.name.startswith('lincoln1-')])==2, 'lincoln1 OBU was not recreated'
         for file in files:
             rows.extend(csv.DictReader(file.open()))
-        assert any(r['event']=='RX' and r['receiver']=='rsu' for r in rows)
+        assert any(r['event']=='RX' and r['receiver']=='rsu0' for r in rows)
         assert any(r['event']=='RX' and r['path']=='relay' and r['receiver'].startswith('lincoln') for r in rows)
         assert any(r['event']=='RX' and r['path']=='direct' and r['sender'].startswith('lincoln') and r['receiver'].startswith('lincoln') for r in rows)
         print(f'PASS: TCP frame ACK, {world.frame} snapshots, V2V, V2I, RSU relay and actor removal/recreation.')
@@ -58,3 +62,4 @@ if __name__ == '__main__':
         stop.set()
         bridge.close()
         worker.join(timeout=2)
+        output.cleanup()

@@ -56,6 +56,7 @@ class ConnectivityApp : public DemoBaseApplLayer {
     int seq = 0;
     cOutVector delay;
     std::ofstream csv;
+    std::set<BaseFrame1609_4*> pendingRelays;
     bool isRsu() const { return par("isRsu").boolValue(); }
     Coord position() { return check_and_cast<ExternalMobility*>(getParentModule()->getSubmodule("veinsmobility"))->getPositionAt(simTime()); }
     void sendProbe(BaseFrame1609_4* original = nullptr) {
@@ -80,7 +81,7 @@ protected:
         DemoBaseApplLayer::initialize(stage);
         if (stage == 0) {
             delay.setName("endToEndDelay");
-            std::string name = std::string("results/") + getParentModule()->getName() + "-" + std::to_string(getParentModule()->getId()) + ".csv";
+            std::string name = std::string(par("csvDir").stringValue()) + "/" + getParentModule()->getName() + "-" + std::to_string(getParentModule()->getId()) + ".csv";
             csv.open(name);
             if (!csv) throw cRuntimeError("Cannot open packet CSV: %s", name.c_str());
             csv << "time,event,sender,receiver,origin,sequence,delay,path" << std::endl;
@@ -90,6 +91,13 @@ protected:
         }
     }
     void handleSelfMsg(cMessage* msg) override {
+        if (auto* original = dynamic_cast<BaseFrame1609_4*>(msg)) {
+            pendingRelays.erase(original);
+            ++relayed;
+            sendProbe(original);
+            delete original;
+            return;
+        }
         if (msg != timer) { DemoBaseApplLayer::handleSelfMsg(msg); return; }
         sendProbe();
         scheduleAt(simTime()+par("interval").doubleValue(), timer);
@@ -106,14 +114,23 @@ protected:
         auto* line = annotations->drawLine(from, position(), relay ? "orange" : "green");
         annotations->scheduleErase(.25, line);
         getParentModule()->bubble(relay ? "RX via RSU" : "RX direct");
-        if (isRsu() && !relay && !p->par("rsu").boolValue()) { ++relayed; sendProbe(p); }
+        if (isRsu() && !relay && !p->par("rsu").boolValue()) {
+            // Separate RSUs can receive the same broadcast almost simultaneously.
+            // Jitter avoids deterministic collisions between their immediate replies.
+            auto* original = p->dup();
+            pendingRelays.insert(original);
+            scheduleAt(simTime()+uniform(0,par("relayJitter").doubleValue()),original);
+        }
     }
     void finish() override {
         DemoBaseApplLayer::finish();
         recordScalar("probeTx",tx); recordScalar("probeRx",rx); recordScalar("relayTx",relayed);
     }
 public:
-    ~ConnectivityApp() override { if (timer) cancelAndDelete(timer); }
+    ~ConnectivityApp() override {
+        if (timer) cancelAndDelete(timer);
+        for (auto* original : pendingRelays) cancelAndDelete(original);
+    }
 };
 Define_Module(ConnectivityApp);
 
@@ -166,7 +183,27 @@ class CarlaManager : public cSimpleModule {
         }
     }
 protected:
-    void initialize() override {
+    int numInitStages() const override { return 2; }
+    void initialize(int stage) override {
+        if (stage == 1) {
+            std::istringstream definitions(par("rsuDefinitions").stringValue());
+            std::string row;
+            while (std::getline(definitions,row)) {
+                if (row.empty()) continue;
+                std::istringstream input(row);
+                std::string name; double x,y,z;
+                if (!(input >> name >> x >> y >> z)) throw cRuntimeError("Invalid RSU definition");
+                if (getParentModule()->getSubmodule(name.c_str())) throw cRuntimeError("Duplicate RSU: %s",name.c_str());
+                auto* rsu=cModuleType::get("Obu")->create(name.c_str(),getParentModule());
+                rsu->finalizeParameters(); rsu->buildInside();
+                rsu->getDisplayString().setTagArg("i",0,"device/antennatower");
+                rsu->getDisplayString().setTagArg("t",0,name.c_str());
+                check_and_cast<ExternalMobility*>(rsu->getSubmodule("veinsmobility"))->setStartPosition(Coord(x,y,z));
+                rsu->scheduleStart(simTime()); rsu->callInitialize();
+                EV_INFO << "RSU CREATED " << name << " SUMO=" << x << "," << y << "," << z << endl;
+            }
+            return;
+        }
         const auto& coordinates = mapCoordinates();
         auto* roads = new cGroupFigure("Town04 roads");
         getParentModule()->getCanvas()->addFigure(roads,0);

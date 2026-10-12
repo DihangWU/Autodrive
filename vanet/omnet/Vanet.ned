@@ -11,6 +11,8 @@ simple ConnectivityApp extends DemoBaseApplLayer {
         @class(ConnectivityApp);
         bool isRsu = default(false);
         double interval @unit(s) = default(1s);
+        string csvDir = default("results");
+        double relayJitter @unit(s) = default(20ms);
 }
 module Obu extends Car {
     parameters:
@@ -23,6 +25,7 @@ simple CarlaManager {
         @class(CarlaManager);
         int port = default(9998);
         bool smoke = default(false);
+        string rsuDefinitions = default("");
 }
 network Town04Vanet {
     parameters:
@@ -41,6 +44,5 @@ network Town04Vanet {
         connectionManager: ConnectionManager { parameters: @display("p=120,40"); }
         annotations: AnnotationManager { parameters: @display("p=200,40"); }
         manager: CarlaManager { parameters: @display("p=280,40"); }
-        rsu: Obu { parameters: @display("i=device/antennatower;t=RSU 924"); }
     connections allowunconnected:
 }

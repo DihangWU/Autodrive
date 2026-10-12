@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'lincoln'))
 from shared_sumo import atomic_json, control_folder, identity, request
-from vanet.config import load_config, sumo_rsu
+from vanet.config import CONFIG, load_config, rsu_definitions
 
 
 def main():
@@ -22,12 +22,12 @@ def main():
     parser.add_argument('--carla-host', default='127.0.0.1')
     parser.add_argument('--carla-port', type=int, default=2000)
     parser.add_argument('--no-scene-markers', action='store_true')
+    parser.add_argument('--vanet-config', default=str(CONFIG))
     args, command = parser.parse_known_args()
-    cfg = load_config()
-    x, y, z = sumo_rsu(cfg)
-    if any(arg.startswith('--*.rsu.veinsmobility.') for arg in command):
+    cfg = load_config(args.vanet_config)
+    if any(arg.startswith(('--*.rsu', '--*.manager.rsuDefinitions=')) for arg in command):
         raise SystemExit('RSU coordinates must be changed in vanet/town04.json.')
-    command += [f'--*.rsu.veinsmobility.{key}={value}' for key, value in zip('xyz', (x, y, z))]
+    command.append('--*.manager.rsuDefinitions=' + json.dumps(rsu_definitions(cfg)))
     if not any(arg.startswith('--*.manager.port=') for arg in command):
         command.append(f'--*.manager.port={cfg["network"]["port"]}')
     configs = [command[i + 1] for i, arg in enumerate(command[:-1]) if arg in ('-c', '--config-name')]
@@ -45,9 +45,9 @@ def main():
             except BlockingIOError:
                 raise RuntimeError('Another OMNeT++ scene session is already running.')
             status = request(args.carla_host, args.carla_port, {'action': 'status'}, timeout=8)
-            if status.get('vanet_scene', {}).get('protocol') != 1:
+            if status.get('vanet_scene', {}).get('protocol') != 2:
                 raise RuntimeError('共享 SUMO 桥仍是旧版本。请正常关闭车辆后，在工程根目录执行 bash run_lincoln.sh --stop-sumo，再重新启动车辆。')
-        print(f'RSU from town04.json: CARLA={cfg["rsu"]}, SUMO=({x}, {y}, {z})', flush=True)
+        print(f'RSUs from {args.vanet_config}: {rsu_definitions(cfg)}', flush=True)
         child = subprocess.Popen(command, close_fds=True, start_new_session=True)
         def forward(signum, frame):
             if child.poll() is None:
