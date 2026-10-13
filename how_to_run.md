@@ -11,3 +11,15 @@
     ```shell
     ./cobridge/start_bridge.sh
     ```
+4. 在 Carla 中 添加 Lincoln 轿车
+    * 随机位置添加
+        ```shell
+        bash carla/Lincoln/run_lincoln.sh
+        ```
+    * 指定位置添加，指定位置使用 `--pose X Y Z YAW`。
+        ```shell
+        ./carla/Lincoln/run_lincoln.sh --pose 199.390472 -204.544281 0.519592 91.314423
+        ```
+        ```shell
+        ./carla/Lincoln/run_lincoln.sh --pose 235.597504 -172.815598 0.695892 180.326126
+        ```
