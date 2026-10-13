@@ -1,6 +1,6 @@
 """Build a local SUMO GUI with CARLA coordinates and live simulation speed.
 
-Only four GUI source copies are compiled, reusing the installed SUMO libraries.
+Only five GUI source copies are compiled, reusing the installed SUMO libraries.
 The installed SUMO, map projection, simulation and TraCI code are untouched.
 """
 import fcntl
@@ -119,6 +119,12 @@ std::mt19937 GUIApplicationWindow::myGamingRNG;'''),
              '''updateTimeLCD(myRunThread->getNet().getCurrentTimeStep());
     if (vanetSpeedLabel != nullptr) vanetSpeedLabel->step(myRunThread->getNet().getCurrentTimeStep());
     const int running'''),
+        ]),
+        ('gui', 'gui', 'GUIRunThread.cpp', [
+            ('''// ensure redraw event is successful at least once per second (#9028)
+            sleep(100);''',
+             '''// Give the GUI thread time to redraw without stalling TraCI for 100 ms.
+            sleep(10);'''),
         ]),
         ('utils/gui/globjects', 'utils_gui_globjects', 'GUIGlObject.cpp', [
             ('GUIDesigns::buildFXMenuCommand(ret, TL("Copy cursor position to clipboard"), nullptr, ret, MID_COPY_CURSOR_POSITION);',

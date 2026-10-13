@@ -95,6 +95,8 @@ SUMO 状态栏在原 x/y 位置同时显示 `SUMO x/y | CARLA x/y`。右键菜�
 
 实现放在 `vanet/sumo_gui/`，生成本工程专用的 `bin/sumo-gui`，不修改系统 SUMO。首次启动带 GUI 的共享桥时自动构建并启用，也可预先执行 `python3 vanet/sumo_gui/build.py`；复用本机 SUMO 1.22.0 源码和 CMake 编译库，可用 `SUMO_HOME` / `SUMO_BUILD_DIR` 指定目录。已运行的旧窗口需先正常退出车辆及 OMNeT++，执行 `bash run_lincoln.sh --stop-sumo`，再重新启动车辆后生效。
 
+本工程的 GUI 将 SUMO 为界面重绘预留的周期性 `100 ms` 休眠缩短到 `10 ms`，保留重绘机会，同时减少 TraCI `simulationStep()` 的周期性等待；系统安装的 SUMO 不受影响。
+
 候选为工程示例 Town04 路网的十字路口 **924**。四条入口为 -17.0.00、10.0.00、18.0.00、-9.0.00，入口长度约 36–69 米，适合小范围相遇测试。车位沿两个垂直入口向上游取 25 米。
 
 | 对象 | CARLA x / y（米） | yaw（度） |
