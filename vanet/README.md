@@ -18,6 +18,7 @@ vanet/
 │   ├── launch.py             # 车辆启动与参数处理
 │   ├── spawn.py              # 出生点选择与预留
 │   ├── bridge.py             # 全部车辆的 TCP 快照、通信反馈及逐帧 ACK
+│   ├── performance.py        # 可选的分段耗时记录
 │   ├── omnet_session.py      # OMNeT++ 会话生命周期
 │   └── rsu_session.py        # 独立 RSU 会话生命周期
 ├── scene/                    # RSU 场景与通信显示
@@ -244,6 +245,29 @@ NPC 支持与其他 NPC、Lincoln 及 RSU 通信，并使用相同的 OMNeT++ �
 
 默认关闭完整 `.elog` 事件记录，保留所有节点的通信 CSV、`.vec/.sca` 指标以及 CARLA 连线。CSV 使用缓冲写入，在每次 probe 定时器触发（默认约 1 仿真秒）和节点正常结束时刷新；强制杀进程可能丢失尚未刷出的尾部记录。
 
+### 清理仿真日志
+
+先正常关闭 OMNeT++，再从工程根目录查看结果目录大小和事件日志：
+
+```bash
+du -sh vanet/omnet/results
+find vanet/omnet/results -maxdepth 1 -type f -name '*.elog' -ls
+```
+
+确认不再需要事件回放后，只删除可能长到数 GB 的 `.elog`：
+
+```bash
+find vanet/omnet/results -maxdepth 1 -type f -name '*.elog' -delete
+```
+
+如果还要清理逐车通信记录，可另执行下面一条；它会删除所有 `.csv` 中的逐包收发时间、序号和延迟，之后无法再用这些文件计算投递率等指标。`.vec/.sca` 汇总指标不受影响：
+
+```bash
+find vanet/omnet/results -maxdepth 1 -type f -name '*.csv' -delete
+```
+
+默认 Live 配置已关闭 `.elog`；只有启用 `PacketDebug` 等事件记录配置才会再次生成。当前结果目录的空间占用也可能主要来自大量 CSV，先用 `du` 查看再决定删哪类文件。
+
 当车辆与 RSU 合计超过 20 个节点时，自动停止 OMNeT++ 临时逐包连线和 TX/RX 气泡；地图、持续的范围虚线、实际无线通信和所有节点的 CARLA 半透明通信线仍保留。回到 20 个及以下时自动恢复提示。可只调此阈值：
 
 ```bash
@@ -254,7 +278,7 @@ bash vanet/run_omnet.sh --*.manager.packetAnimationLimit=50
 
 无线范围仍为 JSON 中的半径。超出范围、原本功率为零的帧，现在在进入接收解码和信道跟踪之前丢弃，避免无效事件；范围内继续使用真实 Veins MAC/PHY、碰撞、HELLO/ACK 和 RSU 转发。覆盖关系每帧计算一次供显示与反馈复用；CARLA 覆盖层在数据、视角和窗口位置都未变化时不重复重绘。
 
-本次性能优化只需重新打开 OMNeT++ 即生效，覆盖层随重连重新启动，车辆、NPC、RSU 与共享桥无需重启。已有运行中的大日志不会自动删除。
+无线模型和 Qtenv 等待刷新调整在重新打开 OMNeT++ 后生效；下面的交通灯缓存及分段计时位于共享桥，需要在正常退出车辆、NPC、RSU 和 OMNeT++ 后按“启动”第 2 步重启共享桥。已有运行中的大日志不会自动删除。
 
 在本机的独立密集测试中，200 个 NPC OBU + 1 个 RSU 推进 3 仿真秒：修改前约 **73.6 秒**，只关闭事件日志约 **23.0 秒**，全部优化后约 **4.2 秒**。修改前后全部 **64,805 条**握手/业务 CSV 记录（含收发时间、序号、延迟）和逐帧连线反馈一致，其中业务 RX 为 39,383 条。测试使用同一随机种子、静止合成坐标和 Cmdenv，不包含 CARLA 渲染或真实车辆推进；这不是整套联仿的帧率保证。
 
@@ -265,6 +289,16 @@ python3 vanet/tests/benchmark_radio.py
 ```
 
 该测试使用隔离端口，不连接正在运行的 CARLA/SUMO。两条路径均关闭事件日志，因此其加速比只比较范围过滤，不包含关闭日志的收益。整套联仿仍按 0.05 秒步长等待网络 ACK；OMNeT++ 或 CARLA 任一主线程耗时增加都会降低现实推进速度，多核 CPU 的总体占用率低并不代表没有瓶颈。
+
+需要定位本机瓶颈时，在**启动新的共享桥之前**设置 `VANET_PROFILE_PATH`，例如 `VANET_PROFILE_PATH=/tmp/vanet-phases.jsonl bash run_lincoln.sh`。桥每 100 帧追加一行 JSON，分别记录 SUMO 推进、SUMO→CARLA 车辆同步、CARLA `world.tick()`、CARLA→SUMO 同步、等待 OMNeT++ ACK 的平均值和 P95（毫秒），以及车辆数量。已在运行的桥不会因后来设置环境变量而开始记录；停止全部客户端后按现有步骤重启桥才生效。记录文件在 `/tmp`，不进入工程仓库。
+
+本机 Town04、0.05 秒步长的分段实测：约 49 辆 NPC、没有 Lincoln 或 OMNeT++ 时，SUMO→CARLA 车辆更新约 1 毫秒/步，CARLA `world.tick()` 约 10 毫秒/步。再加入一辆保留原有 **31 个传感器**的 Lincoln，CARLA `world.tick()` 约 33 毫秒/步，已接近单步预算。CARLA 控制的交通灯原先每帧重复通过 TraCI 写同一灯态，使 CARLA→SUMO 阶段在空场景也约 5–6 毫秒；现在缓存每个 SUMO 灯控连接上次发送的状态，仅首次及灯态变化时写入，空场景约 0.25 毫秒/步。没有改动车辆传感器配置。
+
+同一批约 48–49 辆 NPC 接入网络后，Qtenv Fast 的网络等待约 15–19 毫秒/步，Cmdenv 稳定后约 1.5–2.3 毫秒/步；Qtenv 界面绘制是这部分差值的主要来源。Qtenv 等待桥快照时默认最多每 100 毫秒处理一次 GUI idle，仍可操作 Stop/Run；可用 `--*.manager.guiIdleInterval=0s` 恢复每次轮询都刷新。做无界面性能对照可运行 `OMNET_UI=Cmdenv bash vanet/run_omnet.sh --cmdenv-express-mode=true`，普通 `bash vanet/run_omnet.sh` 仍默认打开 Qtenv。含 49 辆 NPC、上述 Lincoln 和 Cmdenv 的总执行耗时约 45 毫秒/步，逼近 50 毫秒目标。
+
+另一次真实 200 辆 NPC 请求中，路网同时容纳约 186–193 辆；未接入 OMNeT++ 时，约 193 辆的每步实际执行约 48 毫秒，其中 CARLA `world.tick()` 约 31 毫秒、SUMO 推进约 13 毫秒、SUMO→CARLA 同步约 3 毫秒。接入 Cmdenv 后，约 186 辆稳定运行时网络等待约 17 毫秒，合计约 65 毫秒/步，即不计其它启动耗时也低于 20 步/秒。这里的 `sumo_step` 包含 SUMO GUI 周期性约 100 毫秒的阻塞；车辆数是实际进入路网并映射到 CARLA 的数量，不是请求的 200 辆。结果随机器、车流位置和界面状态变化；保留传感器的 Lincoln 未加入这次 200 NPC 测试。
+
+新 NPC 初次映射时若位置短暂落在 Town04 的 OMNeT++ 地图边界外，该帧暂不创建 OBU；回到有效区域后自动接入。Veins 初始化时也使用已转换的 Qtenv 地图坐标做边界检查，允许道路附近合法的负 SUMO 坐标。两处处理避免单辆车的初始位置导致整个网络停止，不改动车辆或 SUMO 路径。
 
 ## 看什么
 
@@ -310,7 +344,9 @@ python3 vanet/tests/benchmark_radio.py
 
 通信范围回归：`python3 vanet/tests/test_radio_range.py` 使用真实 Veins MAC/PHY 和隔离的 TCP 合成快照，验证无 RSU 的 V2V、单车与 RSU、40/220 米边界、越界阻断、RSU 转发、直连与转发并存、三车独立接入及移动时连线断开/恢复。不连接真实 CARLA，也不接管共享桥。
 
-NPC 与统一半径回归：`python3 vanet/tests/test_npc_radio.py` 验证 NPC/Lincoln 混合收发、JSON 默认值与节点覆盖对 PHY/握手/连线的一致作用，以及 200 个 NPC OBU 中删除并重新加入 50 个节点后的通信与动画反馈。200 节点测试使用真实 Veins 和合成快照，不在当前 CARLA 场景中生成 200 辆车。
+临时越界和负 SUMO 坐标接入也包含在通信范围回归中：OBU 跳过错误初始位置，进入地图后创建并恢复双向收包；合法的负 SUMO x 可创建车辆和 RSU。`~/carla-venv/bin/python vanet/tests/test_traffic_light_sync.py` 验证交通灯首次设置、连续不变时省略 TraCI 重发以及状态变化时继续同步。
+
+NPC 与统一半径回归：`python3 vanet/tests/test_npc_radio.py` 验证 NPC/Lincoln 混合收发、JSON 默认值与节点覆盖对 PHY/握手/连线的一致作用，以及 200 个 NPC OBU 中删除并重新加入 50 个节点后的通信与动画反馈。该回归使用真实 Veins 和合成快照；上面的 200 辆请求实测则运行在真实 CARLA/SUMO 场景。
 
 车辆映射回归：`~/carla-venv/bin/python vanet/tests/test_vehicle_sync.py` 使用实际同步适配器、模拟世界与真实 TCP，验证没有 `VANET_PORT` 时仍创建接口、CARLA/SUMO 两个方向的车辆映射、NPC 生成/销毁、未完成映射车辆的排除及动画反馈；只有现有同步时钟推进仿真。
 

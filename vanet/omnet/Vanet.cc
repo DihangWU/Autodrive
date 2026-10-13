@@ -9,6 +9,7 @@
 #include <cmath>
 #include <algorithm>
 #include <deque>
+#include <chrono>
 #include <cerrno>
 #include <poll.h>
 #include <sys/socket.h>
@@ -42,12 +43,6 @@ static const MapCoordinates& mapCoordinates() {
 }
 
 class ExternalMobility : public BaseMobility {
-protected:
-    void initialize(int stage) override {
-        BaseMobility::initialize(stage);
-        if (stage == 0)
-            move.setStart(mapCoordinates().convert(move.getStartPos()), simTime());
-    }
 public:
     void setPosition(double x, double y, double z) {
         move.setStart(mapCoordinates().convert(Coord(x,y,z)), simTime());
@@ -234,6 +229,7 @@ class CarlaManager : public cSimpleModule {
     std::string receiveBuffer;
     std::deque<std::string> frameLines;
     size_t expectedLines = 0;
+    std::chrono::steady_clock::time_point nextGuiIdle;
     // Positions are held fixed between bridge snapshots. Cache node metadata
     // and in-range pairs once per frame; feedback uses those same pairs after
     // the wireless events finish, without another quadratic module lookup pass.
@@ -344,7 +340,15 @@ class CarlaManager : public cSimpleModule {
             if (errno==EINTR) continue;
             if (errno!=EAGAIN && errno!=EWOULDBLOCK) throw cRuntimeError("VANET socket receive failed");
             pollfd socket{fd,POLLIN,0};
-            if (::poll(&socket,1,20)<0 && errno!=EINTR) throw cRuntimeError("VANET socket poll failed");
+            int ready=::poll(&socket,1,20);
+            if (ready<0 && errno!=EINTR) throw cRuntimeError("VANET socket poll failed");
+            if (ready>0) continue; // A complete frame may now be available; avoid a needless GUI redraw.
+            if (getEnvir()->isGUI()) {
+                auto now=std::chrono::steady_clock::now();
+                if (now<nextGuiIdle) continue;
+                nextGuiIdle=now+std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                    std::chrono::duration<double>(par("guiIdleInterval").doubleValue()));
+            }
             if (getEnvir()->idle()) return false;
         }
     }
@@ -354,17 +358,35 @@ class CarlaManager : public cSimpleModule {
         frameLines.pop_front();
         return line;
     }
-    void update(long id,const std::string& name,double x,double y,double z) {
+    bool update(long id,const std::string& name,double x,double y,double z) {
+        // SUMO may create a CARLA actor before its first synchronized pose.
+        // Such a temporary pose can lie outside Veins' playground. Omit its
+        // OBU until it enters the mapped road area; an existing OBU is removed
+        // by the usual absent-node pass below.
+        const Coord point=mapCoordinates().convert(Coord(x,y,z));
+        const auto* network=getParentModule();
+        if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z) ||
+            point.x<0 || point.y<0 || point.z<0 ||
+            point.x>=network->par("playgroundSizeX").doubleValue() ||
+            point.y>=network->par("playgroundSizeY").doubleValue() ||
+            point.z>=network->par("playgroundSizeZ").doubleValue()) {
+            EV_WARN << "OBU outside Town04 playground: " << name << " CARLA actor=" << id
+                    << " SUMO=" << x << "," << y << "," << z << endl;
+            return false;
+        }
         cModule* m;
         if(!nodes.count(id)) {
             m=cModuleType::get("Obu")->create(name.c_str(),getParentModule());
             m->finalizeParameters(); m->buildInside();
             auto* mobility=check_and_cast<ExternalMobility*>(m->getSubmodule("veinsmobility"));
-            mobility->setStartPosition(Coord(x,y,z));
+            // BaseMobility validates its start position during initialize(0).
+            // It must already be in Qtenv coordinates at that point.
+            mobility->setStartPosition(point);
             m->scheduleStart(simTime()); m->callInitialize(); nodes[id]=m;
             EV_INFO << "OBU CREATED actor=" << id << endl;
         } else m=nodes[id];
         check_and_cast<ExternalMobility*>(m->getSubmodule("veinsmobility"))->setPosition(x,y,z);
+        return true;
     }
     void updateRsu(const std::string& name,double x,double y,double z) {
         cModule* rsu;
@@ -376,7 +398,8 @@ class CarlaManager : public cSimpleModule {
             // module is built; non-mutable parameters cannot be set later.
             rsu->getDisplayString().setTagArg("i",0,"device/antennatower");
             rsu->getDisplayString().setTagArg("t",0,name.c_str());
-            check_and_cast<ExternalMobility*>(rsu->getSubmodule("veinsmobility"))->setStartPosition(Coord(x,y,z));
+            check_and_cast<ExternalMobility*>(rsu->getSubmodule("veinsmobility"))->setStartPosition(
+                mapCoordinates().convert(Coord(x,y,z)));
             rsu->scheduleStart(simTime()); rsu->callInitialize();
             rsus[name] = rsu;
             EV_INFO << "RSU CREATED " << name << " SUMO=" << x << "," << y << "," << z << endl;
@@ -392,8 +415,8 @@ class CarlaManager : public cSimpleModule {
         std::set<long> present;
         if(par("smoke").boolValue()) {
             frame++; step=.05;
-            update(101,"lincoln0",700+simTime().dbl(),625,2); present.insert(101);
-            if(simTime()<5 || simTime()>=6) { update(102,"lincoln1",725,600+simTime().dbl(),2); present.insert(102); }
+            if (update(101,"lincoln0",700+simTime().dbl(),625,2)) present.insert(101);
+            if(simTime()<5 || simTime()>=6) { if (update(102,"lincoln1",725,600+simTime().dbl(),2)) present.insert(102); }
         } else {
             std::istringstream header(readLine()); std::string tag; int count,rsuCount=0;
             if(!(header>>tag>>frame>>step>>count) || (tag!="FRAME" && tag!="FRAME2") || step<=0 || count<0 || count>10000) throw cRuntimeError("Invalid VANET frame header");
@@ -401,7 +424,7 @@ class CarlaManager : public cSimpleModule {
             for(int i=0;i<count;++i) {
                 long id;std::string name;double x,y,z;std::istringstream row(readLine());
                 if(!(row>>id>>name>>x>>y>>z)) throw cRuntimeError("Invalid VANET vehicle row");
-                update(id,name,x,y,z); present.insert(id);
+                if (update(id,name,x,y,z)) present.insert(id);
             }
             if (tag=="FRAME2") {
                 std::set<std::string> presentRsus;
@@ -446,6 +469,8 @@ protected:
             double radius = getParentModule()->par(name).doubleValue();
             if (!std::isfinite(radius) || radius <= 0) throw cRuntimeError("%s must be positive and finite",name);
         }
+        if (par("guiIdleInterval").doubleValue()<0)
+            throw cRuntimeError("guiIdleInterval must be non-negative");
         auto* roads = new cGroupFigure("Town04 roads");
         getParentModule()->getCanvas()->addFigure(roads,0);
         std::ifstream roadfile("roads.txt");

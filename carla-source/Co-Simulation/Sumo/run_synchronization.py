@@ -59,8 +59,11 @@ class SimulationSynchronization(object):
         from pathlib import Path
         sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
         from vanet.runtime.bridge import VanetBridge
+        from vanet.runtime.performance import PhaseProfile
         from vanet.common.config import load_config
         self.vanet = VanetBridge(os.environ.get('VANET_PORT') or load_config()['network']['port'])
+        profile_path = os.environ.get('VANET_PROFILE_PATH')
+        self.profile = PhaseProfile(profile_path) if profile_path else None
         # NPC-first and Lincoln-first launches expose the same optional client
         # endpoint. Without OMNeT++ connected, the bridge never waits for ACK.
         self.carla.client.set_timeout(30.0)
@@ -94,10 +97,14 @@ class SimulationSynchronization(object):
         """
         Tick to simulation synchronization
         """
+        profile = self.profile
+        stamps = [time.perf_counter()] if profile else None
         # -----------------
         # sumo-->carla sync
         # -----------------
         self.sumo.tick()
+        if profile:
+            stamps.append(time.perf_counter())
 
         # Spawning new sumo actors in carla (i.e, not controlled by carla).
         sumo_spawned_actors = self.sumo.spawned_actors - set(self.carla2sumo_ids.values())
@@ -147,10 +154,15 @@ class SimulationSynchronization(object):
 
                 self.carla.synchronize_traffic_light(landmark_id, carla_tl_state)
 
+        if profile:
+            stamps.append(time.perf_counter())
+
         # -----------------
         # carla-->sumo sync
         # -----------------
         self.carla.tick()
+        if profile:
+            stamps.append(time.perf_counter())
 
         # Spawning new carla actors (not controlled by sumo)
         carla_spawned_actors = self.carla.spawned_actors - set(self.sumo2carla_ids.values())
@@ -209,10 +221,16 @@ class SimulationSynchronization(object):
                 # Updates all the sumo links related to this landmark.
                 self.sumo.synchronize_traffic_light(landmark_id, sumo_tl_state)
 
+        if profile:
+            stamps.append(time.perf_counter())
+
         if self.vanet:
             vehicle_names = dict(self.carla2sumo_ids)
             vehicle_names.update((carla_id, sumo_id) for sumo_id, carla_id in self.sumo2carla_ids.items())
             self.vanet.tick(self.carla.world, self.carla.step_length, vehicle_names)
+        if profile:
+            stamps.append(time.perf_counter())
+            profile.record(stamps, len(self.sumo2carla_ids), len(self.carla2sumo_ids))
 
     def close(self):
         """

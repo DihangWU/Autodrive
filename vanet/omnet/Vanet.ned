@@ -67,6 +67,9 @@ simple CarlaManager {
         // Detailed packet lines/bubbles for small scenes; persistent coverage
         // and CARLA feedback remain enabled at every scale. -1 means unlimited.
         int packetAnimationLimit = default(20);
+        // The GUI processes Stop/Run while waiting for a bridge snapshot, but
+        // each idle() call redraws the whole Qtenv scene even in Express mode.
+        double guiIdleInterval @unit(s) = default(100ms);
 }
 network Town04Vanet {
     parameters:

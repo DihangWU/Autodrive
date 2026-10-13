@@ -179,6 +179,7 @@ class SumoTLManager(object):
             self._current_phase[tlid] = traci.trafficlight.getPhase(tlid)
 
         self._off = False
+        self._last_link_state = {}
 
     @staticmethod
     def subscribe(tlid):
@@ -254,7 +255,10 @@ class SumoTLManager(object):
         Updates the state of all the signals associated with the given landmark.
         """
         for tlid, link_index in self.get_all_associated_signals(landmark_id):
-            traci.trafficlight.setLinkState(tlid, link_index, state)
+            link = (tlid, link_index)
+            if self._last_link_state.get(link) != state:
+                traci.trafficlight.setLinkState(tlid, link_index, state)
+                self._last_link_state[link] = state
         return True
 
     def switch_off(self):
@@ -263,6 +267,7 @@ class SumoTLManager(object):
         """
         for tlid, link_index in self.get_all_signals():
             traci.trafficlight.setLinkState(tlid, link_index, SumoSignalState.OFF)
+            self._last_link_state[(tlid, link_index)] = SumoSignalState.OFF
         self._off = True
 
     def tick(self):

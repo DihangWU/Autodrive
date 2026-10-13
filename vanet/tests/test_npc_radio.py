@@ -69,7 +69,9 @@ def main():
         print('PASS: invalid ranges and wildcard overrides are rejected.')
 
         # Isolated Veins scale test, without adding 200 actors to live CARLA.
-        points = [(100+100*((i//2)%10)+20*(i%2), 100+100*((i//2)//10)) for i in range(200)]
+        # Keep every synthetic OBU inside Town04's exported 0..899 x,
+        # 0..800 y bounds; the former 1000 m row was outside the map.
+        points = [(60+80*((i//2)%10)+20*(i%2), 60+70*((i//2)//10)) for i in range(200)]
         feedback = []
         rows, log, _ = run_case(tmp, '200_npcs', base,
                                 lambda f: points[:150] if 40<=f<60 else points, duration=5,

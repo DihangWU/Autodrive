@@ -155,6 +155,27 @@ def main():
                        or r['origin'] == 'lincoln2' for r in rows)
         print('PASS: independent links for three vehicles; uncovered car is disconnected')
 
+        # A just-created SUMO actor can have one bad CARLA pose before its
+        # first synchronized update. It must not abort the whole live network.
+        def temporary_outside(frame):
+            return [(700, 625), (1500 if frame < 30 else 725, 625)]
+        rows, log, _ = run_case(tmp, 'temporary_outside', no_rsu, temporary_outside, duration=4)
+        assert 'OBU outside Town04 playground: lincoln1' in log
+        assert 'OBU CREATED actor=102' in log
+        assert received(rows, 'lincoln0', 'lincoln1')
+        assert received(rows, 'lincoln1', 'lincoln0')
+        print('PASS: transient out-of-map vehicle is omitted, then joins and communicates on return')
+
+        # Town04 has roads with negative SUMO coordinates near its border.
+        # BaseMobility must validate the converted Qtenv position, not raw SUMO.
+        rows, _, _ = run_case(tmp, 'negative_sumo_x', no_rsu,
+                              lambda _: [(-10, 625), (10, 625)], duration=4,
+                              rsu_provider=lambda _: [('rsu0', -10, 625, 60)])
+        assert received(rows, 'lincoln0', 'lincoln1')
+        assert received(rows, 'lincoln1', 'lincoln0')
+        assert received(rows, 'lincoln0', 'rsu0')
+        print('PASS: negative SUMO x initializes vehicles and RSU after map conversion')
+
 
 if __name__ == '__main__':
     main()
