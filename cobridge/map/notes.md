@@ -14,3 +14,15 @@
     ```shell
     bash cobridge/start_bridge.sh --help
     ```
+
+
+
+## 补充说明：官方地图转换
+
+`cobridge/map/map_bridge.py` 调用 `cobridge/carla-source-official/Co-Simulation/Sumo/util/netconvert_carla.py`，由官方脚本加载其 `data/opendrive_netconvert.typ.xml` 车道类型配置。
+
+转换包含车道类型及通行权限、道路与车道的原始编号映射（`origId`）、车道连接关系，以及根据 CARLA OpenDRIVE 地标生成的信号灯信息；使用 `--guess-tls` 处理路口信号灯控制连接。编号映射保存在路网中，不代表 GUI 默认会显示所有编号标签。
+
+SUMO GUI 加载官方 `examples/viewsettings.xml` 显示配置。地图来自当前 CARLA，生成文件和转换日志位于 `cobridge/runtime/<地图名>/`；后台启动日志位于 `cobridge/runtime/map_bridge.log`。
+
+这一阶段仍只转换和显示地图。SUMO 信号灯数据包含转换工具生成的默认配时，暂未与运行中的 CARLA 信号灯状态同步。
