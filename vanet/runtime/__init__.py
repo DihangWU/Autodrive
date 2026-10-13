@@ -1,1 +1,0 @@
-"""VANET runtime package."""

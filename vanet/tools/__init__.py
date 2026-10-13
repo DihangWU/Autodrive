@@ -1,1 +1,0 @@
-"""VANET tools package."""
