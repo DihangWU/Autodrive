@@ -163,7 +163,7 @@ RSU 当前基座绝对高度为 0.39 米，主体顶部/通信节点绝对高度
 ## 启动
 
 1. 按工程原说明启动 CARLA Docker，加载 Town04。运行中不切换地图。
-2. 首次升级 NPC 通信功能时，先正常退出车辆、NPC、RSU 命令及 OMNeT++，再执行 `bash run_lincoln.sh --stop-sumo`。重新启动车辆或 NPC 后加载新桥；无需重启 CARLA。新桥默认提供通信接口，NPC 先启动也能直接接入 OMNeT++。
+2. 首次升级 NPC 按批次选择通信功能时，先正常退出车辆、NPC、RSU 命令及 OMNeT++，再执行 `bash run_lincoln.sh --stop-sumo`。重新启动车辆或 NPC 后加载新桥；无需重启 CARLA。新桥默认提供通信接口，带 `--vanet` 的 NPC 先启动也能接入 OMNeT++。
 3. 编译一次：
 
    bash vanet/build.sh
@@ -218,7 +218,7 @@ OMNET_ROOT、VEINS_ROOT 可覆盖安装路径。VANET 端口默认自动读取 t
 }
 ```
 
-- `vehicle_range`：全部 Lincoln、NPC 及其他车辆的默认 V2V 半径。
+- `vehicle_range`：全部 Lincoln、已联网 NPC 及其他通信车辆的默认 V2V 半径。
 - `rsu_range`：全部 RSU 的默认覆盖半径，车与 RSU 双向通信均按该 RSU 的半径判断。
 - `range_overrides`：按**完整节点名称**单独指定半径；没列出的节点继续使用默认值。例如 `{"lincoln0": 25.0, "npc_abcd_0": 20.0, "rsu0": 260.0}`。`npc_abcd_0` 是名称示例，替换成 SUMO/OMNeT++ 中实际显示的 NPC ID；新的 NPC 批次会生成新的批次 ID。
 
@@ -228,7 +228,7 @@ OMNET_ROOT、VEINS_ROOT 可覆盖安装路径。VANET 端口默认自动读取 t
 
 ## NPC 通信与动画
 
-原来的命令即可生成参与通信的 NPC，也可以在没有 Lincoln 时先执行：
+默认生成的 NPC 只参与 SUMO/CARLA 交通，不创建 OBU，也不会出现在 OMNeT++ 通信视图或 CARLA 通信连线中。可以在没有 Lincoln 时先执行：
 
 ```bash
 ~/carla-venv/bin/python \
@@ -239,11 +239,11 @@ carla-source/Co-Simulation/Sumo/spawn_npc_sumo.py \
 --tls-manager carla
 ```
 
-另开终端执行 `bash vanet/run_omnet.sh`，在 Qtenv 点 Run/Fast；若 OMNeT++ 已在运行，NPC 生成后自动加入。NPC 沿用 SUMO 的 `npc_<批次ID>_<序号>` 名称，Lincoln 仍使用 `lincoln0`、`lincoln1` 等名称。只有已实际生成并完成 CARLA/SUMO 映射的车辆才会加入，SUMO 等待插入的车辆暂不创建 OBU。
+需要某一批 NPC 联网时，在该批生成命令末尾加 `--vanet`，例如 `~/carla-venv/bin/python carla-source/Co-Simulation/Sumo/spawn_npc_sumo.py -n 20 --sumo-gui --step-length 0.05 --tls-manager carla --vanet`；不带参数的其他批次仍是普通交通车辆。`bash run_lincoln.sh --sumo-npcs N` 创建的常驻背景批次也默认不联网。另开终端执行 `bash vanet/run_omnet.sh`，在 Qtenv 点 Run/Fast；若 OMNeT++ 已在运行，带 `--vanet` 的 NPC 生成后自动加入。NPC 沿用 SUMO 的 `npc_<批次ID>_<序号>` 名称，Lincoln 仍使用 `lincoln0`、`lincoln1` 等名称。只有已实际生成并完成 CARLA/SUMO 映射的联网 NPC 才会加入，SUMO 等待插入的车辆暂不创建 OBU。
 
-NPC 支持与其他 NPC、Lincoln 及 RSU 通信，并使用相同的 OMNeT++ 收发动画和 CARLA 半透明灰色/蓝黄/绿色连线。NPC 离开路网或在 NPC 命令终端按 Ctrl+C 后，对应 OBU 和连线自动删除；该命令只移除本批 NPC，OMNeT++ 可以继续运行。200 辆时建议用 Express（F7）推进，并取消 Express 窗口的 `auto-update inspectors`；需要查看地图时可以手动刷新或用 Fast（F6）。普通 Run 的逐包动画会显著放慢运行。大场景的提示简化规则见下节。
+带 `--vanet` 的 NPC 支持与其他联网 NPC、Lincoln 及 RSU 通信，并使用相同的 OMNeT++ 收发动画和 CARLA 半透明灰色/蓝黄/绿色连线。NPC 离开路网或在 NPC 命令终端按 Ctrl+C 后，对应 OBU 和连线自动删除；该命令只移除本批 NPC，OMNeT++ 可以继续运行。200 辆时建议用 Express（F7）推进，并取消 Express 窗口的 `auto-update inspectors`；需要查看地图时可以手动刷新或用 Fast（F6）。普通 Run 的逐包动画会显著放慢运行。大场景的提示简化规则见下节。
 
-首次升级需要按“启动”第 2 步重启共享桥一次；之后改通信半径只需重开 OMNeT++。默认不需要设置 `VANET_PORT`，高级端口覆盖仍保留该环境变量。
+首次升级到按批次选择 NPC 是否联网时，需要按“启动”第 2 步重启共享桥一次；之后改通信半径只需重开 OMNeT++。默认不需要设置 `VANET_PORT`，高级端口覆盖仍保留该环境变量。
 
 ## 大规模运行与性能
 
@@ -332,7 +332,7 @@ python3 vanet/tests/benchmark_radio.py
 
 当前 CARLA Shipping 包的原生 HUD 绘线会将亮度和 Alpha 同时放大，无法保留所需半透明效果，因此使用本工程覆盖层，未修改 CARLA 系统文件（见 [CARLA 0.9.16 HUD 绘制源码](https://github.com/carla-simulator/carla/blob/0.9.16/Unreal/CarlaUE4/Plugins/Carla/Source/Carla/Util/DebugShapeDrawer.cpp)）。覆盖层使用本机已有 PyQt5 和 X11，适用于当前有界面的 CARLA 主窗口；不用于无窗口渲染或其他远程视频窗口。状态及错误日志位于共享桥控制目录的 `vanet-communication.json / vanet-communication.log`。
 
-**已有旧共享桥首次升级时**：正常退出 OMNeT++、RSU、NPC 命令及车辆，执行 `bash run_lincoln.sh --stop-sumo`，再重新启动车辆或 NPC 和 OMNeT++，可选启动 RSU。共享桥需要加载 NPC 接入与通信反馈实现；无需重启 CARLA。之后沿用原来的启动命令即可。
+**已有旧共享桥首次升级时**：正常退出 OMNeT++、RSU、NPC 命令及车辆，执行 `bash run_lincoln.sh --stop-sumo`，再重新启动车辆或 NPC 和 OMNeT++，可选启动 RSU。共享桥需要加载 NPC 按批次选择是否联网的实现；无需重启 CARLA。之后普通 NPC 沿用原来的启动命令，需要通信的 NPC 批次加 `--vanet`。
 
 ## 验证
 

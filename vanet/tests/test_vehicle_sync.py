@@ -64,7 +64,7 @@ def main():
     def network():
         try:
             with peer.makefile('r') as reader:
-                for expected in (1,2,3):
+                for expected in (1,2,3,4,5):
                     header = reader.readline().split()
                     assert header[:2] == ['FRAME2',str(expected)], header
                     names = [reader.readline().split()[1] for _ in range(int(header[3]))]
@@ -81,20 +81,26 @@ def main():
              patch.object(BridgeHelper,'get_sumo_transform',return_value=carla.Transform()), \
              patch.object(BridgeHelper,'get_carla_blueprint',return_value=object()):
             sync.tick()
+            sync.vanet_sumo_ids.add('npc_batch_0')
+            sync.tick()
             sumo.destroyed_actors = {'npc_batch_0'}
             sync.tick()
             sumo.destroyed_actors = set()
             sumo.spawned_actors = {'npc_batch_1'}
             sync.tick()
+            sync.vanet_sumo_ids.add('npc_batch_1')
+            sync.tick()
         worker.join(timeout=5)
         assert not worker.is_alive() and not errors, errors
-        assert snapshots == [['lincoln0','npc_batch_0'], ['lincoln0'], ['lincoln0','npc_batch_1']], snapshots
+        assert snapshots == [['lincoln0'], ['lincoln0','npc_batch_0'], ['lincoln0'],
+                             ['lincoln0'], ['lincoln0','npc_batch_1']], snapshots
         assert [set(s['nodes']) for s in visuals] == [set(names) for names in snapshots]
-        assert visuals[0]['links'] == [['lincoln0','npc_batch_0',3]]
-        assert simulator.tick.call_count == sumo.tick.call_count == 3
+        assert visuals[1]['links'] == [['lincoln0','npc_batch_0',3]]
+        assert sync.vanet_sumo_ids == {'npc_batch_1'}
+        assert simulator.tick.call_count == sumo.tick.call_count == 5
         assert sync.sumo2carla_ids == {'npc_batch_1':4}
-        print('PASS: NPC-first endpoint without VANET_PORT, both mapping directions, '
-              'NPC spawn/despawn and shared animation feedback; only the existing clock advances.')
+        print('PASS: NPC default off, batch opt-in, spawn/despawn cleanup and shared animation feedback; '
+              'only the existing clock advances.')
     finally:
         peer.close()
         sync.vanet.close()

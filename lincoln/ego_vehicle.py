@@ -462,12 +462,21 @@ class Lincoln(Node):
                 self.rviz.wait()
         for actor in reversed(self.actors):
             try:
-                if actor.is_alive:
-                    if actor.type_id.startswith('sensor.'):
-                        actor.stop()
-                    actor.destroy()
+                if actor.type_id.startswith('sensor.') and actor.is_alive:
+                    actor.stop()
             except RuntimeError:
                 pass
+        # is_alive comes from the client's local snapshot and can briefly be
+        # false even though the server still owns the actor. Destroy by ID.
+        if self.actors:
+            try:
+                responses = self.client.apply_batch_sync(
+                    [carla.command.DestroyActor(actor.id) for actor in reversed(self.actors)], False)
+                for response in responses:
+                    if response.error:
+                        print(f'CARLA actor cleanup: {response.error}', flush=True)
+            except RuntimeError as error:
+                print(f'CARLA actor cleanup failed: {error}', flush=True)
         self.actors.clear()
 
 

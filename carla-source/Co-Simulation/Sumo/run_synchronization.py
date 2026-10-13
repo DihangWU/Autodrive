@@ -80,6 +80,7 @@ class SimulationSynchronization(object):
         # Mapped actor ids.
         self.sumo2carla_ids = {}  # Contains only actors controlled by sumo.
         self.carla2sumo_ids = {}  # Contains only actors controlled by carla.
+        self.vanet_sumo_ids = set()  # SUMO NPCs explicitly opted in by their batch.
 
         BridgeHelper.blueprint_library = self.carla.world.get_blueprint_library()
         BridgeHelper.offset = self.sumo.get_net_offset()
@@ -125,6 +126,7 @@ class SimulationSynchronization(object):
 
         # Destroying sumo arrived actors in carla.
         for sumo_actor_id in self.sumo.destroyed_actors:
+            self.vanet_sumo_ids.discard(sumo_actor_id)
             if sumo_actor_id in self.sumo2carla_ids:
                 self.carla.destroy_actor(self.sumo2carla_ids.pop(sumo_actor_id))
 
@@ -226,7 +228,8 @@ class SimulationSynchronization(object):
 
         if self.vanet:
             vehicle_names = dict(self.carla2sumo_ids)
-            vehicle_names.update((carla_id, sumo_id) for sumo_id, carla_id in self.sumo2carla_ids.items())
+            vehicle_names.update((carla_id, sumo_id) for sumo_id, carla_id in self.sumo2carla_ids.items()
+                                 if sumo_id in self.vanet_sumo_ids)
             self.vanet.tick(self.carla.world, self.carla.step_length, vehicle_names)
         if profile:
             stamps.append(time.perf_counter())

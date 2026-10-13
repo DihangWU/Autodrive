@@ -79,8 +79,8 @@ def npc_client(args):
                           sumo_gui=args.sumo_gui, tls_manager=args.tls_manager,
                           sync_vehicle_color=True, sync_vehicle_lights=args.sync_vehicle_lights)
     status = request(args.host, args.port, dict(action='status'), timeout=8)
-    if status.get('vanet_scene', {}).get('protocol') != 5:
-        raise ValueError('共享桥仍是旧版本，不能接入 NPC 通信。请正常关闭车辆、NPC、RSU 和 OMNeT++，'
+    if status.get('vanet_scene', {}).get('protocol') != 5 or status.get('npc_vanet_opt_in') is not True:
+        raise ValueError('共享桥仍是旧版本，不支持 NPC 按批次选择是否联网。请正常关闭车辆、NPC、RSU 和 OMNeT++，'
                          '执行 bash run_lincoln.sh --stop-sumo 后重新启动。')
     if abs(ready['step_length'] - args.step_length) > 1e-8 or ready['tls_manager'] != args.tls_manager:
         logging.warning('Using existing bridge settings: step=%s, tls=%s; not changing the running simulation.',
@@ -91,9 +91,11 @@ def npc_client(args):
     added = False
     try:
         result = request(args.host, args.port, dict(action='add', session=session,
-                         count=args.number_of_vehicles, filterv=args.filterv, safe=args.safe))
+                         count=args.number_of_vehicles, filterv=args.filterv,
+                         safe=args.safe, vanet=args.vanet))
         added = True
-        print(f'NPC_SESSION {session}: scheduled {len(result["vehicles"])} vehicles in shared SUMO. '
+        print(f'NPC_SESSION {session}: scheduled {len(result["vehicles"])} vehicles in shared SUMO '
+              f'(VANET {"on" if args.vanet else "off"}). '
               'Ctrl+C removes only this batch; CARLA/SUMO and Lincoln keep running.', flush=True)
         started = time.monotonic()
         while not args.duration or time.monotonic() - started < args.duration:
@@ -202,6 +204,7 @@ def main(args):
 
         def remove_batch(vehicles):
             for vehicle_id in vehicles:
+                synchronization.vanet_sumo_ids.discard(vehicle_id)
                 carla_id = synchronization.sumo2carla_ids.pop(vehicle_id, None)
                 try:
                     sumo_simulation.unsubscribe(vehicle_id)
@@ -218,6 +221,9 @@ def main(args):
             count = int(command['count'])
             if count < 0:
                 raise ValueError('number-of-vehicles must be nonnegative')
+            vanet_enabled = command.get('vanet', False)
+            if not isinstance(vanet_enabled, bool):
+                raise ValueError('vanet must be a boolean')
             blueprints = selected_blueprints(vtypes, command['filterv'], command['safe'])
             vehicles = []
             try:
@@ -237,6 +243,8 @@ def main(args):
             except Exception:
                 remove_batch(vehicles)
                 raise
+            if vanet_enabled:
+                synchronization.vanet_sumo_ids.update(vehicles)
             return vehicles
 
         def status():
@@ -245,12 +253,14 @@ def main(args):
                         sumo2carla=dict(synchronization.sumo2carla_ids),
                         carla2sumo=dict(synchronization.carla2sumo_ids),
                         sessions=list(service.sessions),
+                        npc_vanet_opt_in=True,
                         vanet_port=synchronization.vanet.listener.getsockname()[1],
                         vanet_scene=scene.status())
 
         service = RequestService(args.host, args.port, spawn_batch, remove_batch, status)
         spawn_batch('bridge_' + uuid.uuid4().hex,
-                    dict(count=args.number_of_vehicles, filterv=args.filterv, safe=args.safe))
+                    dict(count=args.number_of_vehicles, filterv=args.filterv,
+                         safe=args.safe, vanet=args.vanet))
         ready_file = control_folder(args.host, args.port) / 'ready.json'
         if args.bridge_server:
             atomic_json(ready_file, dict(pid=os.getpid(), owner=identity(), step_length=args.step_length,
@@ -368,6 +378,8 @@ if __name__ == '__main__':
     argparser.add_argument('--safe',
                            action='store_true',
                            help='avoid spawning vehicles prone to accidents')
+    argparser.add_argument('--vanet', action='store_true',
+                           help='enable VANET communication for this NPC batch (default: off)')
     argparser.add_argument('--filterv',
                            metavar='PATTERN',
                            default='vehicle.*',
