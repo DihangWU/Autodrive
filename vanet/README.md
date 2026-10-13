@@ -31,7 +31,7 @@ vanet/
 ├── common/                   # 公共配置与资源路径
 │   ├── config.py             # 统一配置校验、半径与单节点覆盖参数
 │   └── paths.py              # 工程、配置、图片等路径
-├── sumo_gui/                 # SUMO 双坐标显示与复制菜单
+├── sumo_gui/                 # SUMO 双坐标、复制菜单与实时倍率显示
 │   ├── build.py              # 工程内 GUI 构建
 │   ├── build/                # 临时编译产物，Git 忽略
 │   └── bin/                  # 编译后的 GUI，Git 忽略
@@ -88,6 +88,8 @@ bash run_lincoln.sh --pose 235.597504 -172.815598 0.695892 180.326126
 ## 路口与位置
 
 SUMO 状态栏在原 x/y 位置同时显示 `SUMO x/y | CARLA x/y`。右键菜单的 `Copy SUMO coordinates` 和 `Copy CARLA coordinates` 分别复制右键落点的两种坐标，格式为 `x, y`，保留六位小数。高度 z 和朝向 yaw 需另行确定。
+
+状态栏另有固定小窗 `Sim/real`，显示最近约 2 秒的**仿真时间增量 ÷ 现实时间增量**，每约 0.5 秒更新一次。`1.00x` 表示与现实同速，`2.00x` 表示现实 0.5 秒推进仿真 1 秒；仿真暂停或共享桥超过约 1.2 秒未推进时显示 `0.00x`。刚启动、重新加载地图或恢复运行后，累积足够样本前显示 `--`。它显示的是 CARLA、SUMO、OMNeT++ 联仿的实际推进倍率，不是单独的 SUMO 计算速度。
 
 显示与复制直接使用当前加载路网的 `netOffset` 换算：`CARLA.x = SUMO.x - offset.x`、`CARLA.y = offset.y - SUMO.y`。此功能仅增加界面文字和菜单，不翻转地图，也不改变路网、车辆或 OMNeT++ 的坐标逻辑。SUMO 的鼠标落点与车辆中心、车头参考点是不同概念。
 
