@@ -7,3 +7,7 @@
     ```shell
     ./carla/init/choose_town04.sh
     ```
+3. 将 CARLA 当前地图转换为 SUMO 路网，并打开 SUMO GUI
+    ```shell
+    bash cobridge/start_bridge.sh
+    ```
