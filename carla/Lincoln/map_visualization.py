@@ -3,6 +3,10 @@
 OpenDRIVE supplies lane geometry and marking style, not Unreal road textures.
 Where explicit dash lengths are absent, broken-line rendering is illustrative.
 """
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from collections import defaultdict
 from geometry_msgs.msg import Point
 from visualization_msgs.msg import Marker, MarkerArray

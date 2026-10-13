@@ -2,6 +2,10 @@
 
 No tick ownership and no input interception: pointer motion is sampled/recentered.
 """
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import ctypes as C
 import math
 import time

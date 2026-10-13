@@ -1,12 +1,14 @@
 """One physical Lincoln, native sensors, ROS2 visualization and mouse driving.
 
-CARLA runs asynchronously, or an external bridge owns synchronous ticks.
-This vehicle client never calls world.tick() or starts SUMO.
+The SUMO bridge owns simulation ticks. This client never calls world.tick().
 """
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import argparse
 import json
 import math
-from pathlib import Path
 import queue
 import random
 import re
@@ -29,11 +31,8 @@ from geometry_msgs.msg import Point, TransformStamped
 from sensor_msgs.msg import Image, CameraInfo, PointCloud2, PointField
 from tf2_ros import TransformBroadcaster, StaticTransformBroadcaster
 from visualization_msgs.msg import Marker, MarkerArray
-from lidar_scan import LidarScan
-from traffic_manager import owns_listener
 
-LINCOLN_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = LINCOLN_DIR.parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 # Match Demo's camera order; optional extra rows remain explicitly empty.
 CAMERA_ROWS = (('roof_sensor_rig/standard', 'roof_sensor_rig/tele'),
@@ -139,12 +138,10 @@ class Lincoln(Node):
         self.cruise_time = None
         self.autopilot = False
         self.tm_port = args.tm_port
-        self.traffic_manager = None
-        self.owns_traffic_manager = False
         self.reverse = False
         self.stop_requested = False
         self.rviz = None
-        self.geometry = json.loads((LINCOLN_DIR / 'config/vehicle_geometry.json').read_text())
+        self.geometry = json.loads((PROJECT_ROOT / 'carla/Lincoln/config/vehicle_geometry.json').read_text())
         self.tf = TransformBroadcaster(self)
         self.static_tf = StaticTransformBroadcaster(self)
         self.markers = self.create_publisher(MarkerArray, f'/{self.uid}/markers', 2)
@@ -156,11 +153,10 @@ class Lincoln(Node):
         self.world = self.client.get_world()
         self.follow = self.camera_owner.claim()
         self.camera_control_enabled = self.follow
-        settings = self.world.get_settings()
-        self.dt = settings.fixed_delta_seconds or .05
+        self.dt = self.world.get_settings().fixed_delta_seconds or .05
         try:
             self.spawn_car()
-            specs = json.loads((LINCOLN_DIR / 'config/sensors.json').read_text())
+            specs = json.loads((PROJECT_ROOT / 'carla/Lincoln/config/sensors.json').read_text())
             if args.sensors == 'lidar':
                 specs = [s for s in specs if s['kind'] == 'lidar']
             for spec in specs:
@@ -173,7 +169,7 @@ class Lincoln(Node):
             self.cleanup()
             raise
         print(f'VEHICLE {self.uid} CARLA_ID={self.car.id} MAP={self.world.get_map().name}', flush=True)
-        print(f'Sensors={len(self.sensors)}; ROS namespace=/{self.uid}.', flush=True)
+        print(f'Sensors={len(self.sensors)}; ROS namespace=/{self.uid}; SUMO id is assigned by the bridge.', flush=True)
 
     def spawn_car(self):
         bp = self.world.get_blueprint_library().find('vehicle.lincoln.mkz_2020')
@@ -207,7 +203,7 @@ class Lincoln(Node):
                         return
                     time.sleep(.05)
                 self.car.destroy()
-                raise RuntimeError('Spawned vehicle never appeared in CARLA snapshots; check that CARLA is advancing frames (an external tick owner is required in synchronous mode).')
+                raise RuntimeError('Spawned vehicle never appeared in CARLA snapshots; check that the SUMO bridge is advancing frames.')
         raise RuntimeError('No free spawn point. Choose another --spawn-index or --pose.')
 
     def frame(self, name='base_link'):
@@ -219,10 +215,7 @@ class Lincoln(Node):
             'lidar': 'sensor.lidar.ray_cast', 'radar': 'sensor.other.radar'}[kind])
         rate = min(spec['rate'], 1 / self.dt)
         period = max(1, round(1 / rate / self.dt))
-        # Native lidar advances its angle using the current world frame's dt.
-        # Skipping world frames with sensor_tick slows down its effective scan.
-        bp.set_attribute('sensor_tick', '0' if kind == 'lidar' else
-                         str(max(0., period * self.dt - 1e-6)))
+        bp.set_attribute('sensor_tick', str(max(0., period * self.dt - 1e-6)))
         if kind == 'camera':
             for key, value in [('image_size_x', spec['width']), ('image_size_y', spec['height']),
                                ('fov', math.degrees(spec['fov'])), ('motion_blur_intensity', 0),
@@ -252,14 +245,9 @@ class Lincoln(Node):
             topic + ('/image' if kind == 'camera' else '/points'), qos_profile_sensor_data)
         if kind == 'camera':
             entry['info'] = self.create_publisher(CameraInfo, topic + '/camera_info', qos_profile_sensor_data)
-        scan = LidarScan(1 / self.dt, spec['rate']) if kind == 'lidar' else None
         self.sensors.append(entry)
         def receive(data):
             entry['received'] += 1
-            if scan is not None:
-                data = scan.receive(data)
-                if data is None:
-                    return
             try:
                 entry['queue'].put_nowait(data)
             except queue.Full:
@@ -290,7 +278,7 @@ class Lincoln(Node):
         self.model.header.frame_id = self.frame()
         self.model.ns, self.model.id = self.uid, 0
         self.model.type, self.model.action = Marker.MESH_RESOURCE, Marker.ADD
-        self.model.mesh_resource = (LINCOLN_DIR / 'assets/lincoln.dae').as_uri()
+        self.model.mesh_resource = (PROJECT_ROOT / 'carla/Lincoln/assets/lincoln.dae').as_uri()
         self.model.mesh_use_embedded_materials = True
         cx, cy, cz = self.geometry['center']
         self.model.pose.position.x, self.model.pose.position.y = cx, cy
@@ -431,12 +419,8 @@ class Lincoln(Node):
         if enabled == self.autopilot:
             return
         if enabled:
-            if self.traffic_manager is None:
-                self.traffic_manager = self.client.get_trafficmanager(self.tm_port)
-                self.owns_traffic_manager = owns_listener(self.tm_port)
-                print(f'TRAFFIC_MANAGER port={self.tm_port} '
-                      f'owned={self.owns_traffic_manager}', flush=True)
-            self.traffic_manager.set_synchronous_mode(self.world.get_settings().synchronous_mode)
+            manager = self.client.get_trafficmanager(self.tm_port)
+            manager.set_synchronous_mode(self.world.get_settings().synchronous_mode)
         self.car.set_autopilot(enabled, self.tm_port)
         self.autopilot = enabled
         self.active = None
@@ -466,32 +450,20 @@ class Lincoln(Node):
             self.car.apply_control(control)
 
     def cleanup(self):
-        try:
-            self.cleanup_vehicle()
-        finally:
-            # Explicit shutdown unregisters an owned server from CARLA. Merely
-            # exiting Python leaves its endpoint behind and causes a timeout
-            # on the next connection. Never shut down another process's TM.
-            if self.traffic_manager is not None and self.owns_traffic_manager:
-                try:
-                    self.traffic_manager.shut_down()
-                    print(f'TRAFFIC_MANAGER shutdown port={self.tm_port}', flush=True)
-                except RuntimeError as error:
-                    print(f'Traffic Manager cleanup failed: {error}', flush=True)
-            self.traffic_manager = None
-            self.owns_traffic_manager = False
-
-    def cleanup_vehicle(self):
         self.camera_owner.release()
         if self.autopilot and self.car.is_alive:
-            try:
-                self.set_autopilot(False)
-            except RuntimeError as error:
-                print(f'Autopilot unregister failed: {error}', flush=True)
-                self.autopilot = False
+            self.set_autopilot(False)
         if self.sensors:
-            print('SENSOR_COUNTS ' + json.dumps({e['spec']['name']: [e['received'], e['published']]
-                                               for e in self.sensors}), flush=True)
+            try:
+                runtime = Path(__file__).resolve().parent / 'runtime'
+                runtime.mkdir(parents=True, exist_ok=True)
+                record = dict(event='SENSOR_COUNTS', timestamp=time.time(), vehicle=self.uid,
+                              counts={e['spec']['name']: [e['received'], e['published']]
+                                      for e in self.sensors})
+                with (runtime / f'{self.uid}.log').open('a', encoding='utf-8') as log:
+                    log.write(json.dumps(record, ensure_ascii=False) + '\n')
+            except OSError as error:
+                self.get_logger().warning(f'Cannot write sensor statistics log: {error}')
         if self.rviz and self.rviz.poll() is None:
             self.rviz.send_signal(signal.SIGINT)
             try:
@@ -585,15 +557,11 @@ def main():
     parser.add_argument('--camera-rows', type=int, choices=[4, 6], default=4,
                         help='Two-column camera mosaic; six rows reserves two empty rows.')
     parser.add_argument('--no-rviz', action='store_true')
-    parser.add_argument('--rviz-config', type=Path, default=LINCOLN_DIR / 'rviz/lincoln.rviz',
+    parser.add_argument('--rviz-config', type=Path, default=PROJECT_ROOT / 'carla/Lincoln/rviz/lincoln.rviz',
                         help='Saved RViz layout; vehicle topic/TF namespaces are adapted at startup.')
     parser.add_argument('--headless', action='store_true', help='No mouse panel (for verification).')
     parser.add_argument('--duration', type=float, default=0, help='Exit after this many real seconds; 0 keeps running.')
     args = parser.parse_args()
-    if args.pose and not all(math.isfinite(value) for value in args.pose):
-        parser.error('--pose requires finite X Y Z YAW values.')
-    if not math.isfinite(args.duration) or args.duration < 0:
-        parser.error('--duration must be a finite nonnegative number.')
     rclpy.init()
     node = None
     executor = None

@@ -1,0 +1,43 @@
+{
+  "map": "Town04",
+  "junction": "924",
+  "source": "examples/net/Town04.net.xml; candidate, checked against live CARLA at spawn",
+  "center": {
+    "x": 201.54,
+    "y": -171.64
+  },
+  "rsus": [
+    {
+      "id": "rsu0",
+      "x": 193.0,
+      "y": -179.0,
+      "z": 60.0,
+      "base_z": 0.39,
+      "beacon_radius": 5.0
+    }
+  ],
+  "slots": [
+    {
+      "name": "A",
+      "x": 196.8212644,
+      "y": -204.6032199,
+      "yaw": 91.1457628
+    },
+    {
+      "name": "B",
+      "x": 235.619581,
+      "y": -176.6952547,
+      "yaw": -179.6682664
+    }
+  ],
+  "communication": {
+    "vehicle_range": 40.0,
+    "rsu_range": 220.0,
+    "range_overrides": {}
+  },
+  "network": {
+    "offset_x": 503.02,
+    "offset_y": 423.76,
+    "port": 9998
+  }
+}

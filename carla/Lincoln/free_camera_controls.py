@@ -1,4 +1,8 @@
 """Embedded free-spectator controls; input stays scoped to its Tk canvas."""
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import math
 import time
 import tkinter as tk

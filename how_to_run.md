@@ -9,7 +9,7 @@
     ```
 3. 将 CARLA 当前地图转换为 SUMO 路网，并打开 SUMO GUI
     ```shell
-    ./cobridge/start_bridge.sh
+    ./cobridge/run_cobridge.sh
     ```
 4. 在 Carla 中 添加 Lincoln 轿车
     * 随机位置添加
@@ -22,4 +22,25 @@
         ```
         ```shell
         ./carla/Lincoln/run_lincoln.sh --pose 235.597504 -172.815598 0.695892 180.326126
+        ```
+5. 添加 RSU
+    ```shell
+    ./carla/rsu/run_rsu.sh
+    ```
+6. 启动 omnet
+    ```shell
+    ./omnet/run_omnet.sh
+    ```
+    * 首次使用或修改通信模型后，先编译
+        ```shell
+        ./omnet/build.sh
+        ```
+7. 添加 npc 车流
+    * 默认不参与通信
+        ```shell
+        ./sumo/traffic/run_npc.sh -n 200 --sumo-gui --step-length 0.05 --tls-manager carla
+        ```
+    * 参与通信，添加 `--vanet`
+        ```shell
+        ./sumo/traffic/run_npc.sh -n 200 --sumo-gui --step-length 0.05 --tls-manager carla --vanet
         ```

@@ -1,41 +1,12 @@
 """Exclusive spectator ownership shared by Lincoln processes on one server."""
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from contextlib import contextmanager
 import fcntl
-import hashlib
 import json
-import os
-from pathlib import Path
-import tempfile
-import uuid
-
-
-def control_folder(host, port):
-    host = 'localhost' if host in ('localhost', '127.0.0.1') else host
-    key = hashlib.sha256(f'{os.getuid()}:{host}:{port}'.encode()).hexdigest()[:16]
-    folder = Path(tempfile.gettempdir()) / ('carla-lincoln-' + key)
-    folder.mkdir(mode=0o700, exist_ok=True)
-    return folder
-
-
-def identity(pid=None):
-    pid = os.getpid() if pid is None else pid
-    try:
-        stat = Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()
-        if stat[0] == 'Z':
-            return None
-        return {'pid': pid, 'start': stat[19]}
-    except (OSError, IndexError):
-        return None
-
-
-def alive(owner):
-    return owner is not None and identity(owner['pid']) == owner
-
-
-def atomic_json(path, value):
-    temp = path.with_name(path.name + '.' + uuid.uuid4().hex + '.tmp')
-    temp.write_text(json.dumps(value))
-    os.replace(temp, path)
+from cobridge.bridge.shared_sumo import control_folder, identity, alive, atomic_json
 
 
 class CameraOwnership:

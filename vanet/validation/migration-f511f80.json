@@ -1,0 +1,47 @@
+{
+  "date": "2026-10-14",
+  "baseline": "f511f80",
+  "official_files_checked": 41,
+  "official_files_changed": [],
+  "lincoln_class_methods_match_baseline": true,
+  "preserved_config_and_radio_model_bytes": true,
+  "builds": [
+    "OMNeT++/Veins",
+    "project SUMO GUI"
+  ],
+  "passed_tests": [
+    "test_traffic_light_sync",
+    "test_vehicle_sync",
+    "test_transport_wait",
+    "test_transport",
+    "test_radio_range",
+    "test_multi_rsu",
+    "test_dynamic_rsu",
+    "test_npc_radio",
+    "test_communication",
+    "test_scene_lifecycle",
+    "test_rsu_sensors"
+  ],
+  "live": {
+    "two_lincoln": true,
+    "sensor_count": 62,
+    "sumo_names": [
+      "lincoln0",
+      "lincoln1"
+    ],
+    "independent_npc_batches": 2,
+    "npc_default_not_networked": true,
+    "rsu_physical_and_poi": true,
+    "omnet_handshake_feedback": true,
+    "rsu_removal_keeps_clock_and_omnet_alive": true,
+    "normal_cleanup_no_test_actors_remaining": true,
+    "bridge_stop_restores_async": true,
+    "bridge_restart": true,
+    "rsu_radar_hits": 1250,
+    "rsu_semantic_lidar_hits": 200
+  },
+  "limits": [
+    "Functional regressions and short live smoke tests; not a long-duration performance benchmark.",
+    "Not every interactive driving control was manually exercised; Lincoln methods match baseline after path normalization."
+  ]
+}
