@@ -1,7 +1,7 @@
 * 以下命令默认在 Autodrive 根目录下执行
 1. 打开 Carla
     ```shell
-    ./carla/init/start_carla.sh
+    ./carla/init/run_carla.sh
     ```
 2. 选择地图 Town04
     ```shell
@@ -14,7 +14,7 @@
 4. 在 Carla 中 添加 Lincoln 轿车
     * 随机位置添加
         ```shell
-        bash scenes/lincoln/run_lincoln.sh
+        ./scenes/lincoln/run_lincoln.sh
         ```
     * 指定位置添加，指定位置使用 `--pose X Y Z YAW`。
         ```shell
