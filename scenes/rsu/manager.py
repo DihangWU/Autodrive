@@ -9,8 +9,8 @@ import logging
 from cobridge.common.paths import RSU_SUMO_DIR
 from cobridge.common.ipc import alive, atomic_json, control_folder
 from vanet.common.config import sumo_rsu
-from scene.rsu.carla.rsu_marker import draw_marker
-from scene.rsu.carla.rsu_body import RsuBody
+from scenes.rsu.carla.rsu_marker import draw_marker
+from scenes.rsu.carla.rsu_body import RsuBody
 
 
 class SceneMarkers:

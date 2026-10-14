@@ -1,5 +1,5 @@
 {
-  "rsu_config": "../scene/rsu/config/town04.json",
+  "rsu_config": "../scenes/rsu/config/town04.json",
   "map": "Town04",
   "junction": "924",
   "source": "examples/net/Town04.net.xml; candidate, checked against live CARLA at spawn",

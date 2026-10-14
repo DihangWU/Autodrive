@@ -12,7 +12,7 @@ import json
 import queue
 
 from vanet.common.config import load_config
-from scene.rsu.carla.rsu_body import RsuBody
+from scenes.rsu.carla.rsu_body import RsuBody
 
 
 def main():

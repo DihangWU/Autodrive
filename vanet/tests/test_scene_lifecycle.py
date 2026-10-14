@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(os.environ.get('SUMO_HOME', Path.home() / 'sumo-1.22
 import traci
 from cobridge.common.ipc import RequestService, control_folder, atomic_json, identity
 from vanet.common.config import load_config, sumo_rsu, rsu_definitions
-from scene.rsu.manager import SceneMarkers
+from scenes.rsu.manager import SceneMarkers
 
 
 class World:
@@ -112,7 +112,7 @@ def main():
 
             for mode in ('interrupt', 'terminate', 'crash'):
                 log = (tmp / (mode + '.log')).open('w')
-                command = [sys.executable, str(ROOT / 'scene/rsu/session.py'),
+                command = [sys.executable, str(ROOT / 'scenes/rsu/session.py'),
                            '--carla-host', host, '--vanet-config', str(config_path)]
                 child = subprocess.Popen(command, stdout=log, stderr=log)
                 deadline = time.monotonic() + 10

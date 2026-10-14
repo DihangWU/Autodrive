@@ -59,7 +59,7 @@ from util.netconvert_carla import netconvert_carla
 
 from cobridge.common.ipc import RequestService, control_folder, atomic_json, identity
 
-from scene.rsu.manager import SceneMarkers
+from scenes.rsu.manager import SceneMarkers
 from cobridge.carla.communication_view import CommunicationView
 from cobridge.sumo.npc_client import selected_blueprints, parse_args
 

@@ -141,7 +141,7 @@ class Lincoln(Node):
         self.reverse = False
         self.stop_requested = False
         self.rviz = None
-        self.geometry = json.loads((PROJECT_ROOT / 'carla/Lincoln/config/vehicle_geometry.json').read_text())
+        self.geometry = json.loads((PROJECT_ROOT / 'scenes/lincoln/config/vehicle_geometry.json').read_text())
         self.tf = TransformBroadcaster(self)
         self.static_tf = StaticTransformBroadcaster(self)
         self.markers = self.create_publisher(MarkerArray, f'/{self.uid}/markers', 2)
@@ -156,7 +156,7 @@ class Lincoln(Node):
         self.dt = self.world.get_settings().fixed_delta_seconds or .05
         try:
             self.spawn_car()
-            specs = json.loads((PROJECT_ROOT / 'carla/Lincoln/config/sensors.json').read_text())
+            specs = json.loads((PROJECT_ROOT / 'scenes/lincoln/config/sensors.json').read_text())
             if args.sensors == 'lidar':
                 specs = [s for s in specs if s['kind'] == 'lidar']
             for spec in specs:
@@ -278,7 +278,7 @@ class Lincoln(Node):
         self.model.header.frame_id = self.frame()
         self.model.ns, self.model.id = self.uid, 0
         self.model.type, self.model.action = Marker.MESH_RESOURCE, Marker.ADD
-        self.model.mesh_resource = (PROJECT_ROOT / 'carla/Lincoln/assets/lincoln.dae').as_uri()
+        self.model.mesh_resource = (PROJECT_ROOT / 'scenes/lincoln/assets/lincoln.dae').as_uri()
         self.model.mesh_use_embedded_materials = True
         cx, cy, cz = self.geometry['center']
         self.model.pose.position.x, self.model.pose.position.y = cx, cy
@@ -557,7 +557,7 @@ def main():
     parser.add_argument('--camera-rows', type=int, choices=[4, 6], default=4,
                         help='Two-column camera mosaic; six rows reserves two empty rows.')
     parser.add_argument('--no-rviz', action='store_true')
-    parser.add_argument('--rviz-config', type=Path, default=PROJECT_ROOT / 'carla/Lincoln/rviz/lincoln.rviz',
+    parser.add_argument('--rviz-config', type=Path, default=PROJECT_ROOT / 'scenes/lincoln/rviz/lincoln.rviz',
                         help='Saved RViz layout; vehicle topic/TF namespaces are adapted at startup.')
     parser.add_argument('--headless', action='store_true', help='No mouse panel (for verification).')
     parser.add_argument('--duration', type=float, default=0, help='Exit after this many real seconds; 0 keeps running.')

@@ -49,7 +49,7 @@ while [[ $# -gt 0 ]]; do
         --host) HOST_ARG="$2"; EGO_ARGS+=("$1" "$2"); shift 2 ;;
         --port) PORT_ARG="$2"; EGO_ARGS+=("$1" "$2"); shift 2 ;;
         --help|-h)
-            echo "Usage: bash carla/Lincoln/run_lincoln.sh [--spawn-index N | --pose X Y Z YAW]"
+            echo "Usage: bash scenes/lincoln/run_lincoln.sh [--spawn-index N | --pose X Y Z YAW]"
             echo "       No position arguments: randomly choose a free spawn point."
             echo "       --pose: CARLA world X/Y/Z in meters, yaw in degrees."
             echo "       [--sensors all|lidar] [--sumo-npcs N] [--no-sumo] [--no-rviz]"

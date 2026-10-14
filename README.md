@@ -48,15 +48,15 @@ Lincoln 按要求从基准提交重新迁移，未保留此前重构新增的激
 ### Lincoln：唯一车辆入口
 
 ```bash
-./carla/Lincoln/run_lincoln.sh
+./scenes/lincoln/run_lincoln.sh
 ```
 
 无参数随机生成一辆 Lincoln，打开驾驶面板与 RViz，默认保留全部 31 个传感器。
 指定两处不同的 CARLA 世界坐标，分别在两个终端运行：
 
 ```bash
-./carla/Lincoln/run_lincoln.sh --pose 199.390472 -204.544281 0.519592 91.314423
-./carla/Lincoln/run_lincoln.sh --pose 235.597504 -172.815598 0.695892 180.326126
+./scenes/lincoln/run_lincoln.sh --pose 199.390472 -204.544281 0.519592 91.314423
+./scenes/lincoln/run_lincoln.sh --pose 235.597504 -172.815598 0.695892 180.326126
 ```
 
 `--pose` 是 x/y/z（米）和 yaw（度）；固定位置被占用时报错，不会随机换位置。
@@ -65,9 +65,9 @@ Lincoln 按要求从基准提交重新迁移，未保留此前重构新增的激
 基准中的固定实验车位功能并入同一入口：
 
 ```bash
-./carla/Lincoln/run_lincoln.sh --vanet-slot A
-./carla/Lincoln/run_lincoln.sh --vanet-slot B
-./carla/Lincoln/run_lincoln.sh --vanet-slot auto
+./scenes/lincoln/run_lincoln.sh --vanet-slot A
+./scenes/lincoln/run_lincoln.sh --vanet-slot B
+./scenes/lincoln/run_lincoln.sh --vanet-slot auto
 ```
 
 三条是可选用法，读取 `vanet/town04.json` 并验证道路、占用和车位锁；该功能限定配置中的地图。
@@ -99,7 +99,7 @@ NPC 默认不联网。让当前批次参与通信：
 ```
 
 OMNeT++ 模型、构建、启动会话和背景导出已迁入根目录 `omnet/`，不保留旧路径启动器。
-共享配置为 `vanet/town04.json`，其中 `rsu_config` 引用 `scene/rsu/config/town04.json` 的 RSU 位置列表；桥端协议和跨模块测试仍在 `vanet/`。
+共享配置为 `vanet/town04.json`，其中 `rsu_config` 引用 `scenes/rsu/config/town04.json` 的 RSU 位置列表；桥端协议和跨模块测试仍在 `vanet/`。
 
 在 Qtenv 点击 Run/Fast/Express 后开始推进通信。Qtenv 暂停会阻塞共享仿真时钟，这是基准的锁步机制。
 共享桥启动后，OMNeT++ 可以先于车辆运行；没有 RSU 时车辆仍能直连。
@@ -107,7 +107,7 @@ OMNeT++ 模型、构建、启动会话和背景导出已迁入根目录 `omnet/`
 在独立终端添加 RSU：
 
 ```bash
-./scene/rsu/run_rsu.sh
+./scenes/rsu/run_rsu.sh
 ```
 
 Ctrl+C 删除 RSU，OMNeT++ 保持运行；再次执行重新创建。关闭 OMNeT++ 不删除独立 RSU。
@@ -130,8 +130,6 @@ RSU 同时出现在 CARLA、SUMO 和运行中的 OMNeT++，CARLA 塔身具有有
 Autodrive/
 ├── carla/
 │   ├── init/                  CARLA 启动、选图，保留原结构
-│   ├── Lincoln/               车辆、传感器、驾驶面板、RViz、车位选择
-│   ├── vanet_visual/          通信覆盖层
 │   └── carla_free_camera.py   手动启动的独立自由视角工具
 ├── cobridge/
 │   ├── run_cobridge.sh        共享桥启动、查询、停止
@@ -156,7 +154,9 @@ Autodrive/
 ├── sumo/
 │   ├── traffic/run_npc.sh     NPC 批次入口
 │   └── gui/                   定制 GUI 构建与产物
-├── scene/
+├── scenes/
+│   ├── lincoln/              车辆、传感器、驾驶面板、RViz、车位选择
+│   ├── vanet_visual/         场景通信连线覆盖层
 │   └── rsu/
 │       ├── run_rsu.sh         RSU 唯一启动入口
 │       ├── session.py         会话登记与退出清理
@@ -184,8 +184,12 @@ Autodrive/
 2. 共享桥把 CARLA 控制的车同步到 SUMO，把 SUMO NPC 同步到 CARLA；双向映射防止重复镜像。
 3. CARLA 传感器回调通过 Lincoln 最新帧队列和独立 ROS 发布线程交给 RViz；RViz 道路也来自 CARLA 当前地图。
 4. 桥向 OMNeT++ 发送节点位置快照，等待 ACK 后推进下一步。OMNeT++ 不另起 SUMO，不另连 TraCI。
-5. RSU 会话向桥登记，桥调用 `scene/rsu/manager.py`，协调 CARLA 实体、SUMO POI 和通信节点。
+5. RSU 会话向桥登记，桥调用 `scenes/rsu/manager.py`，协调 CARLA 实体、SUMO POI 和通信节点。
 6. OMNeT++ 返回真实握手/业务事件，覆盖层将连线画在 CARLA 主窗口，不进入传感器数据。
+
+场景对象和场景显示统一归入 `scenes/`：Lincoln 使用 `scenes/lincoln/`（目录名统一小写），RSU 使用 `scenes/rsu/`，通信覆盖层使用 `scenes/vanet_visual/`。车辆网格、传感器配置、RViz 模板以及已有 `runtime/` 日志随 Lincoln 目录移动；共享桥从 `cobridge/common/paths.py` 获取新路径。`carla/` 保留 CARLA 启动、选图及独立自由视角工具。
+
+旧 `scene/`、`carla/Lincoln/`、`carla/vanet_visual/` 不保留兼容入口。迁移前已启动的车辆、RSU、覆盖层和共享桥不会自动加载新代码；正常退出客户端并停止旧桥后，从本文的新路径重新启动。
 
 ### 代码复用与官方边界
 
@@ -197,7 +201,7 @@ Autodrive/
 `common/bridge_manager.py` 复用旧桥管理实现，`common/ipc.py` 提供原 `shared_sumo.py` 的跨模块请求与会话功能。原 `vanet/runtime/` 中的 TCP 传输、CARLA 显示进程管理和性能统计分别归入 `cobridge/omnet/transport.py`、`cobridge/carla/communication_view.py` 与 `cobridge/common/performance.py`。
 NPC shell 只定位实现，不复制车流算法。没有保留旧根目录入口、重复 VANET 车辆入口或空壳路径兼容模块。
 
-`cobridge/` 根目录的程序入口只有 `run_cobridge.sh`，共享 Python 实现在 `common/`，软件接口按服务对象分别放入 `carla/`、`sumo/`、`omnet/`。管理器启动主服务；主服务调用同步器、SUMO 接口、OMNeT++ 传输以及 `scene/rsu/manager.py`。NPC 客户端不另连 TraCI、不另起仿真时钟，通过 IPC 提交批次；默认不联网，`--vanet` 为该批车辆开启联网。NPC 客户端和主服务复用参数解析，避免两份参数定义发生偏差。
+`cobridge/` 根目录的程序入口只有 `run_cobridge.sh`，共享 Python 实现在 `common/`，软件接口按服务对象分别放入 `carla/`、`sumo/`、`omnet/`。管理器启动主服务；主服务调用同步器、SUMO 接口、OMNeT++ 传输以及 `scenes/rsu/manager.py`。NPC 客户端不另连 TraCI、不另起仿真时钟，通过 IPC 提交批次；默认不联网，`--vanet` 为该批车辆开启联网。NPC 客户端和主服务复用参数解析，避免两份参数定义发生偏差。
 
 迁移后，正在运行的桥仍使用已加载的旧模块：先正常退出客户端，再执行 `./cobridge/run_cobridge.sh --stop`，随后重新启动桥和客户端。管理器能识别旧桥进程以完成正常清理，不保留旧启动文件。车辆、NPC、RSU 和 OMNeT++ 的 shell 命令保持现有用法。
 
@@ -230,17 +234,17 @@ NPC shell 只定位实现，不复制车流算法。没有保留旧根目录入�
 
 它沿用基准实现，不接入多车相机锁，不要与其他跟随控制同时使用。
 
-`carla/Lincoln/config/sensors.json` 定义 8 路 640×360 相机、1 个 64 线激光、6 个中距雷达、16 个用近距 radar 模拟的超声节点。
+`scenes/lincoln/config/sensors.json` 定义 8 路 640×360 相机、1 个 64 线激光、6 个中距雷达、16 个用近距 radar 模拟的超声节点。
 相机/超声等通常 10 Hz，中距雷达 20 Hz，实际频率受步长与负载影响。
 RViz 包括地图、车辆模型、rig 分组点云和八路拼图，传感器采用 Best Effort。话题和 TF 以每车 `lincoln_<uid>` 隔离，ROS 对 CARLA 的 y/yaw 做符号转换；出生参数填写 CARLA 坐标。
 本次恢复基准的传感器和着色实现，重构期间新增的激光拼接、地面颜色修改不包含在内。
 
 ## 4. RSU、通信和坐标
 
-RSU 的代码、图标和位置定义集中在 `scene/rsu/`。修改 [scene/rsu/config/town04.json](scene/rsu/config/town04.json) 的 `rsus` 列表：复制一项，设唯一 `rsu1` 等 ID，修改 `x/y/z/base_z`；退出 RSU 命令后重新启动即可，无需重启 OMNeT++。
+RSU 的代码、图标和位置定义集中在 `scenes/rsu/`。修改 [scenes/rsu/config/town04.json](scenes/rsu/config/town04.json) 的 `rsus` 列表：复制一项，设唯一 `rsu1` 等 ID，修改 `x/y/z/base_z`；退出 RSU 命令后重新启动即可，无需重启 OMNeT++。
 坐标使用 CARLA 世界坐标，`z` 是顶部高度，`base_z` 是塔脚高度。配置详解见 [vanet/README.md](vanet/README.md)。
 
-`vanet/town04.json` 的 `rsu_config` 按该配置文件所在目录解析，默认值为 `../scene/rsu/config/town04.json`。统一加载器读取并校验 RSU 列表，再交给 CARLA、SUMO 和 OMNeT++；列表只维护一份。自定义 `--vanet-config PATH` 可以引用其他同地图的 RSU 配置，也可以提供完整的内嵌 `rsus` 列表，但不能同时使用两种定义。
+`vanet/town04.json` 的 `rsu_config` 按该配置文件所在目录解析，默认值为 `../scenes/rsu/config/town04.json`。统一加载器读取并校验 RSU 列表，再交给 CARLA、SUMO 和 OMNeT++；列表只维护一份。自定义 `--vanet-config PATH` 可以引用其他同地图的 RSU 配置，也可以提供完整的内嵌 `rsus` 列表，但不能同时使用两种定义。
 
 从旧目录升级后，先正常退出车辆、NPC、RSU 和 OMNeT++，执行 `./cobridge/run_cobridge.sh --stop`，再启动共享桥和客户端。已运行的桥不会自动重新加载迁移后的 Python 模块。旧 `carla/rsu/` 和 `sumo/gui/assets/rsu.png` 不保留兼容入口。
 
@@ -250,7 +254,7 @@ RSU 的代码、图标和位置定义集中在 `scene/rsu/`。修改 [scene/rsu/
 HELLO/ACK 确认双向邻居；RSU 转发车辆原始 probe。基准实现广播连通性，不含车辆多跳、跨 RSU 单播路由、IP 接入或切换协议。
 握手连线灰色，发送半段蓝色、接收半段黄色，中点分界；双向业务绿色。半透明细线由 Qt/X11 覆盖层显示，不生成传感器可见几何；RSU 实体塔身则能被探测。
 
-SUMO 专用 RSU 图标位于 `scene/rsu/sumo/rsu.png`，由 RSU 场景管理器创建 POI 时引用。
+SUMO 专用 RSU 图标位于 `scenes/rsu/sumo/rsu.png`，由 RSU 场景管理器创建 POI 时引用。
 SUMO GUI 同时显示 SUMO/CARLA 鼠标坐标、右键复制 CARLA 坐标和底部仿真/现实时间倍率。
 鼠标坐标从已载入路网的 netOffset 转换；车辆同步另包含车长参考点、y 翻转及 yaw 转换。
 VANET 的配置 offset 和静态 Town04 背景沿用基准，OMNeT++ 道路从官方示例 Town04 路网导出到 `omnet/roads.txt`，不代表任意地图实时背景。
@@ -297,16 +301,16 @@ PY
 
 目录位于 `/tmp/carla-lincoln-<地址哈希>/`，沿用基准 IPC 命名，但源码和生命周期已由 cobridge 管理。
 `sumo.log` 是桥日志，`bridge.json`、`ready.json` 和请求文件是状态，运行时不要删除。
-RViz 实例配置在 `/tmp/lincoln_<uid>.rviz`，源模板在 `carla/Lincoln/rviz/`。
+RViz 实例配置在 `/tmp/lincoln_<uid>.rviz`，源模板在 `scenes/lincoln/rviz/`。
 
-Lincoln 退出时的 31 个传感器统计写入 `carla/Lincoln/runtime/lincoln_<uid>.log`，
+Lincoln 退出时的 31 个传感器统计写入 `scenes/lincoln/runtime/lincoln_<uid>.log`，
 不再整段打印到终端。每辆车独立日志，每行一个 JSON 记录，包含退出统计时间戳、
 车辆角色名和 `counts`；各传感器的数组依次为 `[收到的帧数, 向 ROS 发布的帧数]`。
 目录自动创建并由 Git 忽略。若写入失败，仅提示一条警告，继续清理车辆。
 
 ```bash
-ls -lt carla/Lincoln/runtime/
-tail -n 1 carla/Lincoln/runtime/lincoln_实际uid.log
+ls -lt scenes/lincoln/runtime/
+tail -n 1 scenes/lincoln/runtime/lincoln_实际uid.log
 ```
 
 OMNeT++ 结果在 `omnet/results/`，默认关闭完整 `.elog` 事件日志。
