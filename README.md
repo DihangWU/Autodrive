@@ -135,8 +135,21 @@ Autodrive/
 │   └── carla_free_camera.py   手动启动的独立自由视角工具
 ├── cobridge/
 │   ├── run_cobridge.sh        共享桥启动、查询、停止
-│   ├── paths.py               工程路径集中定义
-│   ├── bridge/                基准桥接实现、IPC、生命周期、场景协调
+│   ├── common/
+│   │   ├── bridge_manager.py  桥启动、复用、查询和停止
+│   │   ├── service.py         联仿主服务与循环
+│   │   ├── synchronization.py 双向车辆、信号灯与时钟同步
+│   │   ├── ipc.py             客户端与桥的本地请求及会话
+│   │   ├── performance.py     各阶段耗时统计
+│   │   └── paths.py           工程路径集中定义
+│   ├── carla/
+│   │   └── communication_view.py CARLA 通信覆盖层进程管理
+│   ├── sumo/
+│   │   ├── traci_client.py    SUMO/TraCI 操作
+│   │   ├── npc_client.py      NPC 批次客户端与复用的参数解析
+│   │   └── tools/            车型定义生成与分配工具
+│   ├── omnet/
+│   │   └── transport.py      节点快照、逐帧 ACK 与通信结果
 │   ├── map/                   独立地图导出与预览
 │   ├── carla-source-official/  官方目录，迁移未修改
 │   └── runtime/               独立地图导出产物与日志
@@ -161,7 +174,6 @@ Autodrive/
 ├── vanet/
 │   ├── town04.json            RSU 配置引用、车位、通信范围与端口
 │   ├── common/config.py       配置读取与校验
-│   ├── runtime/               桥端 TCP 通信、连线状态、性能分析
 │   ├── tools/、tests/、validation/
 │   └── README.md
 ├── README.md
@@ -178,12 +190,16 @@ Autodrive/
 ### 代码复用与官方边界
 
 `cobridge/carla-source-official/Co-Simulation/Sumo/` 文件保持不变。
-旧版带工程修改的 `spawn_npc_sumo.py`、`run_synchronization.py` 和 `sumo_simulation.py` 迁到 `cobridge/bridge/`，保留原许可证和逻辑，调用官方未修改的转换器、CARLA 包装器、常量及资源。
-辅助车型工具 `create_sumo_vtypes.py`、`sequential_types.py` 也以工程副本保留，修正其资源路径。
+旧版带工程修改的 `spawn_npc_sumo.py` 拆为 `cobridge/common/service.py` 与 `cobridge/sumo/npc_client.py`；主服务负责联仿循环，NPC 客户端负责批次请求和退出清理。原 `run_synchronization.py` 改为 `common/synchronization.py`，原 `sumo_simulation.py` 改为 `sumo/traci_client.py`。保留原许可证和同步逻辑，调用官方未修改的转换器、CARLA 包装器、常量及资源。
+辅助车型工具分别为 `cobridge/sumo/tools/create_vehicle_types.py` 和 `assign_vehicle_types.py`，以工程副本保留。
 后续直接修改官方目录必须先确认。官方原始 NPC 脚本不具备本工程共享会话与可选入网功能，请使用项目入口。
 
-`ensure_bridge.py` 复用旧 `ensure_sumo.py`，`shared_sumo.py` 从旧 Lincoln 目录移入桥模块。
+`common/bridge_manager.py` 复用旧桥管理实现，`common/ipc.py` 提供原 `shared_sumo.py` 的跨模块请求与会话功能。原 `vanet/runtime/` 中的 TCP 传输、CARLA 显示进程管理和性能统计分别归入 `cobridge/omnet/transport.py`、`cobridge/carla/communication_view.py` 与 `cobridge/common/performance.py`。
 NPC shell 只定位实现，不复制车流算法。没有保留旧根目录入口、重复 VANET 车辆入口或空壳路径兼容模块。
+
+`cobridge/` 根目录的程序入口只有 `run_cobridge.sh`，共享 Python 实现在 `common/`，软件接口按服务对象分别放入 `carla/`、`sumo/`、`omnet/`。管理器启动主服务；主服务调用同步器、SUMO 接口、OMNeT++ 传输以及 `scene/rsu/manager.py`。NPC 客户端不另连 TraCI、不另起仿真时钟，通过 IPC 提交批次；默认不联网，`--vanet` 为该批车辆开启联网。NPC 客户端和主服务复用参数解析，避免两份参数定义发生偏差。
+
+迁移后，正在运行的桥仍使用已加载的旧模块：先正常退出客户端，再执行 `./cobridge/run_cobridge.sh --stop`，随后重新启动桥和客户端。管理器能识别旧桥进程以完成正常清理，不保留旧启动文件。车辆、NPC、RSU 和 OMNeT++ 的 shell 命令保持现有用法。
 
 ## 3. Lincoln 功能与设置
 
@@ -274,7 +290,7 @@ python3 sumo/gui/build.py
 
 ```bash
 ~/carla-venv/bin/python - <<'PY'
-from cobridge.bridge.shared_sumo import control_folder
+from cobridge.common.ipc import control_folder
 print(control_folder('127.0.0.1', 2000))
 PY
 ```

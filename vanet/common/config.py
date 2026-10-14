@@ -4,7 +4,7 @@ import math
 import re
 from pathlib import Path
 
-from cobridge.paths import CONFIG
+from cobridge.common.paths import CONFIG
 
 
 def load_config(path=CONFIG):

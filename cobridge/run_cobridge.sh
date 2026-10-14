@@ -6,4 +6,4 @@ if [[ "${1:-}" == "--map-only" ]]; then
     shift
     exec "$HOME/carla-venv/bin/python" -u "$BRIDGE_DIR/map/map_bridge.py" "$@"
 fi
-exec "$HOME/carla-venv/bin/python" -u "$BRIDGE_DIR/bridge/ensure_bridge.py" "$@"
+exec "$HOME/carla-venv/bin/python" -u "$BRIDGE_DIR/common/bridge_manager.py" "$@"

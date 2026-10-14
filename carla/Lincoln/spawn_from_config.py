@@ -9,7 +9,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from cobridge.paths import PROJECT_DIR as PROJECT, LINCOLN_DIR, CONFIG
+from cobridge.common.paths import PROJECT_DIR as PROJECT, LINCOLN_DIR, CONFIG
 sys.path.insert(0, str(LINCOLN_DIR))
 
 def main():
@@ -24,7 +24,7 @@ def main():
     if '--help' in sys.argv or '-h' in sys.argv:
         print('VANET: --vanet-slot auto|A|B selects a fixed Town04 slot; all other options use the Lincoln launcher.', flush=True)
         os.execvp('bash', ['bash', str(LINCOLN_DIR/'run_lincoln.sh'), '--help'])
-    from cobridge.bridge.ensure_bridge import bridges
+    from cobridge.common.bridge_manager import bridges
     import carla
     cfg = json.loads(CONFIG.read_text())
     os.chdir(PROJECT)
@@ -46,7 +46,7 @@ def main():
     os.environ['VANET_PORT'] = str(cfg['network']['port'])
     active = bridges(args.host, args.port)
     if active:
-        from cobridge.bridge.shared_sumo import request
+        from cobridge.common.ipc import request
         status = request(args.host, args.port, dict(action='status'), timeout=8)
         if status.get('vanet_scene', {}).get('protocol') != 5 or status.get('vanet_port') != cfg['network']['port']:
             raise SystemExit('Existing SUMO bridge needs the current VANET endpoint. Close vehicle/NPC/RSU clients and OMNeT++, then run bash cobridge/run_cobridge.sh --stop and retry.')

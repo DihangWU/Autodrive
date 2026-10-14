@@ -11,10 +11,10 @@ import tempfile
 import time
 from types import SimpleNamespace
 
-from cobridge.paths import PROJECT_DIR as ROOT, OMNET_DIR
+from cobridge.common.paths import PROJECT_DIR as ROOT, OMNET_DIR
 sys.path.insert(0, str(Path(os.environ.get('SUMO_HOME', Path.home() / 'sumo-1.22.0')) / 'tools'))
 import traci
-from cobridge.bridge.shared_sumo import RequestService, control_folder, atomic_json, identity
+from cobridge.common.ipc import RequestService, control_folder, atomic_json, identity
 from vanet.common.config import load_config, sumo_rsu, rsu_definitions
 from scene.rsu.manager import SceneMarkers
 

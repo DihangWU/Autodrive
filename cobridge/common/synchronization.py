@@ -6,7 +6,7 @@ Script to integrate CARLA and SUMO simulations
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from cobridge.paths import SUMO_CO_SIM_DIR
+from cobridge.common.paths import SUMO_CO_SIM_DIR
 import os
 os.environ.setdefault('SUMO_HOME', str(Path.home() / 'sumo-1.22.0'))
 sys.path.insert(0, str(SUMO_CO_SIM_DIR))
@@ -42,7 +42,7 @@ else:
 from sumo_integration.bridge_helper import BridgeHelper  # pylint: disable=wrong-import-position
 from sumo_integration.carla_simulation import CarlaSimulation  # pylint: disable=wrong-import-position
 from sumo_integration.constants import INVALID_ACTOR_ID  # pylint: disable=wrong-import-position
-from cobridge.bridge.sumo_simulation import SumoSimulation  # pylint: disable=wrong-import-position
+from cobridge.sumo.traci_client import SumoSimulation  # pylint: disable=wrong-import-position
 
 # ==================================================================================================
 # -- synchronization_loop --------------------------------------------------------------------------
@@ -65,8 +65,8 @@ class SimulationSynchronization(object):
         self.carla = carla_simulation
         from pathlib import Path
 
-        from vanet.runtime.bridge import VanetBridge
-        from vanet.runtime.performance import PhaseProfile
+        from cobridge.omnet.transport import VanetBridge
+        from cobridge.common.performance import PhaseProfile
         from vanet.common.config import load_config
         self.vanet = VanetBridge(os.environ.get('VANET_PORT') or load_config()['network']['port'])
         profile_path = os.environ.get('VANET_PROFILE_PATH')

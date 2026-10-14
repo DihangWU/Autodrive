@@ -5,7 +5,7 @@ Script to create sumo vtypes based on carla blueprints.
 
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 # Copyright (c) 2020 Computer Vision Center (CVC) at the Universitat Autonoma de
 # Barcelona (UAB).
@@ -32,7 +32,7 @@ import carla  # pylint: disable=import-error, wrong-import-position
 # -- load specs definition -------------------------------------------------------------------------
 # ==================================================================================================
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 with (PROJECT_ROOT / 'cobridge/carla-source-official/Co-Simulation/Sumo/data/vtypes.json').open() as f:
     SPECS = json.load(f)
 

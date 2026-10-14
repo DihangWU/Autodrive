@@ -1,7 +1,6 @@
 """Project paths, independent of the working directory; official sources are read-only."""
 from pathlib import Path
-PROJECT_DIR = Path(__file__).resolve().parent.parent
-BRIDGE_DIR = PROJECT_DIR / 'cobridge/bridge'
+PROJECT_DIR = Path(__file__).resolve().parents[2]
 LINCOLN_DIR = PROJECT_DIR / 'carla/Lincoln'
 RSU_DIR = PROJECT_DIR / 'scene/rsu'
 VISUAL_DIR = PROJECT_DIR / 'carla/vanet_visual'

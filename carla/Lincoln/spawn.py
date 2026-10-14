@@ -2,7 +2,7 @@
 import json
 import math
 import fcntl
-from cobridge.paths import CONFIG
+from cobridge.common.paths import CONFIG
 
 
 def experiment_points(world, slot=None):
@@ -37,7 +37,7 @@ def reserve_slot(world, host, port, slot=None):
     This covers the interval before the vehicle exists in CARLA, when occupancy
     checks alone cannot prevent simultaneous launches selecting the same slot.
     """
-    from cobridge.bridge.shared_sumo import control_folder, identity, alive, atomic_json
+    from cobridge.common.ipc import control_folder, identity, alive, atomic_json
     folder = control_folder(host, port)
     state_path = folder / 'vanet-slots.json'
     cfg = json.loads(CONFIG.read_text())

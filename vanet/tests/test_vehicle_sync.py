@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT))
 os.environ.setdefault('SUMO_HOME', str(Path.home() / 'sumo-1.22.0'))
 sys.path.insert(0, str(ROOT / 'cobridge/carla-source-official/Co-Simulation/Sumo'))
 import carla
-from cobridge.bridge.run_synchronization import SimulationSynchronization, BridgeHelper
+from cobridge.common.synchronization import SimulationSynchronization, BridgeHelper
 from vanet.common.config import load_config
 
 

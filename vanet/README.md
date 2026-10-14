@@ -254,8 +254,8 @@ python3 vanet/tests/benchmark_radio.py
 ```
 
 代码按功能分布：`runtime/` 管理桥端 TCP 通信、连线状态和性能统计；
-`common/config.py` 处理配置，工程路径在 `cobridge/paths.py`；根目录 `omnet/` 包含 NED/C++ 无线模型、构建和启动入口、会话管理、道路导出及结果。
+`common/config.py` 处理配置，工程路径在 `cobridge/common/paths.py`；根目录 `omnet/` 包含 NED/C++ 无线模型、构建和启动入口、会话管理、道路导出及结果。
 RSU 入口、会话、场景管理、实体与位置定义集中在 `scene/rsu/`；CARLA 实现在其 `carla/` 子目录，SUMO 图标在 `sumo/rsu.png`，位置列表在 `config/town04.json`。覆盖层在 `carla/vanet_visual/`，定制 GUI 在 `sumo/gui/`。
 Lincoln 只使用 `carla/Lincoln/run_lincoln.sh`，固定车位用 `--vanet-slot`，不另设车辆启动器。
-完整共享桥及工程联仿适配在 `cobridge/bridge/`，由 `cobridge/run_cobridge.sh` 管理，官方源码未修改。
+共享桥的管理、主服务、同步、IPC、路径和性能统计在 `cobridge/common/`；SUMO/TraCI 与 NPC 客户端在 `cobridge/sumo/`，桥端 OMNeT++ TCP 传输在 `cobridge/omnet/transport.py`，CARLA 通信显示进程管理在 `cobridge/carla/communication_view.py`。统一由 `cobridge/run_cobridge.sh` 管理，官方源码未修改。旧 `cobridge/bridge/` 和 `vanet/runtime/` 已移除。
 OMNeT++ 不另起 SUMO，不另连 TraCI。

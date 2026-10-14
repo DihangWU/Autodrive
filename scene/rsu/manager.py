@@ -6,8 +6,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import json
 import logging
 
-from cobridge.paths import RSU_SUMO_DIR
-from cobridge.bridge.shared_sumo import alive, atomic_json, control_folder
+from cobridge.common.paths import RSU_SUMO_DIR
+from cobridge.common.ipc import alive, atomic_json, control_folder
 from vanet.common.config import sumo_rsu
 from scene.rsu.carla.rsu_marker import draw_marker
 from scene.rsu.carla.rsu_body import RsuBody

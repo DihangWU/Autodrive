@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 os.environ.setdefault('SUMO_HOME', str(Path.home() / 'sumo-1.22.0'))
 sys.path.insert(0, str(ROOT / 'cobridge/carla-source-official/Co-Simulation/Sumo'))
 
-from cobridge.bridge.sumo_simulation import SumoTLManager, SumoSignalState
+from cobridge.sumo.traci_client import SumoTLManager, SumoSignalState
 
 
 def main():
@@ -24,7 +24,7 @@ def main():
         'second': {('junction', 1)},
     }[landmark])
 
-    with patch('cobridge.bridge.sumo_simulation.traci.trafficlight.setLinkState') as send:
+    with patch('cobridge.sumo.traci_client.traci.trafficlight.setLinkState') as send:
         manager.switch_off()
         assert send.call_count == 2
         assert set(call.args for call in send.call_args_list) == {

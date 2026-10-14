@@ -3,7 +3,7 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from cobridge.paths import SUMO_CO_SIM_DIR, OMNET_DIR
+from cobridge.common.paths import SUMO_CO_SIM_DIR, OMNET_DIR
 
 
 def main():

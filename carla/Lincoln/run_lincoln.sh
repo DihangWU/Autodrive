@@ -62,6 +62,6 @@ while [[ $# -gt 0 ]]; do
 done
 "$PYTHON" -c 'import carla, rclpy, tf2_ros, numpy, tkinter, yaml'
 if $START_SUMO; then
-    "$PYTHON" "$PROJECT_DIR/cobridge/bridge/ensure_bridge.py" --host "$HOST_ARG" --port "$PORT_ARG" --npcs "$NPC_COUNT"
+    "$PYTHON" "$PROJECT_DIR/cobridge/common/bridge_manager.py" --host "$HOST_ARG" --port "$PORT_ARG" --npcs "$NPC_COUNT"
 fi
 exec "$PYTHON" "$LINCOLN_DIR/ego_vehicle.py" "${EGO_ARGS[@]}"

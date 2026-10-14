@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from contextlib import contextmanager
 import fcntl
 import json
-from cobridge.bridge.shared_sumo import control_folder, identity, alive, atomic_json
+from cobridge.common.ipc import control_folder, identity, alive, atomic_json
 
 
 class CameraOwnership:

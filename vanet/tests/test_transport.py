@@ -13,9 +13,9 @@ import tempfile
 import json
 import time
 from types import SimpleNamespace
-from vanet.runtime.bridge import VanetBridge
+from cobridge.omnet.transport import VanetBridge
 
-from cobridge.paths import OMNET_DIR as ROOT
+from cobridge.common.paths import OMNET_DIR as ROOT
 
 class World:
     def __init__(self):

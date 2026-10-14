@@ -12,7 +12,7 @@ import subprocess
 import time
 
 import carla
-from cobridge.bridge.shared_sumo import control_folder, atomic_json, request
+from cobridge.common.ipc import control_folder, atomic_json, request
 
 PROJECT = Path(__file__).resolve().parents[2]
 
@@ -24,7 +24,12 @@ def bridges(host, port):
             continue
         try:
             args = (directory / 'cmdline').read_bytes().decode().strip('\0').split('\0')
-            if not any(Path(arg).name == 'spawn_npc_sumo.py' for arg in args) or not any(flag in args for flag in ('--bridge-server', '--standalone')):
+            # Also recognize the old running entry point so it can be stopped
+            # safely after migration; no old launcher file is retained.
+            entrypoints = {('cobridge', 'common', 'service.py'),
+                           ('cobridge', 'sumo', 'npc_client.py'),
+                           ('cobridge', 'bridge', 'spawn_npc_sumo.py')}
+            if not any(tuple(Path(arg).parts[-3:]) in entrypoints for arg in args) or not any(flag in args for flag in ('--bridge-server', '--standalone')):
                 continue
             peer_host = args[args.index('--host') + 1] if '--host' in args else '127.0.0.1'
             port_flag = '--port' if '--port' in args else '-p' if '-p' in args else None
@@ -77,7 +82,7 @@ def ensure_bridge(host='127.0.0.1', port=2000, npcs=0, stop=False, step_length=.
                 raise SystemExit('SUMO not found. Set SUMO_HOME to its installation directory.')
             env = dict(os.environ, SUMO_HOME=str(sumo))
             env['PATH'] = str(sumo / 'bin') + ':' + env['PATH']
-            script = PROJECT / 'cobridge/bridge/spawn_npc_sumo.py'
+            script = PROJECT / 'cobridge/common/service.py'
             with (folder / 'sumo.log').open('w') as log:
                 command = [str(Path.home() / 'carla-venv/bin/python'), '-u', str(script),
                            '--bridge-server', '--host', args.host, '--port', str(args.port),

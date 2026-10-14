@@ -13,8 +13,8 @@ import time
 from types import SimpleNamespace
 
 from vanet.common.config import load_config
-from cobridge.paths import OMNET_DIR
-from vanet.runtime.bridge import VanetBridge
+from cobridge.common.paths import OMNET_DIR
+from cobridge.omnet.transport import VanetBridge
 
 
 class World:

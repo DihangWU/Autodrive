@@ -3,8 +3,10 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import carla
-from cobridge.bridge.ensure_bridge import bridges
-from vanet.runtime.spawn import experiment_points
+from cobridge.common.bridge_manager import bridges
+from cobridge.common.paths import LINCOLN_DIR
+sys.path.insert(0, str(LINCOLN_DIR))
+from spawn import experiment_points
 
 if __name__=='__main__':
     if bridges('127.0.0.1',2000):

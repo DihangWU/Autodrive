@@ -5,7 +5,7 @@ Script to modify automatically vtypes to carla type ids in sumo route files.
 
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 # Copyright (c) 2020 Computer Vision Center (CVC) at the Universitat Autonoma de
 # Barcelona (UAB).
@@ -30,7 +30,7 @@ import lxml.etree as ET  # pylint: disable=import-error
 # -- load vtypes -----------------------------------------------------------------------------------
 # ==================================================================================================
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 with (PROJECT_ROOT / 'cobridge/carla-source-official/Co-Simulation/Sumo/data/vtypes.json').open() as f:
     VTYPES = json.load(f)['carla_blueprints'].keys()
 

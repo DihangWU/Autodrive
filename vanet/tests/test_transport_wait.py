@@ -10,7 +10,7 @@ import tempfile
 import time
 
 from vanet.common.config import load_config
-from cobridge.paths import OMNET_DIR
+from cobridge.common.paths import OMNET_DIR
 
 
 def main():

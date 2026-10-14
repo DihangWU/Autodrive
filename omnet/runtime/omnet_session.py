@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from cobridge.bridge.shared_sumo import control_folder, request
+from cobridge.common.ipc import control_folder, request
 from vanet.common.config import CONFIG, load_config, rsu_definitions, radio_arguments
 
 

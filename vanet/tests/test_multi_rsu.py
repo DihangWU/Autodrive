@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 from vanet.common.config import load_config
 
-from cobridge.paths import OMNET_DIR as ROOT
+from cobridge.common.paths import OMNET_DIR as ROOT
 
 
 def main():

@@ -7,7 +7,7 @@ import logging
 import tempfile
 
 from test_radio_range import run_case, load_config
-from cobridge.paths import VISUAL_DIR
+from cobridge.common.paths import VISUAL_DIR
 sys.path.insert(0, str(VISUAL_DIR))
 from communication_overlay import COLORS, colored_segments, project_segment
 

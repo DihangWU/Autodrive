@@ -4,7 +4,7 @@
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from cobridge.paths import SUMO_CO_SIM_DIR
+from cobridge.common.paths import SUMO_CO_SIM_DIR
 import os
 os.environ.setdefault('SUMO_HOME', str(Path.home() / 'sumo-1.22.0'))
 sys.path.insert(0, str(SUMO_CO_SIM_DIR))

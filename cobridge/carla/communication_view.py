@@ -6,8 +6,8 @@ import subprocess
 import sys
 import time
 
-from cobridge.paths import VISUAL_DIR
-from cobridge.bridge.shared_sumo import atomic_json, control_folder, identity
+from cobridge.common.paths import VISUAL_DIR
+from cobridge.common.ipc import atomic_json, control_folder, identity
 
 
 class CommunicationView:
