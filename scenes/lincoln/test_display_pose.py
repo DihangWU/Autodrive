@@ -76,6 +76,26 @@ class DisplayPoseTests(unittest.TestCase):
         self.assertTrue(all(b > a for a, b in zip(output, output[1:])))
         self.assertAlmostEqual(output[-1], 2.)
 
+    def test_receipt_jitter_does_not_reanchor_each_display_frame(self):
+        poses = DisplayPoseBuffer(.05)
+        events = [(i * .05 + (.01 if i % 2 else 0.), i * .05)
+                  for i in range(101)]
+        next_event = 0
+        output = []
+        for frame in range(300):
+            now = frame / 60
+            while next_event < len(events) and events[next_event][0] <= now:
+                receipt, simulation = events[next_event]
+                poses.push(simulation, (24 * simulation, 0., 0.), heading(0), receipt)
+                next_event += 1
+            display = poses.sample(now)
+            if display is not None:
+                self.assertLessEqual(display[0], events[next_event - 1][1])
+                output.append(display[0])
+        steps = [b - a for a, b in zip(output[30:], output[31:])]
+        self.assertGreater(min(steps), .014)
+        self.assertLess(max(steps), .019)
+
 
 if __name__ == '__main__':
     unittest.main()

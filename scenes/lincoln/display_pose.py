@@ -30,6 +30,8 @@ class DisplayPoseBuffer:
         self.delay = delay_seconds
         self.samples = deque(maxlen=32)
         self.last_display_time = None
+        self.last_wall_time = None
+        self.playback_rate = None
         self.lock = threading.Lock()
 
     def push(self, simulation_time, position, rotation, wall_time=None):
@@ -38,6 +40,8 @@ class DisplayPoseBuffer:
             if self.samples and simulation_time < self.samples[-1][0]:
                 self.samples.clear()
                 self.last_display_time = None
+                self.last_wall_time = None
+                self.playback_rate = None
             if self.samples and simulation_time == self.samples[-1][0]:
                 return
             self.samples.append((simulation_time, wall_time, tuple(position), tuple(rotation)))
@@ -48,11 +52,26 @@ class DisplayPoseBuffer:
             if not self.samples:
                 return None
             latest = self.samples[-1]
-            earlier = self.samples[max(0, len(self.samples) - 8)]
+            earlier = self.samples[0]
             elapsed = latest[1] - earlier[1]
             rate = (latest[0] - earlier[0]) / elapsed if elapsed > 0 else 1.
-            target = latest[0] + max(0., wall_time - latest[1]) * rate - self.delay
+            desired = latest[0] + max(0., wall_time - latest[1]) * rate - self.delay
+            if self.last_wall_time is None:
+                target = desired
+                self.playback_rate = rate
+            else:
+                wall_step = max(0., wall_time - self.last_wall_time)
+                # Advance a continuous playback clock. Re-anchoring on every
+                # receipt would turn network/scheduling jitter into speed jumps.
+                blend = 1. - math.exp(-wall_step / .25)
+                self.playback_rate += blend * (rate - self.playback_rate)
+                advance = wall_step * self.playback_rate
+                predicted = self.last_display_time + advance
+                correction = (desired - predicted) * blend
+                correction = max(-advance * .1, min(advance * .1, correction))
+                target = predicted + correction
             target = max(self.samples[0][0], min(latest[0], target))
+            self.last_wall_time = wall_time
             if self.last_display_time is not None and target <= self.last_display_time:
                 return None
             self.last_display_time = target
