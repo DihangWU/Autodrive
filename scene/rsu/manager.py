@@ -3,16 +3,14 @@
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from cobridge.paths import RSU_DIR
-sys.path.insert(0, str(RSU_DIR))
 import json
 import logging
 
-from cobridge.paths import SUMO_GUI_ASSETS_DIR
+from cobridge.paths import RSU_SUMO_DIR
 from cobridge.bridge.shared_sumo import alive, atomic_json, control_folder
 from vanet.common.config import sumo_rsu
-from rsu_marker import draw_marker
-from rsu_body import RsuBody
+from scene.rsu.carla.rsu_marker import draw_marker
+from scene.rsu.carla.rsu_body import RsuBody
 
 
 class SceneMarkers:
@@ -94,7 +92,7 @@ class SceneMarkers:
                     body.spawn(self.world, p, base_z)
                     traci.poi.add(name, x, y, (255, 130, 0, 255),
                                   poiType='RSU', layer=100, width=8, height=8,
-                                  imgFile=str(SUMO_GUI_ASSETS_DIR / 'rsu.png'))
+                                  imgFile=str(RSU_SUMO_DIR / 'rsu.png'))
                     self.markers[name] = (p, base_z)
                     traci.poi.setParameter(name, 'name', name)
                     positions[name] = [x, y]

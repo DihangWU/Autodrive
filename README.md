@@ -99,7 +99,7 @@ NPC 默认不联网。让当前批次参与通信：
 ```
 
 OMNeT++ 模型、构建、启动会话和背景导出已迁入根目录 `omnet/`，不保留旧路径启动器。
-共享配置仍为 `vanet/town04.json`，桥端协议和跨模块测试仍在 `vanet/`。
+共享配置为 `vanet/town04.json`，其中 `rsu_config` 引用 `scene/rsu/config/town04.json` 的 RSU 位置列表；桥端协议和跨模块测试仍在 `vanet/`。
 
 在 Qtenv 点击 Run/Fast/Express 后开始推进通信。Qtenv 暂停会阻塞共享仿真时钟，这是基准的锁步机制。
 共享桥启动后，OMNeT++ 可以先于车辆运行；没有 RSU 时车辆仍能直连。
@@ -107,7 +107,7 @@ OMNeT++ 模型、构建、启动会话和背景导出已迁入根目录 `omnet/`
 在独立终端添加 RSU：
 
 ```bash
-./carla/rsu/run_rsu.sh
+./scene/rsu/run_rsu.sh
 ```
 
 Ctrl+C 删除 RSU，OMNeT++ 保持运行；再次执行重新创建。关闭 OMNeT++ 不删除独立 RSU。
@@ -131,7 +131,6 @@ Autodrive/
 ├── carla/
 │   ├── init/                  CARLA 启动、选图，保留原结构
 │   ├── Lincoln/               车辆、传感器、驾驶面板、RViz、车位选择
-│   ├── rsu/                   RSU 入口、实体、标签和标记
 │   ├── vanet_visual/          通信覆盖层
 │   └── carla_free_camera.py   手动启动的独立自由视角工具
 ├── cobridge/
@@ -143,7 +142,15 @@ Autodrive/
 │   └── runtime/               独立地图导出产物与日志
 ├── sumo/
 │   ├── traffic/run_npc.sh     NPC 批次入口
-│   └── gui/                   定制 GUI 构建、assets/rsu.png 图标与产物
+│   └── gui/                   定制 GUI 构建与产物
+├── scene/
+│   └── rsu/
+│       ├── run_rsu.sh         RSU 唯一启动入口
+│       ├── session.py         会话登记与退出清理
+│       ├── manager.py         桥调用的 RSU 场景管理
+│       ├── carla/             带碰撞的实体、塔标记与名称显示
+│       ├── sumo/rsu.png       SUMO POI 图标
+│       └── config/town04.json RSU 位置列表
 ├── omnet/
 │   ├── build.sh、run_omnet.sh   OMNeT++ 构建和唯一启动入口
 │   ├── runtime/               OMNeT++ 会话管理
@@ -152,7 +159,7 @@ Autodrive/
 │   ├── omnetpp.ini、radio.xml、antenna.xml、roads.txt
 │   └── results/               实验输出，迁移保留原结果
 ├── vanet/
-│   ├── town04.json            RSU、车位、通信范围与端口
+│   ├── town04.json            RSU 配置引用、车位、通信范围与端口
 │   ├── common/config.py       配置读取与校验
 │   ├── runtime/               桥端 TCP 通信、连线状态、性能分析
 │   ├── tools/、tests/、validation/
@@ -165,7 +172,7 @@ Autodrive/
 2. 共享桥把 CARLA 控制的车同步到 SUMO，把 SUMO NPC 同步到 CARLA；双向映射防止重复镜像。
 3. CARLA 传感器回调通过 Lincoln 最新帧队列和独立 ROS 发布线程交给 RViz；RViz 道路也来自 CARLA 当前地图。
 4. 桥向 OMNeT++ 发送节点位置快照，等待 ACK 后推进下一步。OMNeT++ 不另起 SUMO，不另连 TraCI。
-5. RSU 会话向桥登记，桥协调 CARLA 实体、SUMO POI 和通信节点。
+5. RSU 会话向桥登记，桥调用 `scene/rsu/manager.py`，协调 CARLA 实体、SUMO POI 和通信节点。
 6. OMNeT++ 返回真实握手/业务事件，覆盖层将连线画在 CARLA 主窗口，不进入传感器数据。
 
 ### 代码复用与官方边界
@@ -214,8 +221,12 @@ RViz 包括地图、车辆模型、rig 分组点云和八路拼图，传感器�
 
 ## 4. RSU、通信和坐标
 
-统一配置为 `vanet/town04.json`。在 `rsus` 中复制一项，设唯一 `rsu1` 等 ID，修改 `x/y/z/base_z`；退出 RSU 命令后重新启动即可，无需重启 OMNeT++。
+RSU 的代码、图标和位置定义集中在 `scene/rsu/`。修改 [scene/rsu/config/town04.json](scene/rsu/config/town04.json) 的 `rsus` 列表：复制一项，设唯一 `rsu1` 等 ID，修改 `x/y/z/base_z`；退出 RSU 命令后重新启动即可，无需重启 OMNeT++。
 坐标使用 CARLA 世界坐标，`z` 是顶部高度，`base_z` 是塔脚高度。配置详解见 [vanet/README.md](vanet/README.md)。
+
+`vanet/town04.json` 的 `rsu_config` 按该配置文件所在目录解析，默认值为 `../scene/rsu/config/town04.json`。统一加载器读取并校验 RSU 列表，再交给 CARLA、SUMO 和 OMNeT++；列表只维护一份。自定义 `--vanet-config PATH` 可以引用其他同地图的 RSU 配置，也可以提供完整的内嵌 `rsus` 列表，但不能同时使用两种定义。
+
+从旧目录升级后，先正常退出车辆、NPC、RSU 和 OMNeT++，执行 `./cobridge/run_cobridge.sh --stop`，再启动共享桥和客户端。已运行的桥不会自动重新加载迁移后的 Python 模块。旧 `carla/rsu/` 和 `sumo/gui/assets/rsu.png` 不保留兼容入口。
 
 默认车车 40 米、车与 RSU 220 米，通过 `communication.vehicle_range`、`communication.rsu_range` 统一调整，也支持单个节点例外。超范围不连通，V2V 与 RSU 转发可以共存。
 
@@ -223,7 +234,7 @@ RViz 包括地图、车辆模型、rig 分组点云和八路拼图，传感器�
 HELLO/ACK 确认双向邻居；RSU 转发车辆原始 probe。基准实现广播连通性，不含车辆多跳、跨 RSU 单播路由、IP 接入或切换协议。
 握手连线灰色，发送半段蓝色、接收半段黄色，中点分界；双向业务绿色。半透明细线由 Qt/X11 覆盖层显示，不生成传感器可见几何；RSU 实体塔身则能被探测。
 
-SUMO 专用 RSU 图标位于 `sumo/gui/assets/rsu.png`，由共享桥创建 POI 时引用。
+SUMO 专用 RSU 图标位于 `scene/rsu/sumo/rsu.png`，由 RSU 场景管理器创建 POI 时引用。
 SUMO GUI 同时显示 SUMO/CARLA 鼠标坐标、右键复制 CARLA 坐标和底部仿真/现实时间倍率。
 鼠标坐标从已载入路网的 netOffset 转换；车辆同步另包含车长参考点、y 翻转及 yaw 转换。
 VANET 的配置 offset 和静态 Town04 背景沿用基准，OMNeT++ 道路从官方示例 Town04 路网导出到 `omnet/roads.txt`，不代表任意地图实时背景。

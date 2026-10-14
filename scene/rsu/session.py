@@ -22,7 +22,7 @@ def main():
     args = parser.parse_args()
     cfg = load_config(args.vanet_config)
     if not cfg['rsus']:
-        raise RuntimeError('town04.json 的 rsus 列表为空，没有可生成的 RSU。')
+        raise RuntimeError('RSU 配置中的 rsus 列表为空，没有可生成的 RSU。')
     folder = control_folder(args.carla_host, args.carla_port)
     lease, reply = folder / 'vanet-rsu.json', folder / 'vanet-rsu-status.json'
     stopped = threading.Event()

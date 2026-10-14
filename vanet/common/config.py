@@ -8,7 +8,19 @@ from cobridge.paths import CONFIG
 
 
 def load_config(path=CONFIG):
-    cfg = json.loads(Path(path).read_text())
+    path = Path(path)
+    cfg = json.loads(path.read_text())
+    rsu_file = cfg.pop('rsu_config', None)
+    if rsu_file is not None:
+        if not isinstance(rsu_file, str) or not rsu_file.strip():
+            raise ValueError(f'{path}: rsu_config must be a configuration file path')
+        if 'rsus' in cfg or 'rsu' in cfg:
+            raise ValueError(f'{path}: use rsu_config or inline RSUs, not both')
+        rsu_path = (path.parent / rsu_file).resolve()
+        rsu_cfg = json.loads(rsu_path.read_text())
+        if not isinstance(rsu_cfg, dict) or rsu_cfg.get('map') != cfg.get('map'):
+            raise ValueError(f'{rsu_path}: RSU map must match {cfg.get("map")}')
+        cfg['rsus'] = rsu_cfg.get('rsus')
     if 'rsu' in cfg and 'rsus' in cfg:
         raise ValueError('Use rsus only; do not define both rsu and rsus')
     if 'rsus' not in cfg and 'rsu' in cfg:

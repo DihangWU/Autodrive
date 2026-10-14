@@ -1,4 +1,5 @@
 {
+  "rsu_config": "../scene/rsu/config/town04.json",
   "map": "Town04",
   "junction": "924",
   "source": "examples/net/Town04.net.xml; candidate, checked against live CARLA at spawn",
@@ -6,16 +7,6 @@
     "x": 201.54,
     "y": -171.64
   },
-  "rsus": [
-    {
-      "id": "rsu0",
-      "x": 193.0,
-      "y": -179.0,
-      "z": 60.0,
-      "base_z": 0.39,
-      "beacon_radius": 5.0
-    }
-  ],
   "slots": [
     {
       "name": "A",

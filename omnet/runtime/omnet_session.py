@@ -22,7 +22,7 @@ def main():
     args, command = parser.parse_known_args()
     cfg = load_config(args.vanet_config)
     if any(arg.startswith(('--*.rsu', '--*.manager.rsuDefinitions=')) for arg in command):
-        raise SystemExit('RSU coordinates must be changed in vanet/town04.json.')
+        raise SystemExit('RSU coordinates must be changed in scene/rsu/config/town04.json (or the selected configuration).')
     if any(arg.startswith('--') and any(name in arg.split('=', 1)[0] for name in
            ('vehicleRange', 'rsuRange', 'communicationRange', 'maxInterfDist')) for arg in command):
         raise SystemExit('Radio ranges must be changed in the JSON communication configuration.')
@@ -47,7 +47,7 @@ def main():
             status = request(args.carla_host, args.carla_port, {'action': 'status'}, timeout=8)
             if status.get('vanet_scene', {}).get('protocol') != 5:
                 raise RuntimeError('共享 SUMO 桥仍是旧版本。请正常关闭车辆后，执行 bash cobridge/run_cobridge.sh --stop，再重新启动车辆。')
-            print('Live RSUs are controlled independently by bash carla/rsu/run_rsu.sh.', flush=True)
+            print('Live RSUs are controlled independently by bash scene/rsu/run_rsu.sh.', flush=True)
         child = subprocess.Popen(command, close_fds=True, start_new_session=True)
         def forward(signum, frame):
             if child.poll() is None:

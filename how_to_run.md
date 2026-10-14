@@ -25,7 +25,7 @@
         ```
 5. 添加 RSU
     ```shell
-    ./carla/rsu/run_rsu.sh
+    ./scene/rsu/run_rsu.sh
     ```
 6. 启动 omnet
     ```shell
@@ -38,9 +38,9 @@
 7. 添加 npc 车流
     * 默认不参与通信
         ```shell
-        ./sumo/traffic/run_npc.sh -n 200 --sumo-gui --step-length 0.05 --tls-manager carla
+        ./sumo/traffic/run_npc.sh -n 100 --sumo-gui --step-length 0.05 --tls-manager carla
         ```
     * 参与通信，添加 `--vanet`
         ```shell
-        ./sumo/traffic/run_npc.sh -n 200 --sumo-gui --step-length 0.05 --tls-manager carla --vanet
+        ./sumo/traffic/run_npc.sh -n 40 --sumo-gui --step-length 0.05 --tls-manager carla --vanet
         ```

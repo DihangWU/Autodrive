@@ -62,7 +62,7 @@ from util.netconvert_carla import netconvert_carla
 from cobridge.bridge.shared_sumo import RequestService, control_folder, atomic_json, request, identity, alive
 from cobridge.bridge.ensure_bridge import ensure_bridge
 
-from cobridge.bridge.scene_markers import SceneMarkers
+from scene.rsu.manager import SceneMarkers
 from vanet.runtime.communication import CommunicationView
 
 

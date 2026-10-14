@@ -7,14 +7,12 @@ Does not tick, reload the map, move vehicles, or change simulation settings.
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from cobridge.paths import RSU_DIR
-sys.path.insert(0, str(RSU_DIR))
 import argparse
 import json
 import queue
 
 from vanet.common.config import load_config
-from rsu_body import RsuBody
+from scene.rsu.carla.rsu_body import RsuBody
 
 
 def main():

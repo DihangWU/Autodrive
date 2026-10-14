@@ -2,7 +2,7 @@
 
 本目录在现有 CARLA/SUMO 共享桥上接入 OMNeT++ 6.1 和 Veins 5.3.1。车辆运动仍由 CARLA/SUMO 决定，Veins 为已入网车辆创建 OBU，模拟 802.11p 无线通信；本项目不使用 INET。共享桥是唯一推进 CARLA 时钟和调用 TraCI 的进程。
 
-以下命令均从**工程根目录**执行。配置入口是 [town04.json](town04.json)；运行入口是 `carla/Lincoln/run_lincoln.sh --vanet-slot auto`、`omnet/run_omnet.sh` 和 `carla/rsu/run_rsu.sh`。
+以下命令均从**工程根目录**执行。共享配置入口是 [town04.json](town04.json)，RSU 位置列表是 [scene/rsu/config/town04.json](../scene/rsu/config/town04.json)；运行入口是 `carla/Lincoln/run_lincoln.sh --vanet-slot auto`、`omnet/run_omnet.sh` 和 `scene/rsu/run_rsu.sh`。
 
 ## 快速启动
 
@@ -35,7 +35,7 @@
 4. 需要 RSU 时，在独立终端运行：
 
    ```bash
-   bash carla/rsu/run_rsu.sh
+   bash scene/rsu/run_rsu.sh
    ```
 
    RSU 会同时出现在 CARLA、SUMO 和运行中的 OMNeT++。在该终端按 Ctrl+C 只删除 RSU；车辆和 OMNeT++ 继续运行。也可以先启动 RSU，再打开 OMNeT++。
@@ -80,7 +80,7 @@ NPC **默认只参与 SUMO/CARLA 交通，不创建 OBU**。例如生成 200 辆
 
 ## 配置、路口与坐标
 
-[town04.json](town04.json) 集中定义实验车位、RSU、通信半径及网络端口。当前选用 Town04 路口 **924**：车位 A、B 位于相互垂直的入口；`rsu0` 位于路侧草地、红砖墙前。
+[town04.json](town04.json) 定义实验车位、通信半径及网络端口，通过 `rsu_config` 引用 [RSU 位置列表](../scene/rsu/config/town04.json)。当前选用 Town04 路口 **924**：车位 A、B 位于相互垂直的入口；`rsu0` 位于路侧草地、红砖墙前。
 
 | 对象 | CARLA x / y（米） | 其他参数 |
 |---|---:|---|
@@ -118,7 +118,7 @@ Qtenv 绘制：x' = SUMO.x - 路网最小 x + 40
 
 ## RSU：新增、修改与清理
 
-RSU 的唯一位置列表是 [town04.json](town04.json) 的 `rsus`。保留现有 `rsu0`，复制一个列表项并改唯一 `id` 与坐标即可增加 RSU。例如：
+RSU 的唯一位置列表是 [scene/rsu/config/town04.json](../scene/rsu/config/town04.json) 的 `rsus`。保留现有 `rsu0`，复制一个列表项并改唯一 `id` 与坐标即可增加 RSU。例如：
 
 ```json
 "rsus": [
@@ -137,10 +137,12 @@ RSU 的唯一位置列表是 [town04.json](town04.json) 的 `rsus`。保留现�
 
 第二项坐标只是格式示例，需换成实际目标位置。`id` 必须唯一，以 `rsu` 开头，后续只用字母、数字或下划线；它同时是 OMNeT++ 节点名、SUMO POI 名和 CARLA 显示名。`z` 为通信节点与主体顶部绝对高度；`base_z` 是塔脚绝对高度，可省略并由邻近车道估算。`beacon_radius` 是顶部光环半径，省略时为 1.6 米。网络高度范围为 0–100 米。
 
+共享配置中 `rsu_config` 默认值为 `../scene/rsu/config/town04.json`，相对共享配置文件所在目录解析；RSU 配置的 `map` 必须与共享配置一致。自定义 `--vanet-config` 支持引用另一个 RSU 文件，也支持内嵌 `rsus` 列表，两种定义不能同时出现。加载后产生完整配置快照，传给桥和 OMNeT++。
+
 修改列表后，在 RSU 终端按 Ctrl+C，再运行：
 
 ```bash
-bash carla/rsu/run_rsu.sh
+bash scene/rsu/run_rsu.sh
 ```
 
 车辆、共享桥和 OMNeT++ 不必重启。删除列表项后重启 RSU 命令会删除对应 RSU；空列表 `[]` 表示不生成 RSU。RSU 命令异常终止时桥也会清理其实体和图标。
@@ -253,7 +255,7 @@ python3 vanet/tests/benchmark_radio.py
 
 代码按功能分布：`runtime/` 管理桥端 TCP 通信、连线状态和性能统计；
 `common/config.py` 处理配置，工程路径在 `cobridge/paths.py`；根目录 `omnet/` 包含 NED/C++ 无线模型、构建和启动入口、会话管理、道路导出及结果。
-RSU 入口和实体在 `carla/rsu/`，覆盖层在 `carla/vanet_visual/`，定制 GUI 在 `sumo/gui/`，SUMO 的 RSU 图标在 `sumo/gui/assets/rsu.png`。
+RSU 入口、会话、场景管理、实体与位置定义集中在 `scene/rsu/`；CARLA 实现在其 `carla/` 子目录，SUMO 图标在 `sumo/rsu.png`，位置列表在 `config/town04.json`。覆盖层在 `carla/vanet_visual/`，定制 GUI 在 `sumo/gui/`。
 Lincoln 只使用 `carla/Lincoln/run_lincoln.sh`，固定车位用 `--vanet-slot`，不另设车辆启动器。
 完整共享桥及工程联仿适配在 `cobridge/bridge/`，由 `cobridge/run_cobridge.sh` 管理，官方源码未修改。
 OMNeT++ 不另起 SUMO，不另连 TraCI。

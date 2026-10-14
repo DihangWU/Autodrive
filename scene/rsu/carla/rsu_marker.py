@@ -1,10 +1,7 @@
 """Short-lived CARLA RSU drawing, owned by the independent RSU command."""
 
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import math
-from rsu_label import draw_label
+from .rsu_label import draw_label
 
 
 def draw_marker(world, rsu, base_z, lifetime=.1, label="RSU"):
