@@ -141,7 +141,8 @@ Autodrive/
 │   │   ├── performance.py     各阶段耗时统计
 │   │   └── paths.py           工程路径集中定义
 │   ├── carla/
-│   │   └── communication_view.py CARLA 通信覆盖层进程管理
+│   │   ├── communication_view.py CARLA 通信覆盖层进程管理
+│   │   └── communication_overlay.py CARLA 窗口通信连线覆盖层
 │   ├── sumo/
 │   │   ├── traci_client.py    SUMO/TraCI 操作
 │   │   ├── npc_client.py      NPC 批次客户端与复用的参数解析
@@ -156,7 +157,6 @@ Autodrive/
 │   └── gui/                   定制 GUI 构建与产物
 ├── scenes/
 │   ├── lincoln/              车辆、传感器、驾驶面板、RViz、车位选择
-│   ├── vanet_visual/         场景通信连线覆盖层
 │   └── rsu/
 │       ├── run_rsu.sh         RSU 唯一启动入口
 │       ├── session.py         会话登记与退出清理
@@ -187,7 +187,7 @@ Autodrive/
 5. RSU 会话向桥登记，桥调用 `scenes/rsu/manager.py`，协调 CARLA 实体、SUMO POI 和通信节点。
 6. OMNeT++ 返回真实握手/业务事件，覆盖层将连线画在 CARLA 主窗口，不进入传感器数据。
 
-场景对象和场景显示统一归入 `scenes/`：Lincoln 使用 `scenes/lincoln/`（目录名统一小写），RSU 使用 `scenes/rsu/`，通信覆盖层使用 `scenes/vanet_visual/`。车辆网格、传感器配置、RViz 模板以及已有 `runtime/` 日志随 Lincoln 目录移动；共享桥从 `cobridge/common/paths.py` 获取新路径。`carla/` 保留 CARLA 启动、选图及独立自由视角工具。
+场景对象归入 `scenes/`：Lincoln 使用 `scenes/lincoln/`（目录名统一小写），RSU 使用 `scenes/rsu/`。通信覆盖层与其进程管理集中在 `cobridge/carla/`：共享桥提供节点与通信状态，覆盖层直接读取 CARLA spectator 视角进行投影显示。车辆网格、传感器配置、RViz 模板以及已有 `runtime/` 日志随 Lincoln 目录移动；共享桥从 `cobridge/common/paths.py` 获取新路径。`carla/` 保留 CARLA 启动、选图及独立自由视角工具。
 
 旧 `scene/`、`carla/Lincoln/`、`carla/vanet_visual/` 不保留兼容入口。迁移前已启动的车辆、RSU、覆盖层和共享桥不会自动加载新代码；正常退出客户端并停止旧桥后，从本文的新路径重新启动。
 

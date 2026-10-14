@@ -6,7 +6,6 @@ import subprocess
 import sys
 import time
 
-from cobridge.common.paths import VISUAL_DIR
 from cobridge.common.ipc import atomic_json, control_folder, identity
 
 
@@ -32,7 +31,7 @@ class CommunicationView:
                 for name in ('QT_PLUGIN_PATH','QT_QPA_PLATFORM_PLUGIN_PATH'):
                     env.pop(name,None)
                 with self.log.open('a') as log:
-                    self.process = subprocess.Popen([sys.executable,str(VISUAL_DIR / 'communication_overlay.py'),
+                    self.process = subprocess.Popen([sys.executable,str(Path(__file__).resolve().with_name('communication_overlay.py')),
                                                      '--state',str(self.state),'--host',self.host,'--port',str(self.port)],
                                                     env=env,stdin=subprocess.DEVNULL,stdout=log,stderr=log,
                                                     close_fds=True,start_new_session=True)
