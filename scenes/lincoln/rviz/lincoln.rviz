@@ -980,7 +980,7 @@ Visualization Manager:
   Global Options:
     Background Color: 48; 48; 48
     Fixed Frame: map
-    Frame Rate: 20
+    Frame Rate: 60
   Name: root
   Tools:
     - Class: rviz_default_plugins/MoveCamera
@@ -1010,7 +1010,7 @@ Visualization Manager:
       Name: Current View
       Near Clip Distance: 0.05000000074505806
       Pitch: 0.22500017285346985
-      Target Frame: lincoln_f5c9033aa2/base_link
+      Target Frame: lincoln_f5c9033aa2/visual_base_link
       Value: ThirdPersonFollower (rviz_default_plugins)
       Yaw: 3.1500003337860107
     Saved: ~

@@ -154,6 +154,8 @@ class Lincoln(Node):
         self.follow = self.camera_owner.claim()
         self.camera_control_enabled = self.follow
         self.dt = self.world.get_settings().fixed_delta_seconds or .05
+        from display_pose import DisplayPoseBuffer
+        self.display_poses = DisplayPoseBuffer(self.dt)
         try:
             self.spawn_car()
             specs = json.loads((PROJECT_ROOT / 'scenes/lincoln/config/sensors.json').read_text())
@@ -275,7 +277,10 @@ class Lincoln(Node):
 
     def make_markers(self):
         self.model = Marker()
-        self.model.header.frame_id = self.frame()
+        self.model.header.frame_id = self.frame('visual_base_link')
+        # Resolve the moving frame on each RViz update, alongside its follower
+        # camera, instead of freezing the pose when a marker message arrives.
+        self.model.frame_locked = True
         self.model.ns, self.model.id = self.uid, 0
         self.model.type, self.model.action = Marker.MESH_RESOURCE, Marker.ADD
         self.model.mesh_resource = (PROJECT_ROOT / 'scenes/lincoln/assets/lincoln.dae').as_uri()
@@ -289,9 +294,11 @@ class Lincoln(Node):
         self.mounts = []
         for i, entry in enumerate(self.sensors, 1):
             m = Marker()
-            m.header.frame_id = self.frame(entry['spec']['name'])
+            m.header.frame_id = self.frame('visual_base_link')
+            m.frame_locked = True
             m.ns, m.id, m.type, m.action = self.uid, i, Marker.SPHERE, Marker.ADD
-            m.pose.orientation.w = 1.
+            m.pose.position.x, m.pose.position.y, m.pose.position.z = entry['pose'][:3]
+            set_rotation(m.pose.orientation, entry['pose'][3:])
             m.scale.x = m.scale.y = m.scale.z = .08
             m.color.r, m.color.g, m.color.b, m.color.a = (1., .6, .1, 1.)
             self.mounts.append(m)
@@ -300,24 +307,45 @@ class Lincoln(Node):
         from map_visualization import road_markers
         self.roads = road_markers(self.world.get_map())
 
+    def publish_pose(self, snapshot):
+        """Publish each observed simulation pose from the frame-waiting thread."""
+        if snapshot.frame == self.last_frame:
+            return
+        actor = snapshot.find(self.car.id)
+        if actor is None:
+            return
+        self.last_frame = snapshot.frame
+        transform = actor.get_transform()
+        tf = TransformStamped()
+        tf.header.frame_id, tf.child_frame_id = 'map', self.frame()
+        tf.header.stamp = stamp(snapshot.timestamp.elapsed_seconds)
+        loc, rot = transform.location, transform.rotation
+        tf.transform.translation.x, tf.transform.translation.y, tf.transform.translation.z = loc.x, -loc.y, loc.z
+        set_rotation(tf.transform.rotation, (math.radians(rot.roll), -math.radians(rot.pitch), -math.radians(rot.yaw)))
+        self.display_poses.push(snapshot.timestamp.elapsed_seconds,
+                               (loc.x, -loc.y, loc.z),
+                               (tf.transform.rotation.x, tf.transform.rotation.y,
+                                tf.transform.rotation.z, tf.transform.rotation.w))
+        self.tf.sendTransform(tf)
+        self.markers.publish(MarkerArray(markers=[self.model] + self.mounts))
+
+    def publish_display_pose(self):
+        pose = self.display_poses.sample()
+        if pose is None:
+            return
+        timestamp, position, rotation = pose
+        tf = TransformStamped()
+        tf.header.frame_id, tf.child_frame_id = 'map', self.frame('visual_base_link')
+        tf.header.stamp = stamp(timestamp)
+        tf.transform.translation.x, tf.transform.translation.y, tf.transform.translation.z = position
+        tf.transform.rotation.x, tf.transform.rotation.y, tf.transform.rotation.z, tf.transform.rotation.w = rotation
+        self.tf.sendTransform(tf)
+
     def update(self):
         if not self.car.is_alive:
             self.stop_requested = True
             return
         snapshot = self.world.get_snapshot()
-        if snapshot.frame != self.last_frame:
-            self.last_frame = snapshot.frame
-            actor = snapshot.find(self.car.id)
-            if actor:
-                transform = actor.get_transform()
-                tf = TransformStamped()
-                tf.header.frame_id, tf.child_frame_id = 'map', self.frame()
-                tf.header.stamp = stamp(snapshot.timestamp.elapsed_seconds)
-                loc, rot = transform.location, transform.rotation
-                tf.transform.translation.x, tf.transform.translation.y, tf.transform.translation.z = loc.x, -loc.y, loc.z
-                set_rotation(tf.transform.rotation, (math.radians(rot.roll), -math.radians(rot.pitch), -math.radians(rot.yaw)))
-                self.tf.sendTransform(tf)
-                self.markers.publish(MarkerArray(markers=[self.model] + self.mounts))
         for entry in self.sensors:
             try:
                 data = entry['queue'].get_nowait()
@@ -493,7 +521,7 @@ class Lincoln(Node):
 
 def rviz_config(node):
     rear = {'Class': 'rviz_default_plugins/ThirdPersonFollower', 'Name': '车后跟随',
-            'Target Frame': node.frame(), 'Distance': 15., 'Pitch': .4, 'Yaw': 3.14,
+            'Target Frame': node.frame('visual_base_link'), 'Distance': 15., 'Pitch': .4, 'Yaw': 3.14,
             'Focal Point': {'X': 0., 'Y': 0., 'Z': 1.}, 'Near Clip Distance': .05}
     displays = [dict(Class='rviz_default_plugins/Grid', Name='Grid', Enabled=True, **{'Cell Size': 5}),
         dict(Class='rviz_default_plugins/MarkerArray', Name='Lincoln and mounts', Enabled=True,
@@ -537,7 +565,7 @@ def rviz_config(node):
     return {'Panels': [{'Class': 'rviz_common/Displays', 'Name': 'Displays',
                         'Property Tree Widget': {'Expanded': []}},
                        {'Class': 'rviz_common/Views', 'Name': 'Views'}],
-        'Visualization Manager': {'Global Options': {'Fixed Frame': 'map', 'Frame Rate': 20},
+        'Visualization Manager': {'Global Options': {'Fixed Frame': 'map', 'Frame Rate': 60},
             'Tools': [{'Class': 'rviz_default_plugins/MoveCamera'},
                       {'Class': 'rviz_default_plugins/Interact'},
                       {'Class': 'rviz_default_plugins/Select'}],
@@ -567,6 +595,7 @@ def main():
     executor = None
     worker = None
     camera_worker = None
+    display_worker = None
     free_camera = None
     camera_stop = threading.Event()
     started = time.monotonic()
@@ -620,12 +649,26 @@ def main():
                     except RuntimeError:
                         continue
                     if not camera_stop.is_set():
+                        # Keep ROS vehicle motion aligned with the simulation
+                        # frame, independent of sensor conversion and images.
+                        node.publish_pose(snapshot)
                         node.update_camera(snapshot)
             except Exception as error:
                 print(f'Camera worker stopped: {error}', flush=True)
                 node.stop_requested = True
         camera_worker = threading.Thread(target=follow_camera, name='lincoln-camera')
         camera_worker.start()
+        def display_vehicle():
+            try:
+                while not camera_stop.is_set():
+                    started_frame = time.monotonic()
+                    node.publish_display_pose()
+                    camera_stop.wait(max(0., 1 / 60 - (time.monotonic() - started_frame)))
+            except Exception as error:
+                print(f'Display pose worker stopped: {error}', flush=True)
+                node.stop_requested = True
+        display_worker = threading.Thread(target=display_vehicle, name='lincoln-display')
+        display_worker.start()
         if args.headless:
             while not done():
                 node.drive()
@@ -805,6 +848,8 @@ def main():
         camera_stop.set()
         if camera_worker:
             camera_worker.join()
+        if display_worker:
+            display_worker.join()
         if executor:
             executor.shutdown()
         if worker:
