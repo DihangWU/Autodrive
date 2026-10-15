@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -e
+set -e # 当脚本中的命令执行失败时，立即退出脚本，而不是继续执行后面的命令
 
 ~/carla-venv/bin/python - <<'PY'
 import carla
