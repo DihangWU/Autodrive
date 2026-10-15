@@ -11,7 +11,7 @@ import tkinter as tk
 from tkinter import ttk
 
 
-def move_camera(transform, actions, elapsed, speed, turn_speed, drag, ground_locked=False):
+def move_camera(transform, actions, elapsed, speed, turn_speed, drag):
     """根据按住的按钮和拖拽增量，计算新的相机位置、朝向。"""
     import carla
     yaw = transform.rotation.yaw + drag[0]
@@ -20,17 +20,15 @@ def move_camera(transform, actions, elapsed, speed, turn_speed, drag, ground_loc
     pitch += (('look_up' in actions) - ('look_down' in actions)) * turn_speed * elapsed
     rotation = carla.Rotation(pitch=max(-89, min(89, pitch)),
                               yaw=(yaw + 180) % 360 - 180, roll=transform.rotation.roll)
-    if ground_locked:
-        rotation.pitch, rotation.roll = -45, 0
-    # 锁定俯视时，用水平朝向计算平移，避免前进时随视线向地面下降。
-    movement_rotation = carla.Rotation(yaw=rotation.yaw) if ground_locked else rotation
+    # 平移只使用水平朝向，不随相机的俯仰或侧倾改变高度。
+    movement_rotation = carla.Rotation(yaw=rotation.yaw)
     forward, right = movement_rotation.get_forward_vector(), movement_rotation.get_right_vector()
     longitudinal = ('forward' in actions) - ('back' in actions)
     lateral = ('right' in actions) - ('left' in actions)
     vertical = ('up' in actions) - ('down' in actions)
     dx = longitudinal * forward.x + lateral * right.x
     dy = longitudinal * forward.y + lateral * right.y
-    dz = longitudinal * forward.z + lateral * right.z + vertical
+    dz = vertical
     length = max(1, math.sqrt(dx * dx + dy * dy + dz * dz))
     distance = speed * elapsed / length
     position = transform.location
@@ -90,7 +88,6 @@ def camera_loop(args, commands, messages, stopped):
             previous = time.monotonic()
             next_world_check = previous + 1
             target, actions = None, set()
-            ground_locked = False
             while not stopped.is_set():
                 now = time.monotonic()
                 elapsed = min(now - previous, .1)
@@ -114,13 +111,6 @@ def camera_loop(args, commands, messages, stopped):
                         drag[1] += command[2]
                     elif command[0] == 'view':
                         view = command[1]
-                        ground_locked = False
-                        actions.clear()
-                        drag = [0., 0.]
-                    elif command[0] == 'ground_lock':
-                        ground_locked = command[1]
-                        view = 'ground' if ground_locked else None
-                        actions.clear()
                         drag = [0., 0.]
                 if now >= next_world_check:
                     latest_world = client.get_world()
@@ -128,18 +118,15 @@ def camera_loop(args, commands, messages, stopped):
                         world, spectator = latest_world, latest_world.get_spectator()
                         target, actions, drag = None, set(), [0., 0.]
                         view = None
-                        ground_locked = False
                         messages.put(('reset', '地图已切换 · 重新取得观察相机'))
                     next_world_check = now + 1
-                if view is not None or actions or any(drag) or ground_locked:
+                if view is not None or actions or any(drag):
                     # 连续移动使用累计位置，避免旧快照让观察相机倒退。
                     if target is None:
                         target = spectator.get_transform()
                     if view is not None:
                         target = preset_view(target, view)
-                    else:
-                        target = move_camera(target, actions, elapsed, speed, args.turn_speed,
-                                             drag, ground_locked)
+                    target = move_camera(target, actions, elapsed, speed, args.turn_speed, drag)
                     if not stopped.is_set():
                         spectator.set_transform(target)
                 else:
@@ -164,19 +151,19 @@ class CameraPanel:
         self.messages = context.Queue()
         self.stopped = context.Event()
         self.actions = set()
+        self.auto_forward = False
         self.speed = args.speed
         self.closed = False
-        self.ground_locked = False
         self.drag_position = None
         root.title('CARLA 自由视角')
         root.resizable(False, False)
         root.attributes('-topmost', True)
         root.protocol('WM_DELETE_WINDOW', self.close)
         self.build_controls()
-        # 窗口外松开或窗口失焦时停止，避免远程桌面丢失松开事件后持续移动。
+        # 松开、失焦和最小化只清理临时按住操作，保留明确开启的自动前进。
         root.bind_all('<ButtonRelease-1>', self.release_mouse)
-        root.bind('<FocusOut>', lambda event: self.stop_motion())
-        root.bind('<Unmap>', lambda event: self.stop_motion())
+        root.bind('<FocusOut>', lambda event: root.after_idle(self.stop_if_unfocused))
+        root.bind('<Unmap>', self.release_mouse)
         root.bind_all('<MouseWheel>', self.mouse_wheel)
         root.bind_all('<Button-4>', lambda event: self.change_speed(1.25))
         root.bind_all('<Button-5>', lambda event: self.change_speed(1 / 1.25))
@@ -189,33 +176,36 @@ class CameraPanel:
     def build_controls(self):
         panel = ttk.Frame(self.root, padding=10)
         panel.pack(fill='both', expand=True)
-        ttk.Label(panel, text=f'CARLA  {self.args.host}:{self.args.port}').pack(anchor='w')
+        header = ttk.Frame(panel)
+        header.pack(fill='x', pady=(0, 8))
+        header.columnconfigure(0, weight=1)
+        ttk.Label(header, text=f'CARLA  {self.args.host}:{self.args.port}').grid(
+            row=0, column=0, sticky='w')
         self.status = tk.StringVar(value='正在连接 CARLA…')
-        ttk.Label(panel, textvariable=self.status, wraplength=365).pack(anchor='w', pady=(2, 8))
+        ttk.Label(header, textvariable=self.status, wraplength=280).grid(
+            row=1, column=0, sticky='w', pady=(2, 0))
+        drag_pad = tk.Label(header, text='拖动\n视角', bg='#dbe8f5', width=6,
+                            padx=4, pady=5, cursor='fleur')
+        drag_pad.grid(row=0, column=1, rowspan=2, sticky='ne', padx=(8, 0))
+        drag_pad.bind('<ButtonPress-1>', self.begin_drag)
+        drag_pad.bind('<B1-Motion>', self.drag_view)
         groups = ttk.Frame(panel)
         groups.pack(fill='x')
         movement = ttk.LabelFrame(groups, text='移动与转头按住操作，视角预设单击', padding=5)
         movement.pack(fill='x', expand=True)
         for column in range(3):
             movement.columnconfigure(column, weight=1)
-        buttons = [('左转', 'look_left', 0, 0), ('W 前进', 'forward', 0, 1),
-                   ('右转', 'look_right', 0, 2), ('A 左移', 'left', 1, 0),
-                   ('S 后退', 'back', 1, 1), ('D 右移', 'right', 1, 2),
-                   ('Q 上升', 'up', 2, 0), ('抬头', 'look_up', 2, 1),
-                   ('E 下降', 'down', 3, 0), ('低头', 'look_down', 3, 1)]
+        buttons = [('左转', 'look_left', 0, 0), ('前进', 'forward', 0, 1),
+                   ('右转', 'look_right', 0, 2), ('左移', 'left', 1, 0),
+                   ('后退', 'back', 1, 1), ('右移', 'right', 1, 2),
+                   ('上升', 'up', 2, 0), ('抬头', 'look_up', 2, 1),
+                   ('下降', 'down', 3, 0), ('低头', 'look_down', 3, 1)]
         for text, action, row, column in buttons:
             self.hold_button(movement, text, action, row, column)
         ttk.Button(movement, text='恢复水平视角', command=lambda: self.set_view('level')).grid(
             row=2, column=2, sticky='ew', padx=1, pady=2)
-        self.ground_button_text = tk.StringVar(value='45° 看地面')
-        self.ground_button = ttk.Button(movement, textvariable=self.ground_button_text,
-                                       command=self.toggle_ground_lock)
-        self.ground_button.grid(
+        ttk.Button(movement, text='45° 看地面', command=lambda: self.set_view('ground')).grid(
             row=3, column=2, sticky='ew', padx=1, pady=2)
-        drag_pad = tk.Label(panel, text='按住此处拖动：转动视角', bg='#dbe8f5', pady=12, cursor='fleur')
-        drag_pad.pack(fill='x', pady=8)
-        drag_pad.bind('<ButtonPress-1>', self.begin_drag)
-        drag_pad.bind('<B1-Motion>', self.drag_view)
         self.speed_label = tk.StringVar()
         ttk.Label(panel, textvariable=self.speed_label).pack(anchor='w')
         self.speed_slider = tk.Scale(panel, from_=.5, to=100, resolution=.5, orient='horizontal',
@@ -228,48 +218,67 @@ class CameraPanel:
         ttk.Button(controls, text='速度 ＋', command=lambda: self.change_speed(1.25)).pack(side='left', padx=4)
         ttk.Button(controls, text='停止', command=self.stop_motion).pack(side='left')
         ttk.Button(controls, text='贴靠 CARLA', command=self.place_panel).pack(side='right')
-        ttk.Label(panel, text='滚轮调速 · 松开停止 · 拖动标题栏移动面板').pack(pady=(8, 0))
+        ttk.Label(panel, text='前进右键持续移动 · 滚轮调速 · 左键按住移动').pack(pady=(8, 0))
         self.set_speed(self.speed)
 
     def hold_button(self, parent, text, action, row, column):
-        button = ttk.Button(parent, text=text, width=12)
+        button = ttk.Button(parent, text=text, width=12,
+                            padding=(3, 16) if row == 0 else (3, 3))
         button.grid(row=row, column=column, sticky='ew', padx=1, pady=2)
         def press(event):
-            self.stop_motion()
+            self.actions.clear()
+            self.drag_position = None
+            if action == 'back':
+                self.stop_motion()
             self.actions.add(action)
-            self.commands.put(('actions', list(self.actions)))
+            self.send_actions()
             button.grab_set()
             return 'break'
         button.bind('<ButtonPress-1>', press)
+        if action == 'forward':
+            self.forward_button = button
+            button.bind('<ButtonPress-3>', self.toggle_auto_forward)
 
     def release_mouse(self, event=None):
-        self.stop_motion()
+        self.actions.clear()
+        self.drag_position = None
+        self.send_actions()
         grabbed = self.root.grab_current()
         if grabbed is not None:
             grabbed.grab_release()
 
+    def send_actions(self):
+        actions = self.actions | ({'forward'} if self.auto_forward else set())
+        self.commands.put(('actions', list(actions)))
+
     def stop_motion(self):
+        self.auto_forward = False
+        self.forward_button.configure(text='前进')
         self.actions.clear()
         self.commands.put(('stop',))
         self.drag_position = None
 
+    def toggle_auto_forward(self, event=None):
+        self.auto_forward = not self.auto_forward
+        self.actions.clear()
+        self.drag_position = None
+        self.forward_button.configure(text='前进（自动）' if self.auto_forward else '前进')
+        self.send_actions()
+        return 'break'
+
+    def stop_if_unfocused(self):
+        if self.closed:
+            return
+        focused = self.root.focus_displayof()
+        if focused is None or focused.winfo_toplevel() != self.root:
+            self.release_mouse()
+
     def set_view(self, mode):
-        self.stop_motion()
-        self.update_ground_lock(False)
+        self.release_mouse()
         self.commands.put(('view', mode))
 
-    def update_ground_lock(self, locked):
-        self.ground_locked = locked
-        self.ground_button_text.set('45° 已锁定 · 点击释放' if locked else '45° 看地面')
-        self.ground_button.state(['pressed'] if locked else ['!pressed'])
-
-    def toggle_ground_lock(self):
-        self.stop_motion()
-        self.update_ground_lock(not self.ground_locked)
-        self.commands.put(('ground_lock', self.ground_locked))
-
     def begin_drag(self, event):
-        self.stop_motion()
+        self.release_mouse()
         self.drag_position = (event.x_root, event.y_root)
         event.widget.grab_set()
 
@@ -311,9 +320,7 @@ class CameraPanel:
             except queue.Empty:
                 break
             if kind == 'reset':
-                self.stop_motion()
-                self.update_ground_lock(False)
-                self.commands.put(('ground_lock', False))
+                self.release_mouse()
                 self.commands.put(('speed', self.speed))
             self.status.set(text)
         if not self.stopped.is_set():
