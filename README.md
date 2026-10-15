@@ -13,6 +13,9 @@ Autodrive/
 │   │   │   ├── carla_init.sh       # 后台启动 CARLA Docker 容器
 │   │   │   ├── choose_town04.sh    # 将默认 CARLA 实例切换到 Town04
 │   │   │   └── notes.md           # CARLA 和 Docker 操作笔记
+│   │   ├── mouse_move/
+│   │   │   ├── mouse_move.sh      # 独立自由相机悬浮面板入口
+│   │   │   └── mouse_move.py      # 鼠标按钮、拖拽转头和调速
 │   │   └── carla-official/         # 官方源码及 SUMO 联仿工具
 │   ├── map_convert/
 │   │   ├── carla2sumo.sh          # 地图转换 Shell 入口
@@ -72,6 +75,7 @@ source /home/maple/Desktop/Autodrive/setup.bash
 | `map_carla2sumo` | `envinit/map_convert/carla2sumo.sh` | 默认调用可用；自定义参数见下方说明 |
 | `run_sumo` | `envinit/sumo/init/sumo_init.sh` | 可选的 `.sumocfg` 路径 |
 | `run_rsu` | `env_modules/rsu/rsu.sh` | 可选的 `--host`、`--port`、`--config`、`--duration` |
+| `mouse_move_carla` | `envinit/carla/mouse_move/mouse_move.sh` | 可选的 `--host`、`--port`、`--speed`、`--turn-speed` |
 
 快捷函数通过 `"$@"` 转发参数。下面涉及相对文件路径的示例，除非另有说明，均在工程根目录运行。
 
@@ -150,6 +154,65 @@ sudo docker stop carla
 ```
 
 其他操作笔记见 [envinit/carla/init/notes.md](envinit/carla/init/notes.md)；其中部分笔记描述前台运行方式，当前启动入口以这里的 `--rm -d` 为准。
+
+## 独立自由视角悬浮面板
+
+加载或重新加载 `setup.bash` 后，可直接使用快捷命令：
+
+```bash
+source /home/maple/Desktop/Autodrive/setup.bash
+mouse_move_carla
+```
+
+快捷命令同样转发参数，例如 `mouse_move_carla --port 3000 --speed 20`。
+
+远程桌面无法直接控制 CARLA 窗口时，可以单独启动鼠标控制面板：
+
+```bash
+bash envinit/carla/mouse_move/mouse_move.sh
+```
+
+指定另一份 CARLA 或初始速度：
+
+```bash
+bash envinit/carla/mouse_move/mouse_move.sh --host 127.0.0.1 --port 3000 --speed 10 --turn-speed 45
+```
+
+查看参数：
+
+```bash
+bash envinit/carla/mouse_move/mouse_move.sh --help
+```
+
+面板功能：
+
+控制按钮布局如下；移动和转头按住操作，视角预设单击生效：
+
+```text
+左转       W 前进     右转
+A 左移     S 后退     D 右移
+Q 上升     抬头       恢复水平视角
+E 下降     低头       45° 看地面
+```
+
+| 控件 | 操作 |
+|---|---|
+| W / S | 按住前进 / 后退；普通模式沿视线移动，45° 锁定时沿水平面移动 |
+| A / D | 按住左移 / 右移 |
+| Q / E | 按住上升 / 下降，沿世界竖直方向移动 |
+| 抬头、低头、左转、右转 | 按住持续转动观察方向 |
+| 恢复水平视角 | 保留位置和 yaw，将 pitch、roll 归零 |
+| 45° 看地面 | 单击锁定 pitch=-45°、roll=0，再次单击释放；按钮显示锁定状态。锁定期间 WASD 沿水平面移动，Q/E 沿世界竖直方向升降；可左右转向，抬头、低头及拖拽的俯仰操作暂不生效 |
+| 蓝色拖拽区 | 按住鼠标左键拖动，改变朝向；不需要 CARLA 窗口接收鼠标 |
+| 滚轮、速度按钮、滑条 | 调整移动速度，范围 0.5～100 米/秒，默认 10 |
+| 停止 | 清除当前移动与转头操作 |
+| 贴靠 CARLA | 重新将面板放到 CARLA 窗口右下角 |
+
+释放 45° 锁定后保持当前视角，恢复普通移动和转头操作；点击“恢复水平视角”也会解除锁定并恢复水平。停止、按钮松开、面板失焦或最小化只清除运动操作，不解除锁定；连接重建或切换地图时解除锁定。面板置顶，可拖动标题栏重新摆放；启动时通过可选的 `xwininfo` 查询唯一的 CARLA 窗口并定位到右下角。查询工具不可用、没有匹配窗口或有多个 CARLA 窗口时，默认放在桌面右下角，由用户拖动到合适位置。它是独立窗口，不嵌入或修改 CARLA 原生界面，也不会自动跟随 CARLA 窗口后续移动。
+
+该功能只使用 Python 标准库 Tk 和 CARLA Python API，不调用 SUMO、RSU、ROS、TraCI 或其他场景模块，并通过 `setup.bash` 提供 `mouse_move_carla` 快捷函数。面板直接连接 `--host/--port`，通过 `world.get_spectator().set_transform(...)` 控制观察相机，不创建传感器、不操作车辆、不调用 `world.tick()`、不更改同步模式。CARLA 请求在独立子进程执行，避免 RPC 超时占用 Python 解释器而冻结 Tk 界面；失败时面板保持响应并自动重试；切换地图后重新取得 spectator。
+
+关闭面板只停止面板自身，不停止 CARLA，观察相机保留最后位置。启动脚本使用 `nohup` 后台运行，立即释放终端，并输出面板 PID；关闭终端后面板仍可运行。标准输出和错误追加到 `.runtime/carla/mouse_move/panel.log`；`--help` 仍直接在终端显示。CARLA 的 spectator 是共享观察相机，其他客户端若同时持续控制它，仍可能互相覆盖，需要关闭另一端的跟随相机功能。
 
 ## CARLA 地图导出与 SUMO 转换
 

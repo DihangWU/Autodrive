@@ -21,3 +21,7 @@ run_sumo() {
 run_rsu() {
     bash "$AUTODRIVE_ROOT/env_modules/rsu/rsu.sh" "$@"
 }
+
+mouse_move_carla() {
+    bash "$AUTODRIVE_ROOT/envinit/carla/mouse_move/mouse_move.sh" "$@"
+}
