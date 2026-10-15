@@ -15,5 +15,9 @@ map_carla2sumo() {
 }
 
 run_sumo() {
-    bash "$AUTODRIVE_ROOT/envinit/sumo/sumo_init.sh" "$@"
+    bash "$AUTODRIVE_ROOT/envinit/sumo/init/sumo_init.sh" "$@"
+}
+
+run_rsu() {
+    bash "$AUTODRIVE_ROOT/env_modules/rsu/rsu.sh" "$@"
 }

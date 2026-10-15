@@ -1,6 +1,6 @@
 # CARLA / SUMO 环境
 
-本工程目前将 CARLA 启动、地图转换和 SUMO 打开分为三个独立入口。地图转换读取 CARLA 当前地图，SUMO 只加载已经生成的配置文件。
+本工程将 CARLA 启动、地图转换、SUMO 打开和 RSU 场景模块分别管理。地图转换读取 CARLA 当前地图；SUMO 加载已有配置，由独立 TraCI 服务接收模块请求；RSU 在 CARLA 和 SUMO 中使用同一份位置配置。
 
 ## 目录结构
 
@@ -18,10 +18,26 @@ Autodrive/
 │   │   ├── carla2sumo.sh          # 地图转换 Shell 入口
 │   │   └── carla2sumo.py          # 导出 .xodr、转换 .net.xml、生成 .sumocfg
 │   └── sumo/
-│       ├── sumo_init.sh           # SUMO 打开 Shell 入口
-│       └── sumo_init.py           # 加载已有 .sumocfg 并后台打开 GUI
+│       ├── init/
+│       │   ├── sumo_init.sh       # SUMO 打开 Shell 入口
+│       │   └── sumo_init.py       # 只选择 .sumocfg、调用管理模块启动
+│       └── traci/
+│           ├── service.py         # 后台持有 TraCI 连接，串行处理请求
+│           └── client.py          # 其他模块调用的本地请求接口
+├── env_modules/
+│   └── rsu/
+│       ├── rsu.sh                 # RSU 前台会话入口
+│       ├── rsu.py                 # 配置校验、两端创建和退出清理
+│       ├── carla_rsu.py           # 从旧版复用的有碰撞塔身
+│       ├── rsu_marker.py          # 显眼的塔架和信标绘制
+│       ├── rsu_label.py           # 巨型粉色文字绘制
+│       ├── sumo_rsu.py            # 坐标转换和 SUMO POI 请求
+│       ├── config/town04.json     # RSU 配置，保留旧版位置
+│       └── assets/rsu.png         # SUMO 图标
 └── .runtime/                       # 共用的运行产物目录，已加入 Git 忽略规则
-    └── maps/<地图名>/               # 地图文件和日志
+    ├── maps/<地图名>/               # 地图文件和 SUMO 日志
+    ├── sumo/                      # TraCI 管理端日志、本地 socket 和锁
+    └── rsu/                       # RSU 会话状态、日志和锁
 ```
 
 ## 环境准备
@@ -30,7 +46,7 @@ Autodrive/
 - CARLA 镜像为 `carlasim/carla:0.9.16`，使用宿主机网络。
 - 地图转换使用 `$HOME/carla-venv/bin/python`，需要 CARLA Python API 和官方脚本依赖的 `lxml`。
 - SUMO 的 `netconvert` 和 `sumo-gui` 需要加入 `PATH`，官方转换脚本还需要 `SUMO_HOME/tools/sumolib`。
-- SUMO 打开入口也使用上述 Python 路径，但不会导入 CARLA，也不要求 CARLA 正在运行。
+- SUMO 打开入口也使用上述 Python 路径，管理端通过 `SUMO_HOME/tools` 导入 TraCI；SUMO 本身不要求 CARLA 正在运行。RSU 命令则同时需要 CARLA 与本工程的 SUMO 管理端就绪。
 
 按当前本机 SUMO 安装位置配置：
 
@@ -54,7 +70,8 @@ source /home/maple/Desktop/Autodrive/setup.bash
 | `run_carla` | `envinit/carla/init/carla_init.sh` | 可选的容器名称、RPC 端口，按位置填写 |
 | `choose_town04` | `envinit/carla/init/choose_town04.sh` | 当前不解析参数，固定连接 `localhost:2000` |
 | `map_carla2sumo` | `envinit/map_convert/carla2sumo.sh` | 默认调用可用；自定义参数见下方说明 |
-| `run_sumo` | `envinit/sumo/sumo_init.sh` | 可选的 `.sumocfg` 路径 |
+| `run_sumo` | `envinit/sumo/init/sumo_init.sh` | 可选的 `.sumocfg` 路径 |
+| `run_rsu` | `env_modules/rsu/rsu.sh` | 可选的 `--host`、`--port`、`--config`、`--duration` |
 
 快捷函数通过 `"$@"` 转发参数。下面涉及相对文件路径的示例，除非另有说明，均在工程根目录运行。
 
@@ -78,7 +95,13 @@ map_carla2sumo
 run_sumo
 ```
 
-三个入口不自动串联：启动 CARLA 不会启动 SUMO，地图转换不会打开 SUMO，打开 SUMO 也不会再次导出地图。
+需要添加 RSU 时，重新加载包含 `run_rsu` 的 `setup.bash` 后执行：
+
+```bash
+run_rsu
+```
+
+RSU 命令保持在前台，按 `Ctrl+C` 删除本次 RSU，保留 CARLA 和 SUMO。各入口不自动串联：启动 CARLA 不会启动 SUMO，地图转换不会打开 SUMO，打开 SUMO 也不会再次导出地图。
 
 ## CARLA 启动与关闭
 
@@ -189,7 +212,7 @@ run_sumo
 或者：
 
 ```bash
-bash envinit/sumo/sumo_init.sh
+bash envinit/sumo/init/sumo_init.sh
 ```
 
 无参数时，从工程根目录的 `.runtime/maps/*/*.sumocfg` 中，按文件最后修改时间选取最新的一份。它不查询 CARLA 当前地图；手动保存配置也会改变选择结果。
@@ -206,11 +229,96 @@ run_sumo .runtime/maps/Town04/Town04.sumocfg
 run_sumo --help
 ```
 
-相对配置路径按当前终端目录解析；不指定配置时，脚本根据自身位置寻找工程的 `.runtime`，不受当前工作目录影响。当前输出路径使用 `relative_to(PROJECT_DIR.parent)`，建议选择本工程内的配置；工程父目录之外的配置可能在打印路径时报错。
+相对配置路径按当前终端目录解析；不指定配置时，脚本根据自身位置寻找工程的 `.runtime`，不受当前工作目录影响。
 
-SUMO GUI 使用 `Popen()` 和独立会话后台运行，终端可继续使用，输出追加到配置所在目录的 `sumo.log`。配置引用的官方 `viewsettings.xml` 决定显示样式，移动工程或官方资源后，已有配置中的绝对样式路径可能需要重新生成。
+`init/sumo_init.py` 保持简短：保留配置选择与校验，由 `open_sumo()` 调用独立模块的 `start_sumo()`。所有后台启动、就绪等待、复用、TraCI 连接和 POI 管理都在 `traci/service.py`，没有把管理参数塞进初始化入口。
+
+`traci/service.py` 后台运行，通过 `traci.start()` 启动 SUMO 并持有一条连接；同一配置重复运行 `run_sumo` 会复用管理端，不重复开窗。管理端使用本机 UNIX socket 接收 JSON 请求，RSU 通过 `envinit.sumo.traci.client` 访问，不能把这个 socket 当成 CARLA 的 RPC 端口。
+
+`init/` 只放初始化入口，`traci/` 放本工程的管理服务和请求接口，文件统一命名为 `service.py`、`client.py`。自己的模块使用完整包路径导入，例如 `from envinit.sumo.traci.client import request`；官方 SUMO 库仍使用 `import traci`，从 `SUMO_HOME/tools` 加载，两者不是同一模块。运行文件继续保存在根目录 `.runtime/sumo/`。
+
+终端在服务就绪后释放。管理日志写入 `.runtime/sumo/service.log`，SUMO 日志写入配置同目录的 `sumo.log`。配置引用的官方 `viewsettings.xml` 决定显示样式，移动工程或官方资源后，已有配置中的绝对样式路径可能需要重新生成。
+
+查看管理状态和关闭受管理的 SUMO，使用服务模块自己的命令：
+
+```bash
+~/carla-venv/bin/python envinit/sumo/traci/service.py --status
+~/carla-venv/bin/python envinit/sumo/traci/service.py --stop
+```
+
+关闭 SUMO 窗口同样会使管理端退出。切换 SUMO 地图时先停止管理端，再用 `run_sumo <新配置路径>` 启动。当前仅管理一个 SUMO 实例。此前用普通 `Popen()` 打开的窗口不受该服务管理，需要关闭旧窗口后重新运行 `run_sumo`。
+
+当前管理端不调用 `simulationStep()`，因此不会推进 SUMO 仿真时间，也不会接管 CARLA 时钟；运行中可以添加、查询和删除 POI。后续车辆联仿需要单独接入统一时钟协调器。
 
 该入口只加载文件，不导出或转换地图，也没有 `--host`、`--port`、`--timeout`、`--export-only` 参数。关闭 SUMO 窗口不影响 CARLA。
+
+## RSU 实体与 SUMO 图标
+
+运行前保证 CARLA 已加载所需地图、该地图已转换，并且 `run_sumo` 已启动对应配置。使用快捷命令或完整脚本：
+
+```bash
+run_rsu
+# 或
+bash env_modules/rsu/rsu.sh
+```
+
+默认读取 `env_modules/rsu/config/town04.json`，位置保留旧版 `f511f80` 的 `rsu0`：`x=193`、`y=-179`、塔脚 `base_z=0.39`、塔顶 `z=60`，信标半径 `beacon_radius=5`，单位为米。`z` 是塔顶的 CARLA 绝对高度，实际塔身高度为 `z - base_z`。
+
+```json
+{
+  "map": "Town04",
+  "coordinate_system": "carla",
+  "rsus": [
+    {
+      "id": "rsu0",
+      "x": 193.0,
+      "y": -179.0,
+      "z": 60.0,
+      "base_z": 0.39,
+      "beacon_radius": 5.0
+    }
+  ]
+}
+```
+
+新增 RSU：在 `rsus` 数组中增加一项，使用唯一 ID（字母、数字或下划线），填写 `x/y/z/base_z`，然后退出并重新运行 RSU 命令。位置建议选道路外的平整区域，塔身高度支持大于 0 且不超过 200 米。使用其他地图时，另备配置并修改 `map` 和对应位置；不会把 Town04 的坐标自动搬到其他地图。
+
+自定义 CARLA 地址、端口或配置：
+
+```bash
+run_rsu --host 127.0.0.1 --port 3000 --config /完整路径/my_rsus.json
+```
+
+运行五秒后自动清理，便于验证：
+
+```bash
+run_rsu --duration 5
+```
+
+实现分工：
+
+- `carla_rsu.py` 复用旧版圆柱堆叠实体，使用 CARLA 内置 `/Engine/BasicShapes/Cylinder.Cylinder`，关闭重力与物理运动、启用碰撞。塔身可被相机和雷达感知，不需要独立 `.fbx` 文件。
+- `rsu_marker.py`、`rsu_label.py` 使用醒目标记和约 8 米高的粉色大字。每个塔顶只显示一块文字面板，`rsu0` 显示为带空格的大写 `RSU 0`（`rsu1` 显示 `RSU 1`）。文字绕塔中心的竖直轴水平旋转，每 4 秒现实时间一圈，让各方向轮流看到正面；约 20 Hz 更新并使用短寿命绘制减少残影，塔身本身不转。这些是短时 debug 绘制，退出后在 CARLA 继续推进时自然消失；碰撞由实体塔身承担。
+- `sumo_rsu.py` 请求管理端添加同名 POI，图标引用本模块 `assets/rsu.png`。POI 是显示标记，不阻挡 SUMO 车辆。
+- `rsu.py` 管理整个会话，任一端创建失败会清理已创建对象；只允许一个 RSU 命令会话运行，但一份配置可以包含多个 RSU。
+
+坐标直接使用 CARLA 世界坐标，SUMO 转换从当前实际路网的 `<location netOffset>` 读取偏移：
+
+```text
+SUMO x = CARLA x + offset_x
+SUMO y = -CARLA y + offset_y
+```
+
+Town04 当前路网的偏移是 `(503.02, 423.76)`，因此旧版 RSU 对应 SUMO `(696.02, 602.76)`。偏移不写死在 RSU 配置中。启动前还会核对 CARLA、SUMO、RSU 配置的地图名称，以及导出 `.xodr` 与 CARLA 当前道路数据是否一致。
+
+退出行为：
+
+- `Ctrl+C` 或正常终止 RSU 命令：删除本次 CARLA 实体和 SUMO POI，不关闭两端仿真程序。
+- 关闭 SUMO 或管理端：RSU 检测到断开后清理 CARLA 实体并结束。
+- 强制杀死 RSU 进程：管理端自动回收该进程的 POI；CARLA 实体在下次启动 RSU 时根据会话前缀回收，不能把强制退出当成即时清理。
+- 清理无法确认时保留 `.runtime/rsu/session.json`，日志记录原因，下次启动时重试。
+
+该模块尚未接入 OMNeT++，不计算无线通信、握手或通信连线，也不会修改 CARLA 地图资源。
 
 ## 运行文件与排查
 
@@ -236,4 +344,19 @@ SUMO GUI 使用 `Popen()` 和独立会话后台运行，终端可继续使用，
 sumo-gui -c .runtime/maps/Town04/Town04.sumocfg
 ```
 
-当前功能范围是地图导出、转换和预览，没有启动 TraCI 联仿、车辆双向同步或时钟同步，也不会修改 CARLA 同步模式。
+其他运行文件：
+
+```text
+.runtime/sumo/
+├── service.log                 # 后台 TraCI 服务日志
+├── control.sock                # 模块请求接口，服务退出时移除
+└── service.lock                # 防止重复服务持有同一个 SUMO
+.runtime/rsu/
+├── rsu.log                     # RSU 创建与清理日志
+├── session.json                # 活动会话及实体 ID，正常退出后删除
+└── session.lock                # 防止重复运行 RSU 命令
+```
+
+本轮实测覆盖：旧版单塔位置、两个 RSU 的双端创建和删除、重复会话拒绝、毫米波雷达与激光雷达命中、Ctrl+C 清理、强制退出后的图标回收和重启实体恢复、中途创建失败的完整回滚，以及 SUMO 退出后的 CARLA 清理。测试中没有改变 CARLA 同步模式或固定步长。
+
+当前已有 TraCI 运行时控制接口和 RSU 双端同步，但尚未实现车辆双向联仿或时钟同步。直接执行 `sumo-gui -c ...` 仍只能预览，不会建立本工程 RSU 所需的管理服务。
