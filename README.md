@@ -1,6 +1,6 @@
 # CARLA / SUMO 环境
 
-本工程将 CARLA 启动、地图转换、SUMO 打开和 RSU 场景模块分别管理。`simuenv/` 集中存放仿真环境的启动、地图转换、TraCI 服务和自由视角工具；场景模块仍放在 `env_modules/`，运行产物仍放在根目录 `.runtime/`。地图转换读取 CARLA 当前地图；SUMO 加载已有配置，由独立 TraCI 服务接收模块请求；RSU 在 CARLA 和 SUMO 中使用同一份位置配置。
+本工程将 CARLA 启动、地图转换、SUMO 打开和 RSU 场景模块分别管理。`simuenv/` 集中存放仿真环境的启动、地图转换、TraCI 服务和自由视角工具；场景模块仍放在 `modules/`，运行产物仍放在根目录 `.runtime/`。地图转换读取 CARLA 当前地图；SUMO 加载已有配置，由独立 TraCI 服务接收模块请求；RSU 在 CARLA 和 SUMO 中使用同一份位置配置。
 
 ## 目录结构
 
@@ -27,7 +27,7 @@ Autodrive/
 │       └── traci/
 │           ├── service.py         # 后台持有 TraCI 连接，串行处理请求
 │           └── client.py          # 其他模块调用的本地请求接口
-├── env_modules/
+├── modules/
 │   └── rsu/
 │       ├── rsu.sh                 # RSU 前台会话入口
 │       ├── rsu.py                 # 配置校验、两端创建和退出清理
@@ -74,7 +74,7 @@ source /home/maple/Desktop/Autodrive/setup.bash
 | `choose_town04` | `simuenv/carla/init/choose_town04.sh` | 当前不解析参数，固定连接 `localhost:2000` |
 | `map_carla2sumo` | `simuenv/map_convert/carla2sumo.sh` | 默认调用可用；自定义参数见下方说明 |
 | `run_sumo` | `simuenv/sumo/init/sumo_init.sh` | 可选的 `.sumocfg` 路径 |
-| `run_rsu` | `env_modules/rsu/rsu.sh` | 可选的 `--host`、`--port`、`--config`、`--duration` |
+| `run_rsu` | `modules/rsu/rsu.sh` | 可选的 `--host`、`--port`、`--config`、`--duration` |
 | `mouse_move_carla` | `simuenv/carla/mouse_move/mouse_move.sh` | 可选的 `--host`、`--port`、`--speed`、`--turn-speed` |
 
 快捷函数通过 `"$@"` 转发参数。下面涉及相对文件路径的示例，除非另有说明，均在工程根目录运行。
@@ -322,10 +322,10 @@ run_sumo --help
 ```bash
 run_rsu
 # 或
-bash env_modules/rsu/rsu.sh
+bash modules/rsu/rsu.sh
 ```
 
-默认读取 `env_modules/rsu/config/town04.json`，位置保留旧版 `f511f80` 的 `rsu0`：`x=193`、`y=-179`、塔脚 `base_z=0.39`、塔顶 `z=60`，信标半径 `beacon_radius=5`，单位为米。`z` 是塔顶的 CARLA 绝对高度，实际塔身高度为 `z - base_z`。
+默认读取 `modules/rsu/config/town04.json`，位置保留旧版 `f511f80` 的 `rsu0`：`x=193`、`y=-179`、塔脚 `base_z=0.39`、塔顶 `z=60`，信标半径 `beacon_radius=5`，单位为米。`z` 是塔顶的 CARLA 绝对高度，实际塔身高度为 `z - base_z`。
 
 ```json
 {

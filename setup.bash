@@ -19,7 +19,7 @@ run_sumo() {
 }
 
 run_rsu() {
-    bash "$AUTODRIVE_ROOT/env_modules/rsu/rsu.sh" "$@"
+    bash "$AUTODRIVE_ROOT/modules/rsu/rsu.sh" "$@"
 }
 
 mouse_move_carla() {
