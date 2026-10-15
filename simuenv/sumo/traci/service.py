@@ -1,4 +1,4 @@
-"""持有唯一的 TraCI 连接，串行处理模块请求。当前只管理地图和 POI。"""
+"""持有唯一的 TraCI 连接，串行处理地图、POI 和统一时钟的步进请求。"""
 
 import fcntl
 import hashlib
@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 
 PROJECT_DIR = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(PROJECT_DIR))
-from simuenv.sumo.traci.client import RUNTIME_DIR, SOCKET_FILE, owner_alive, request
+from simuenv.sumo.traci.client import RUNTIME_DIR, SOCKET_FILE, STEP_LENGTH, owner_alive, request
 
 
 def start_sumo(config_file, headless=False):
@@ -78,6 +78,7 @@ class SumoService:
         self.network = network
         self.sessions = {}
         self.stopped = False
+        self.clock = None
 
     def remove_session(self, session):
         owned = self.sessions.get(session, {})
@@ -93,7 +94,31 @@ class SumoService:
             pois = list(self.connection.poi.getIDList())
             return dict(self.network, pid=os.getpid(), pois=pois,
                         poi_positions={name: self.connection.poi.getPosition(name) for name in pois},
-                        sessions=list(self.sessions), time=self.connection.simulation.getTime())
+                        sessions=list(self.sessions), time=self.connection.simulation.getTime(),
+                        step_length=self.connection.simulation.getDeltaT(), clock=self.clock)
+        if action == 'claim_clock':
+            owner = command['owner']
+            if not owner_alive(owner):
+                raise ValueError('时钟进程已经退出。')
+            if self.clock and owner_alive(self.clock['owner']):
+                raise ValueError('SUMO 已由另一个时钟管理，不能重复接管。')
+            if abs(self.connection.simulation.getDeltaT() - STEP_LENGTH) > 1e-9:
+                raise ValueError('SUMO 步长不是 0.05 秒，请重启 SUMO 管理端。')
+            self.clock = dict(owner=owner, sequence=0)
+            return dict(time=self.connection.simulation.getTime())
+        if action in ('step', 'release_clock'):
+            if not self.clock or command['owner'] != self.clock['owner']:
+                raise ValueError('请求方没有持有 SUMO 时钟。')
+            if action == 'release_clock':
+                self.clock = None
+                return 'SUMO 时钟已释放。'
+            if not owner_alive(self.clock['owner']):
+                raise ValueError('时钟进程已经退出。')
+            if command['sequence'] != self.clock['sequence'] + 1:
+                raise ValueError('步进序号不连续，停止推进以免重复执行。')
+            self.connection.simulationStep()
+            self.clock['sequence'] = command['sequence']
+            return dict(sequence=self.clock['sequence'], time=self.connection.simulation.getTime())
         if action == 'stop':
             self.stopped = True
             return 'SUMO 管理端正在关闭。'
@@ -124,8 +149,10 @@ class SumoService:
         raise ValueError(f'未知 SUMO 请求：{action}')
 
     def poll(self):
-        # 不调用 simulationStep：编辑 POI 不需要接管联仿时钟。
+        # 只处理存活检查；simulationStep 只能响应时钟进程的显式请求。
         self.connection.getVersion()
+        if self.clock and not owner_alive(self.clock['owner']):
+            self.clock = None
         for session, state in list(self.sessions.items()):
             if not owner_alive(state['owner']):
                 self.remove_session(session)
@@ -147,6 +174,7 @@ def serve(config_file, headless=False):
         binary = 'sumo' if headless else 'sumo-gui'
         # SUMO 日志仍放在地图目录；管理端自身的输出另存 service.log。
         command = [binary, '-c', str(config_file), '--quit-on-end', 'false',
+                   '--step-length', str(STEP_LENGTH),
                    '--log', str(config_file.parent / 'sumo.log')]
         if not headless:
             command += ['--start']

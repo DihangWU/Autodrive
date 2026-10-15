@@ -1,6 +1,6 @@
 # CARLA / SUMO 环境
 
-本工程将 CARLA 启动、地图转换、SUMO 打开和 RSU 场景模块分别管理。`simuenv/` 集中存放仿真环境的启动、地图转换、TraCI 服务和自由视角工具；场景模块仍放在 `modules/`，运行产物仍放在根目录 `.runtime/`。地图转换读取 CARLA 当前地图；SUMO 加载已有配置，由独立 TraCI 服务接收模块请求；RSU 在 CARLA 和 SUMO 中使用同一份位置配置。
+本工程将 CARLA 启动、地图转换、SUMO 打开和 RSU 场景模块分别管理。`simuenv/` 集中存放仿真环境的启动、地图转换、TraCI 服务、统一同步时钟和自由视角工具；场景模块仍放在 `modules/`，运行产物仍放在根目录 `.runtime/`。地图转换读取 CARLA 当前地图；SUMO 加载已有配置，由独立 TraCI 服务接收模块请求；RSU 在 CARLA 和 SUMO 中使用同一份位置配置。
 
 ## 目录结构
 
@@ -17,6 +17,9 @@ Autodrive/
 │   │   │   ├── mouse_move.sh      # 独立自由相机悬浮面板入口
 │   │   │   └── mouse_move.py      # 鼠标按钮、拖拽转头和调速
 │   │   └── carla-official/         # 官方源码及 SUMO 联仿工具
+│   ├── cobridge/
+│   │   ├── run_cobridge.sh        # 统一时钟前台入口
+│   │   └── cobridge.py           # 唯一的 CARLA/SUMO 步进循环
 │   ├── map_convert/
 │   │   ├── carla2sumo.sh          # 地图转换 Shell 入口
 │   │   └── carla2sumo.py          # 导出 .xodr、转换 .net.xml、生成 .sumocfg
@@ -40,6 +43,7 @@ Autodrive/
 └── .runtime/                       # 共用的运行产物目录，已加入 Git 忽略规则
     ├── maps/<地图名>/               # 地图文件和 SUMO 日志
     ├── sumo/                      # TraCI 管理端日志、本地 socket 和锁
+    ├── cobridge/                  # 统一时钟日志和单实例锁
     └── rsu/                       # RSU 会话状态、日志和锁
 ```
 
@@ -74,6 +78,7 @@ source /home/maple/Desktop/Autodrive/setup.bash
 | `choose_town04` | `simuenv/carla/init/choose_town04.sh` | 当前不解析参数，固定连接 `localhost:2000` |
 | `map_carla2sumo` | `simuenv/map_convert/carla2sumo.sh` | 默认调用可用；自定义参数见下方说明 |
 | `run_sumo` | `simuenv/sumo/init/sumo_init.sh` | 可选的 `.sumocfg` 路径 |
+| `run_cobridge` | `simuenv/cobridge/run_cobridge.sh` | 可选的 `--host`、`--port`、`--timeout`、`--steps` |
 | `run_rsu` | `modules/rsu/rsu.sh` | 可选的 `--host`、`--port`、`--config`、`--duration` |
 | `mouse_move_carla` | `simuenv/carla/mouse_move/mouse_move.sh` | 可选的 `--host`、`--port`、`--speed`、`--turn-speed` |
 
@@ -99,7 +104,14 @@ map_carla2sumo
 run_sumo
 ```
 
-需要添加 RSU 时，重新加载包含 `run_rsu` 的 `setup.bash` 后执行：
+在另一个终端加载快捷命令并启动统一时钟，让两端每帧同步推进：
+
+```bash
+source /home/maple/Desktop/Autodrive/setup.bash
+run_cobridge
+```
+
+保持时钟运行，需要添加 RSU 时，在另一个已加载 `setup.bash` 的终端执行：
 
 ```bash
 run_rsu
@@ -311,13 +323,54 @@ run_sumo --help
 
 关闭 SUMO 窗口同样会使管理端退出。切换 SUMO 地图时先停止管理端，再用 `run_sumo <新配置路径>` 启动。当前仅管理一个 SUMO 实例。此前用普通 `Popen()` 打开的窗口不受该服务管理，需要关闭旧窗口后重新运行 `run_sumo`。
 
-当前管理端不调用 `simulationStep()`，因此不会推进 SUMO 仿真时间，也不会接管 CARLA 时钟；运行中可以添加、查询和删除 POI。后续车辆联仿需要单独接入统一时钟协调器。
+SUMO 管理端不会自行推进时间；它只响应持有时钟的 CoBridge 发来的 `step` 请求，通过现有 TraCI 连接执行一次 `simulationStep()`。没有启动 CoBridge 时，SUMO 时间保持不变，仍可添加、查询和删除 POI，但 GUI 可能直到交互或下一次步进才显示更新。
 
 该入口只加载文件，不导出或转换地图，也没有 `--host`、`--port`、`--timeout`、`--export-only` 参数。关闭 SUMO 窗口不影响 CARLA。
 
+## CoBridge 统一同步时钟
+
+先启动 CARLA，转换当前地图，再运行 `run_sumo`。修改服务代码后必须关闭旧 SUMO 窗口，重新运行 `run_sumo`，才能加载新接口和 0.05 秒步长。CoBridge 不负责启动仿真器、切换地图或转换地图。
+
+```bash
+source /home/maple/Desktop/Autodrive/setup.bash
+run_cobridge
+
+# 等价的完整入口
+bash simuenv/cobridge/run_cobridge.sh
+
+# 指定 CARLA 地址；SUMO 仍使用本工程当前的本地管理端
+run_cobridge --host 127.0.0.1 --port 2000 --timeout 10
+
+# 验证：两端各推进 20 帧，即仿真时间增量 1 秒，然后退出
+run_cobridge --steps 20
+run_cobridge --help
+```
+
+运行期间保持这个终端打开；`Ctrl+C` 或正常终止时停止时钟、释放 SUMO 时钟所有权，并恢复启动前 CARLA 的设置，不关闭 CARLA/SUMO，不删除 RSU。日志保存在 `.runtime/cobridge/clock.log`，单实例锁为 `.runtime/cobridge/clock.lock`。锁文件可保留，进程退出后系统自动释放文件锁。
+
+每帧的执行顺序是：
+
+```text
+CoBridge 检查当前世界
+    → CARLA world.tick()：推进 0.05 秒
+    → 请求 SUMO 管理端 simulationStep()：推进 0.05 秒
+    → 核对两端时间增量
+    → 等待本帧剩余预算，进入下一帧
+```
+
+- 唯一的步长常量为 `simuenv/sumo/traci/client.py` 的 `STEP_LENGTH = 0.05`，CARLA 和 SUMO 启动都使用它；本版按 20 Hz 设计。
+- 默认以真实时间每秒 20 帧为目标。每帧处理耗时不足 50ms 才等待剩余时间；超过 50ms 就直接进入下一帧，因此负载过高时倍率会低于 1，不会改变仿真步长或跳帧。
+- 启动时校验当前 CARLA 地图的 OpenDRIVE 指纹与 SUMO 导出文件一致、SUMO 步长正确。两端保留各自已有时间起点，只保证本次会话的时间增量一致，不重置 CARLA 世界或 SUMO 时间。
+- 本工程使用文件锁限制一个 CoBridge；SUMO 端还校验时钟进程身份和连续步进序号，拒绝其他请求方步进或重复提交。同一 CARLA 实例不能再由其他客户端调用 `tick()` 或 `apply_batch_sync(..., True)`；检测到额外帧会停止并报错。
+- CARLA 已处于同步模式时拒绝接管，避免和已有时钟竞争。强制杀死进程无法执行恢复；若发生这种情况，需要先确认旧时钟已退出，再手动恢复 CARLA 异步模式或重启 CARLA 后重新启动。本版没有自动接管崩溃时钟。
+- 时钟持续运行时，SUMO 正常步进会重绘 RSU 的添加和删除，不再依赖手动缩放地图；异步进程清理仍由现有 RSU 会话管理负责。RSU 退出时保持 CoBridge 运行，删除操作才会在后续步进中显示。
+- 任意一端失败就停止，不自动重试步进。两端 RPC 不是原子事务，若 CARLA 已推进而 SUMO 失败，可能留下最后一帧差异，需要排除故障后重新启动会话。
+
+本次只实现时钟和 POI 显示所需的 SUMO 步进，没有加入 Lincoln、NPC 车流、车辆映射、ROS 2 或传感器发布。以后控制、传感器数据使用 CARLA 帧号和仿真时间戳；车辆模块不再自行推进世界。车辆状态交换加入现有步进循环，不另开一套时钟。
+
 ## RSU 实体与 SUMO 图标
 
-运行前保证 CARLA 已加载所需地图、该地图已转换，并且 `run_sumo` 已启动对应配置。使用快捷命令或完整脚本：
+运行前保证 CARLA 已加载所需地图、该地图已转换，`run_sumo` 已启动对应配置，并保持 `run_cobridge` 运行以实时刷新 SUMO。使用快捷命令或完整脚本：
 
 ```bash
 run_rsu
@@ -422,4 +475,4 @@ sumo-gui -c .runtime/maps/Town04/Town04.sumocfg
 
 本轮实测覆盖：旧版单塔位置、两个 RSU 的双端创建和删除、重复会话拒绝、毫米波雷达与激光雷达命中、Ctrl+C 清理、强制退出后的图标回收和重启实体恢复、中途创建失败的完整回滚，以及 SUMO 退出后的 CARLA 清理。测试中没有改变 CARLA 同步模式或固定步长。
 
-当前已有 TraCI 运行时控制接口和 RSU 双端同步，但尚未实现车辆双向联仿或时钟同步。直接执行 `sumo-gui -c ...` 仍只能预览，不会建立本工程 RSU 所需的管理服务。
+当前已有 TraCI 运行时控制接口、RSU 双端创建清理和 CoBridge 固定步长时钟，但尚未实现车辆双向联仿。直接执行 `sumo-gui -c ...` 仍只能预览，不会建立本工程 RSU 所需的管理服务。

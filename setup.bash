@@ -18,6 +18,10 @@ run_sumo() {
     bash "$AUTODRIVE_ROOT/simuenv/sumo/init/sumo_init.sh" "$@"
 }
 
+run_cobridge() {
+    bash "$AUTODRIVE_ROOT/simuenv/cobridge/run_cobridge.sh" "$@"
+}
+
 run_rsu() {
     bash "$AUTODRIVE_ROOT/modules/rsu/rsu.sh" "$@"
 }

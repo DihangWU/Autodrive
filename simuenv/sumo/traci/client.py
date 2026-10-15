@@ -9,6 +9,8 @@ import socket
 PROJECT_DIR = Path(__file__).resolve().parents[3]
 RUNTIME_DIR = PROJECT_DIR / '.runtime' / 'sumo'
 SOCKET_FILE = RUNTIME_DIR / 'control.sock'
+# CARLA 和 SUMO 共用的仿真步长，单位为秒；不表示每帧必须等待这么久。
+STEP_LENGTH = 0.05
 
 
 def process_identity():
