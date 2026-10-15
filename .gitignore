@@ -1,2 +1,10 @@
 # 字节 TraeCode 的文件
 .marscode/
+
+# VScode 配置文件
+.vscode/
+
+# 运行时地图、日志与 Python 缓存
+.runtime/
+__pycache__/
+*.pyc
