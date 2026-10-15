@@ -1,13 +1,13 @@
 # CARLA / SUMO 环境
 
-本工程将 CARLA 启动、地图转换、SUMO 打开和 RSU 场景模块分别管理。地图转换读取 CARLA 当前地图；SUMO 加载已有配置，由独立 TraCI 服务接收模块请求；RSU 在 CARLA 和 SUMO 中使用同一份位置配置。
+本工程将 CARLA 启动、地图转换、SUMO 打开和 RSU 场景模块分别管理。`simuenv/` 集中存放仿真环境的启动、地图转换、TraCI 服务和自由视角工具；场景模块仍放在 `env_modules/`，运行产物仍放在根目录 `.runtime/`。地图转换读取 CARLA 当前地图；SUMO 加载已有配置，由独立 TraCI 服务接收模块请求；RSU 在 CARLA 和 SUMO 中使用同一份位置配置。
 
 ## 目录结构
 
 ```text
 Autodrive/
 ├── setup.bash                      # 加载当前终端的快捷命令
-├── envinit/
+├── simuenv/
 │   ├── carla/
 │   │   ├── init/
 │   │   │   ├── carla_init.sh       # 后台启动 CARLA Docker 容器
@@ -70,12 +70,12 @@ source /home/maple/Desktop/Autodrive/setup.bash
 
 | 快捷命令 | 对应脚本 | 参数 |
 |---|---|---|
-| `run_carla` | `envinit/carla/init/carla_init.sh` | 可选的容器名称、RPC 端口，按位置填写 |
-| `choose_town04` | `envinit/carla/init/choose_town04.sh` | 当前不解析参数，固定连接 `localhost:2000` |
-| `map_carla2sumo` | `envinit/map_convert/carla2sumo.sh` | 默认调用可用；自定义参数见下方说明 |
-| `run_sumo` | `envinit/sumo/init/sumo_init.sh` | 可选的 `.sumocfg` 路径 |
+| `run_carla` | `simuenv/carla/init/carla_init.sh` | 可选的容器名称、RPC 端口，按位置填写 |
+| `choose_town04` | `simuenv/carla/init/choose_town04.sh` | 当前不解析参数，固定连接 `localhost:2000` |
+| `map_carla2sumo` | `simuenv/map_convert/carla2sumo.sh` | 默认调用可用；自定义参数见下方说明 |
+| `run_sumo` | `simuenv/sumo/init/sumo_init.sh` | 可选的 `.sumocfg` 路径 |
 | `run_rsu` | `env_modules/rsu/rsu.sh` | 可选的 `--host`、`--port`、`--config`、`--duration` |
-| `mouse_move_carla` | `envinit/carla/mouse_move/mouse_move.sh` | 可选的 `--host`、`--port`、`--speed`、`--turn-speed` |
+| `mouse_move_carla` | `simuenv/carla/mouse_move/mouse_move.sh` | 可选的 `--host`、`--port`、`--speed`、`--turn-speed` |
 
 快捷函数通过 `"$@"` 转发参数。下面涉及相对文件路径的示例，除非另有说明，均在工程根目录运行。
 
@@ -118,7 +118,7 @@ run_carla
 对应的完整脚本命令为：
 
 ```bash
-bash envinit/carla/init/carla_init.sh
+bash simuenv/carla/init/carla_init.sh
 ```
 
 可以按顺序传入容器名称和 RPC 端口：
@@ -153,7 +153,7 @@ sudo docker stop carla
 ~/carla-venv/bin/python -c "import carla; c=carla.Client('127.0.0.1',3000); c.set_timeout(120); c.load_world('Town04')"
 ```
 
-其他操作笔记见 [envinit/carla/init/notes.md](envinit/carla/init/notes.md)；其中部分笔记描述前台运行方式，当前启动入口以这里的 `--rm -d` 为准。
+其他操作笔记见 [simuenv/carla/init/notes.md](simuenv/carla/init/notes.md)；其中部分笔记描述前台运行方式，当前启动入口以这里的 `--rm -d` 为准。
 
 ## 独立自由视角悬浮面板
 
@@ -169,19 +169,19 @@ mouse_move_carla
 远程桌面无法直接控制 CARLA 窗口时，可以单独启动鼠标控制面板：
 
 ```bash
-bash envinit/carla/mouse_move/mouse_move.sh
+bash simuenv/carla/mouse_move/mouse_move.sh
 ```
 
 指定另一份 CARLA 或初始速度：
 
 ```bash
-bash envinit/carla/mouse_move/mouse_move.sh --host 127.0.0.1 --port 3000 --speed 10 --turn-speed 45
+bash simuenv/carla/mouse_move/mouse_move.sh --host 127.0.0.1 --port 3000 --speed 10 --turn-speed 45
 ```
 
 查看参数：
 
 ```bash
-bash envinit/carla/mouse_move/mouse_move.sh --help
+bash simuenv/carla/mouse_move/mouse_move.sh --help
 ```
 
 面板功能：
@@ -225,7 +225,7 @@ map_carla2sumo
 对应脚本为：
 
 ```bash
-bash envinit/map_convert/carla2sumo.sh
+bash simuenv/map_convert/carla2sumo.sh
 ```
 
 Python 入口定义了三个参数：
@@ -241,8 +241,8 @@ Python 入口定义了三个参数：
 需要自定义参数或查看帮助时，暂时直接运行 Python：
 
 ```bash
-~/carla-venv/bin/python envinit/map_convert/carla2sumo.py --host 127.0.0.1 --port 3000 --timeout 60
-~/carla-venv/bin/python envinit/map_convert/carla2sumo.py --help
+~/carla-venv/bin/python simuenv/map_convert/carla2sumo.py --host 127.0.0.1 --port 3000 --timeout 60
+~/carla-venv/bin/python simuenv/map_convert/carla2sumo.py --help
 ```
 
 转换流程：
@@ -260,7 +260,7 @@ CARLA 当前地图
 <地图名>.sumocfg
 ```
 
-官方工具位于 `envinit/carla/carla-official/Co-Simulation/Sumo/`，源码保持原样。当前调用带有 `--guess-tls`，信号灯控制连接可能经过推断，需要核对，不能视为已经验证正确；生成的默认灯控程序也不代表 CARLA 当前的实时灯色。
+官方工具位于 `simuenv/carla/carla-official/Co-Simulation/Sumo/`，源码保持原样。当前调用带有 `--guess-tls`，信号灯控制连接可能经过推断，需要核对，不能视为已经验证正确；生成的默认灯控程序也不代表 CARLA 当前的实时灯色。
 
 地图名称从 `current_map.name` 最后一段取得，并非写死 Town04。地图与日志提示使用带工程目录名称的相对路径，例如 `Autodrive/.runtime/maps/Town04/Town04.xodr`。
 
@@ -275,7 +275,7 @@ run_sumo
 或者：
 
 ```bash
-bash envinit/sumo/init/sumo_init.sh
+bash simuenv/sumo/init/sumo_init.sh
 ```
 
 无参数时，从工程根目录的 `.runtime/maps/*/*.sumocfg` 中，按文件最后修改时间选取最新的一份。它不查询 CARLA 当前地图；手动保存配置也会改变选择结果。
@@ -296,17 +296,17 @@ run_sumo --help
 
 `init/sumo_init.py` 保持简短：保留配置选择与校验，由 `open_sumo()` 调用独立模块的 `start_sumo()`。所有后台启动、就绪等待、复用、TraCI 连接和 POI 管理都在 `traci/service.py`，没有把管理参数塞进初始化入口。
 
-`traci/service.py` 后台运行，通过 `traci.start()` 启动 SUMO 并持有一条连接；同一配置重复运行 `run_sumo` 会复用管理端，不重复开窗。管理端使用本机 UNIX socket 接收 JSON 请求，RSU 通过 `envinit.sumo.traci.client` 访问，不能把这个 socket 当成 CARLA 的 RPC 端口。
+`traci/service.py` 后台运行，通过 `traci.start()` 启动 SUMO 并持有一条连接；同一配置重复运行 `run_sumo` 会复用管理端，不重复开窗。管理端使用本机 UNIX socket 接收 JSON 请求，RSU 通过 `simuenv.sumo.traci.client` 访问，不能把这个 socket 当成 CARLA 的 RPC 端口。
 
-`init/` 只放初始化入口，`traci/` 放本工程的管理服务和请求接口，文件统一命名为 `service.py`、`client.py`。自己的模块使用完整包路径导入，例如 `from envinit.sumo.traci.client import request`；官方 SUMO 库仍使用 `import traci`，从 `SUMO_HOME/tools` 加载，两者不是同一模块。运行文件继续保存在根目录 `.runtime/sumo/`。
+`init/` 只放初始化入口，`traci/` 放本工程的管理服务和请求接口，文件统一命名为 `service.py`、`client.py`。自己的模块使用完整包路径导入，例如 `from simuenv.sumo.traci.client import request`；官方 SUMO 库仍使用 `import traci`，从 `SUMO_HOME/tools` 加载，两者不是同一模块。运行文件继续保存在根目录 `.runtime/sumo/`。
 
 终端在服务就绪后释放。管理日志写入 `.runtime/sumo/service.log`，SUMO 日志写入配置同目录的 `sumo.log`。配置引用的官方 `viewsettings.xml` 决定显示样式，移动工程或官方资源后，已有配置中的绝对样式路径可能需要重新生成。
 
 查看管理状态和关闭受管理的 SUMO，使用服务模块自己的命令：
 
 ```bash
-~/carla-venv/bin/python envinit/sumo/traci/service.py --status
-~/carla-venv/bin/python envinit/sumo/traci/service.py --stop
+~/carla-venv/bin/python simuenv/sumo/traci/service.py --status
+~/carla-venv/bin/python simuenv/sumo/traci/service.py --stop
 ```
 
 关闭 SUMO 窗口同样会使管理端退出。切换 SUMO 地图时先停止管理端，再用 `run_sumo <新配置路径>` 启动。当前仅管理一个 SUMO 实例。此前用普通 `Popen()` 打开的窗口不受该服务管理，需要关闭旧窗口后重新运行 `run_sumo`。

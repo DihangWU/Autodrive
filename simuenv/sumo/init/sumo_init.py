@@ -7,7 +7,7 @@ import sys
 
 PROJECT_DIR = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(PROJECT_DIR))
-from envinit.sumo.traci.service import start_sumo
+from simuenv.sumo.traci.service import start_sumo
 MAPS_DIR = PROJECT_DIR / '.runtime' / 'maps'
 
 

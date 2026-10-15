@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 
 PROJECT_DIR = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(PROJECT_DIR))
-from envinit.sumo.traci.client import RUNTIME_DIR, SOCKET_FILE, owner_alive, request
+from simuenv.sumo.traci.client import RUNTIME_DIR, SOCKET_FILE, owner_alive, request
 
 
 def start_sumo(config_file, headless=False):

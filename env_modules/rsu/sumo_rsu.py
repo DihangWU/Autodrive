@@ -1,7 +1,7 @@
 """通过 SUMO 管理端同步 RSU 图标，使用当前路网的实际偏移。"""
 
 from pathlib import Path
-from envinit.sumo.traci.client import process_identity, request
+from simuenv.sumo.traci.client import process_identity, request
 
 
 IMAGE_FILE = Path(__file__).resolve().parent / 'assets' / 'rsu.png'

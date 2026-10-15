@@ -2,7 +2,7 @@
 读取 CARLA 当前地图，调用官方工具转换转换为 sumo 地图
 Read the current CARLA map and convert it to a SUMO road network using the official tool
 """
-# 本文件依赖 envinit/carla-source-official/ ，如果移动 carla-source-official/ 需要修改本文件调用路径
+# 本文件依赖 simuenv/carla/carla-official/ ，如果移动 carla/carla-official/ 需要修改本文件调用路径
 
 
 import os
@@ -13,10 +13,10 @@ import subprocess
 
 
 
-ENVINIT_DIR = Path(__file__).resolve().parents[1]
+SIMUENV_DIR = Path(__file__).resolve().parents[1]
 # 当前文件的路径.的绝对路径.所在目录的上1层目录；.parents[0] = .parent
-PROJECT_DIR = ENVINIT_DIR.parent
-OFFICIAL_SUMO_DIR = ENVINIT_DIR / 'carla' / 'carla-official' / 'Co-Simulation' / 'Sumo'
+PROJECT_DIR = SIMUENV_DIR.parent
+OFFICIAL_SUMO_DIR = SIMUENV_DIR / 'carla' / 'carla-official' / 'Co-Simulation' / 'Sumo'
 MAPS_DIR = PROJECT_DIR / '.runtime' / 'maps'
 
 

@@ -22,7 +22,7 @@ from carla_rsu import RsuBody
 from rsu_marker import draw_marker
 from rsu_label import draw_label, label_text
 from sumo_rsu import SumoRsu
-from envinit.sumo.traci.client import owner_alive, process_identity
+from simuenv.sumo.traci.client import owner_alive, process_identity
 
 RUNTIME_DIR = PROJECT_DIR / '.runtime' / 'rsu'
 

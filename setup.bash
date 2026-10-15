@@ -3,19 +3,19 @@
 AUTODRIVE_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 run_carla() {
-    bash "$AUTODRIVE_ROOT/envinit/carla/init/carla_init.sh" "$@"
+    bash "$AUTODRIVE_ROOT/simuenv/carla/init/carla_init.sh" "$@"
 }
 
 choose_town04() {
-    bash "$AUTODRIVE_ROOT/envinit/carla/init/choose_town04.sh" "$@"
+    bash "$AUTODRIVE_ROOT/simuenv/carla/init/choose_town04.sh" "$@"
 }
 
 map_carla2sumo() {
-    bash "$AUTODRIVE_ROOT/envinit/map_convert/carla2sumo.sh" "$@"
+    bash "$AUTODRIVE_ROOT/simuenv/map_convert/carla2sumo.sh" "$@"
 }
 
 run_sumo() {
-    bash "$AUTODRIVE_ROOT/envinit/sumo/init/sumo_init.sh" "$@"
+    bash "$AUTODRIVE_ROOT/simuenv/sumo/init/sumo_init.sh" "$@"
 }
 
 run_rsu() {
@@ -23,5 +23,5 @@ run_rsu() {
 }
 
 mouse_move_carla() {
-    bash "$AUTODRIVE_ROOT/envinit/carla/mouse_move/mouse_move.sh" "$@"
+    bash "$AUTODRIVE_ROOT/simuenv/carla/mouse_move/mouse_move.sh" "$@"
 }
