@@ -327,6 +327,8 @@ SUMO 管理端不会自行推进时间；它只响应持有时钟的 CoBridge �
 
 该入口只加载文件，不导出或转换地图，也没有 `--host`、`--port`、`--timeout`、`--export-only` 参数。关闭 SUMO 窗口不影响 CARLA。
 
+通信代码中的 `socket` 保留为导入的模块名，连接对象使用 `connection`。不要写 `with socket.socket(...) as socket:`，否则 Python 会将函数内的 `socket` 判定为局部变量，在创建连接时触发 `UnboundLocalError`。
+
 ## CoBridge 统一同步时钟
 
 先启动 CARLA，转换当前地图，再运行 `run_sumo`。修改服务代码后必须关闭旧 SUMO 窗口，重新运行 `run_sumo`，才能加载新接口和 0.05 秒步长。CoBridge 不负责启动仿真器、切换地图或转换地图。
