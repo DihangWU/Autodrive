@@ -1,0 +1,425 @@
+"""独立的 CARLA 自由视角悬浮面板，只控制 spectator，不操作车辆或仿真时钟。"""
+
+import argparse
+import math
+import multiprocessing
+import queue
+import re
+import subprocess
+import time
+import tkinter as tk
+from tkinter import ttk
+
+
+# 可调参数集中于此；坐标运算、事件名和协议字段保留在实现中。
+DEFAULT_HOST = '127.0.0.1'
+DEFAULT_PORT = 2000
+DEFAULT_SPEED = 10.0
+DEFAULT_TURN_SPEED = 45.0
+MIN_SPEED = 0.5
+MAX_SPEED = 100.0
+MAX_TURN_SPEED = 180.0
+MAX_PITCH = 89.0
+VIEW_PITCHES = {'level': 0, 'ground': -45}
+XWININFO_COMMAND = 'xwininfo'
+XWININFO_TIMEOUT = 1.0
+WINDOW_PREFIXES = ('CarlaUE4', 'CarlaUnreal')
+RPC_TIMEOUT = 3.0
+WORLD_CHECK_INTERVAL = 1.0
+MAX_ELAPSED = 0.1
+CAMERA_RATE = 30.0
+RECONNECT_DELAY = 2.0
+SPEED_FACTOR = 1.25
+DRAG_SENSITIVITY = 0.2
+STATUS_INTERVAL_MS = 100
+INITIAL_PLACEMENT_DELAY_MS = 150
+WINDOW_INSET = (16, 40)
+SCREEN_INSET = (24, 64)
+WORKER_JOIN_TIMEOUT = 0.15
+WORKER_TERMINATE_TIMEOUT = 1.0
+SPEED_RESOLUTION = 0.5
+MOVEMENT_BUTTON_PADDING = (3, 3)
+PRIMARY_BUTTON_PADDING = (3, 16)
+PANEL_TOPMOST = True
+PANEL_RESIZABLE = (False, False)
+
+
+# 面板外观参数
+PANEL_PADDING = 10
+HEADER_MARGIN = (0, 8)
+STATUS_MARGIN = (2, 0)
+DRAG_PAD_COLOR = '#dbe8f5'
+DRAG_PAD_WIDTH = 6
+DRAG_PAD_PADDING_X = 4
+DRAG_PAD_PADDING_Y = 5
+DRAG_PAD_CURSOR = 'fleur'
+DRAG_PAD_MARGIN = (8, 0)
+MOVEMENT_PADDING = 5
+LEVEL_BUTTON_MARGIN_X = 1
+LEVEL_BUTTON_MARGIN_Y = 2
+GROUND_BUTTON_MARGIN_X = 1
+GROUND_BUTTON_MARGIN_Y = 2
+SLIDER_HIGHLIGHT_THICKNESS = 0
+CONTROLS_MARGIN = (4, 0)
+SPEED_BUTTON_MARGIN = 4
+HELP_MARGIN = (8, 0)
+MOVEMENT_BUTTON_WIDTH = 12
+MOVEMENT_BUTTON_MARGIN_X = 1
+MOVEMENT_BUTTON_MARGIN_Y = 2
+STATUS_WRAP_LENGTH = 280
+
+
+def move_camera(transform, actions, elapsed, speed, turn_speed, drag):
+    """根据按住的按钮和拖拽增量，计算新的相机位置、朝向。"""
+    import carla
+    yaw = transform.rotation.yaw + drag[0]
+    pitch = transform.rotation.pitch + drag[1]
+    yaw += (('look_right' in actions) - ('look_left' in actions)) * turn_speed * elapsed
+    pitch += (('look_up' in actions) - ('look_down' in actions)) * turn_speed * elapsed
+    rotation = carla.Rotation(pitch=max(-MAX_PITCH, min(MAX_PITCH, pitch)),
+                              yaw=(yaw + 180) % 360 - 180, roll=transform.rotation.roll)
+    # 平移只使用水平朝向，不随相机的俯仰或侧倾改变高度。
+    movement_rotation = carla.Rotation(yaw=rotation.yaw)
+    forward, right = movement_rotation.get_forward_vector(), movement_rotation.get_right_vector()
+    longitudinal = ('forward' in actions) - ('back' in actions)
+    lateral = ('right' in actions) - ('left' in actions)
+    vertical = ('up' in actions) - ('down' in actions)
+    dx = longitudinal * forward.x + lateral * right.x
+    dy = longitudinal * forward.y + lateral * right.y
+    dz = vertical
+    length = max(1, math.sqrt(dx * dx + dy * dy + dz * dz))
+    distance = speed * elapsed / length
+    position = transform.location
+    return carla.Transform(carla.Location(x=position.x + dx * distance,
+                                         y=position.y + dy * distance,
+                                         z=position.z + dz * distance), rotation)
+
+
+def preset_view(transform, mode):
+    """保留位置和水平方向，恢复水平或切到 45 度俯视。"""
+    import carla
+    pitch = VIEW_PITCHES[mode]
+    return carla.Transform(transform.location,
+                           carla.Rotation(pitch=pitch, yaw=transform.rotation.yaw, roll=0))
+
+
+def carla_window_bounds():
+    """可选的 X11 定位。多窗口或查询失败时交给用户手动拖动。"""
+    try:
+        result = subprocess.run([XWININFO_COMMAND, '-root', '-tree'], capture_output=True,
+                                text=True, timeout=XWININFO_TIMEOUT, check=True)
+        windows = re.findall(
+            r'(0x[0-9a-fA-F]+)\s+"([^"\n]+)":\s+\("([^"]*)"\s+"([^"]*)"\)', result.stdout)
+        # 排除窗口管理器的同名装饰框，只选 CARLA 自身的客户端窗口。
+        candidates = [wid for wid, name, instance, window_class in windows
+                      if name.startswith(WINDOW_PREFIXES)
+                      and 'carla' in (instance + window_class).lower()]
+        if len(candidates) != 1:
+            return None
+        result = subprocess.run([XWININFO_COMMAND, '-id', candidates[0]], capture_output=True,
+                                text=True, timeout=XWININFO_TIMEOUT, check=True)
+        values = [re.search(pattern, result.stdout) for pattern in (
+            r'Absolute upper-left X:\s*(-?\d+)', r'Absolute upper-left Y:\s*(-?\d+)',
+            r'Width:\s*(\d+)', r'Height:\s*(\d+)')]
+        if all(values):
+            return tuple(int(value.group(1)) for value in values)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return None
+
+
+def camera_loop(args, commands, messages, stopped):
+    """CARLA RPC 放到独立进程，超时不会阻塞 Tk 的界面进程。"""
+    try:
+        import carla
+    except ImportError:
+        messages.put(('reset', '缺少 CARLA Python API，请使用 carla-venv 启动。'))
+        return
+    client = carla.Client(args.host, args.port)
+    client.set_timeout(RPC_TIMEOUT)
+    speed = args.speed
+    while not stopped.is_set():
+        try:
+            world = client.get_world()
+            spectator = world.get_spectator()
+            messages.put(('reset', '已连接 · 仅控制自由观察相机'))
+            previous = time.monotonic()
+            next_world_check = previous + WORLD_CHECK_INTERVAL
+            target, actions = None, set()
+            while not stopped.is_set():
+                now = time.monotonic()
+                elapsed = min(now - previous, MAX_ELAPSED)
+                previous = now
+                drag = [0., 0.]
+                view = None
+                while True:
+                    try:
+                        command = commands.get_nowait()
+                    except queue.Empty:
+                        break
+                    if command[0] == 'stop':
+                        actions.clear()
+                        drag = [0., 0.]
+                    elif command[0] == 'actions':
+                        actions = set(command[1])
+                    elif command[0] == 'speed':
+                        speed = command[1]
+                    elif command[0] == 'drag':
+                        drag[0] += command[1]
+                        drag[1] += command[2]
+                    elif command[0] == 'view':
+                        view = command[1]
+                        drag = [0., 0.]
+                if now >= next_world_check:
+                    latest_world = client.get_world()
+                    if latest_world.id != world.id:
+                        world, spectator = latest_world, latest_world.get_spectator()
+                        target, actions, drag = None, set(), [0., 0.]
+                        view = None
+                        messages.put(('reset', '地图已切换 · 重新取得观察相机'))
+                    next_world_check = now + WORLD_CHECK_INTERVAL
+                if view is not None or actions or any(drag):
+                    # 连续移动使用累计位置，避免旧快照让观察相机倒退。
+                    if target is None:
+                        target = spectator.get_transform()
+                    if view is not None:
+                        target = preset_view(target, view)
+                    target = move_camera(target, actions, elapsed, speed, args.turn_speed, drag)
+                    if not stopped.is_set():
+                        spectator.set_transform(target)
+                else:
+                    target = None
+                stopped.wait(max(0, 1 / CAMERA_RATE - (time.monotonic() - now)))
+        except (RuntimeError, OSError) as error:
+            messages.put(('reset', f'连接中断，正在重试：{error}'))
+            # 断开期间的移动请求不在重连后继续执行。
+            stopped.wait(RECONNECT_DELAY)
+            while True:
+                try:
+                    commands.get_nowait()
+                except queue.Empty:
+                    break
+
+
+class CameraPanel:
+    def __init__(self, root, args):
+        self.root, self.args = root, args
+        context = multiprocessing.get_context('spawn')
+        self.commands = context.Queue()
+        self.messages = context.Queue()
+        self.stopped = context.Event()
+        self.actions = set()
+        self.auto_forward = False
+        self.speed = args.speed
+        self.closed = False
+        self.drag_position = None
+        root.title('CARLA 自由视角')
+        root.resizable(*PANEL_RESIZABLE)
+        root.attributes('-topmost', PANEL_TOPMOST)
+        root.protocol('WM_DELETE_WINDOW', self.close)
+        self.build_controls()
+        # 松开、失焦和最小化只清理临时按住操作，保留明确开启的自动前进。
+        root.bind_all('<ButtonRelease-1>', self.release_mouse)
+        root.bind('<FocusOut>', lambda event: root.after_idle(self.stop_if_unfocused))
+        root.bind('<Unmap>', self.release_mouse)
+        root.bind_all('<MouseWheel>', self.mouse_wheel)
+        root.bind_all('<Button-4>', lambda event: self.change_speed(SPEED_FACTOR))
+        root.bind_all('<Button-5>', lambda event: self.change_speed(1 / SPEED_FACTOR))
+        self.worker = context.Process(target=camera_loop, name='carla-spectator', daemon=True,
+                                      args=(args, self.commands, self.messages, self.stopped))
+        self.worker.start()
+        root.after(STATUS_INTERVAL_MS, self.refresh_status)
+        root.after(INITIAL_PLACEMENT_DELAY_MS, self.place_panel)
+
+    def build_controls(self):
+        panel = ttk.Frame(self.root, padding=PANEL_PADDING)
+        panel.pack(fill='both', expand=True)
+        header = ttk.Frame(panel)
+        header.pack(fill='x', pady=HEADER_MARGIN)
+        header.columnconfigure(0, weight=1)
+        ttk.Label(header, text=f'CARLA  {self.args.host}:{self.args.port}').grid(
+            row=0, column=0, sticky='w')
+        self.status = tk.StringVar(value='正在连接 CARLA…')
+        ttk.Label(header, textvariable=self.status, wraplength=STATUS_WRAP_LENGTH).grid(
+            row=1, column=0, sticky='w', pady=STATUS_MARGIN)
+        drag_pad = tk.Label(header, text='拖动\n视角', bg=DRAG_PAD_COLOR, width=DRAG_PAD_WIDTH,
+                            padx=DRAG_PAD_PADDING_X, pady=DRAG_PAD_PADDING_Y, cursor=DRAG_PAD_CURSOR)
+        drag_pad.grid(row=0, column=1, rowspan=2, sticky='ne', padx=DRAG_PAD_MARGIN)
+        drag_pad.bind('<ButtonPress-1>', self.begin_drag)
+        drag_pad.bind('<B1-Motion>', self.drag_view)
+        groups = ttk.Frame(panel)
+        groups.pack(fill='x')
+        movement = ttk.LabelFrame(groups, text='移动与转头按住操作，视角预设单击', padding=MOVEMENT_PADDING)
+        movement.pack(fill='x', expand=True)
+        for column in range(3):
+            movement.columnconfigure(column, weight=1)
+        buttons = [('左转', 'look_left', 0, 0), ('前进', 'forward', 0, 1),
+                   ('右转', 'look_right', 0, 2), ('左移', 'left', 1, 0),
+                   ('后退', 'back', 1, 1), ('右移', 'right', 1, 2),
+                   ('上升', 'up', 2, 0), ('抬头', 'look_up', 2, 1),
+                   ('下降', 'down', 3, 0), ('低头', 'look_down', 3, 1)]
+        for text, action, row, column in buttons:
+            self.hold_button(movement, text, action, row, column)
+        ttk.Button(movement, text='恢复水平视角', command=lambda: self.set_view('level')).grid(
+            row=2, column=2, sticky='ew', padx=LEVEL_BUTTON_MARGIN_X, pady=LEVEL_BUTTON_MARGIN_Y)
+        ttk.Button(movement, text='45° 看地面', command=lambda: self.set_view('ground')).grid(
+            row=3, column=2, sticky='ew', padx=GROUND_BUTTON_MARGIN_X, pady=GROUND_BUTTON_MARGIN_Y)
+        self.speed_label = tk.StringVar()
+        ttk.Label(panel, textvariable=self.speed_label).pack(anchor='w')
+        self.speed_slider = tk.Scale(panel, from_=MIN_SPEED, to=MAX_SPEED, resolution=SPEED_RESOLUTION, orient='horizontal',
+                                     showvalue=False, command=self.set_speed, highlightthickness=SLIDER_HIGHLIGHT_THICKNESS)
+        self.speed_slider.set(self.speed)
+        self.speed_slider.pack(fill='x')
+        controls = ttk.Frame(panel)
+        controls.pack(fill='x', pady=CONTROLS_MARGIN)
+        ttk.Button(controls, text='速度 −', command=lambda: self.change_speed(1 / SPEED_FACTOR)).pack(side='left')
+        ttk.Button(controls, text='速度 ＋', command=lambda: self.change_speed(SPEED_FACTOR)).pack(side='left', padx=SPEED_BUTTON_MARGIN)
+        ttk.Button(controls, text='停止', command=self.stop_motion).pack(side='left')
+        ttk.Button(controls, text='贴靠 CARLA', command=self.place_panel).pack(side='right')
+        ttk.Label(panel, text='前进右键持续移动 · 滚轮调速 · 左键按住移动').pack(pady=HELP_MARGIN)
+        self.set_speed(self.speed)
+
+    def hold_button(self, parent, text, action, row, column):
+        button = ttk.Button(parent, text=text, width=MOVEMENT_BUTTON_WIDTH,
+                            padding=PRIMARY_BUTTON_PADDING if row == 0 else MOVEMENT_BUTTON_PADDING)
+        button.grid(row=row, column=column, sticky='ew', padx=MOVEMENT_BUTTON_MARGIN_X, pady=MOVEMENT_BUTTON_MARGIN_Y)
+        def press(event):
+            self.actions.clear()
+            self.drag_position = None
+            if action == 'back':
+                self.stop_motion()
+            self.actions.add(action)
+            self.send_actions()
+            button.grab_set()
+            return 'break'
+        button.bind('<ButtonPress-1>', press)
+        if action == 'forward':
+            self.forward_button = button
+            button.bind('<ButtonPress-3>', self.toggle_auto_forward)
+
+    def release_mouse(self, event=None):
+        self.actions.clear()
+        self.drag_position = None
+        self.send_actions()
+        grabbed = self.root.grab_current()
+        if grabbed is not None:
+            grabbed.grab_release()
+
+    def send_actions(self):
+        actions = self.actions | ({'forward'} if self.auto_forward else set())
+        self.commands.put(('actions', list(actions)))
+
+    def stop_motion(self):
+        self.auto_forward = False
+        self.forward_button.configure(text='前进')
+        self.actions.clear()
+        self.commands.put(('stop',))
+        self.drag_position = None
+
+    def toggle_auto_forward(self, event=None):
+        self.auto_forward = not self.auto_forward
+        self.actions.clear()
+        self.drag_position = None
+        self.forward_button.configure(text='前进（自动）' if self.auto_forward else '前进')
+        self.send_actions()
+        return 'break'
+
+    def stop_if_unfocused(self):
+        if self.closed:
+            return
+        focused = self.root.focus_displayof()
+        if focused is None or focused.winfo_toplevel() != self.root:
+            self.release_mouse()
+
+    def set_view(self, mode):
+        self.release_mouse()
+        self.commands.put(('view', mode))
+
+    def begin_drag(self, event):
+        self.release_mouse()
+        self.drag_position = (event.x_root, event.y_root)
+        event.widget.grab_set()
+
+    def drag_view(self, event):
+        if self.drag_position is None:
+            return
+        old_x, old_y = self.drag_position
+        self.commands.put(('drag', (event.x_root - old_x) * DRAG_SENSITIVITY,
+                            -(event.y_root - old_y) * DRAG_SENSITIVITY))
+        self.drag_position = (event.x_root, event.y_root)
+
+    def set_speed(self, value):
+        self.speed = float(value)
+        self.commands.put(('speed', self.speed))
+        self.speed_label.set(f'移动速度：{self.speed:.1f} 米/秒')
+
+    def change_speed(self, factor):
+        self.speed_slider.set(max(MIN_SPEED, min(MAX_SPEED, self.speed * factor)))
+
+    def mouse_wheel(self, event):
+        self.change_speed(SPEED_FACTOR if event.delta > 0 else 1 / SPEED_FACTOR)
+
+    def place_panel(self):
+        self.root.update_idletasks()
+        width, height = self.root.winfo_width(), self.root.winfo_height()
+        bounds = carla_window_bounds()
+        if bounds:
+            x, y, window_width, window_height = bounds
+            x, y = x + window_width - width - WINDOW_INSET[0], y + window_height - height - WINDOW_INSET[1]
+        else:
+            x = self.root.winfo_screenwidth() - width - SCREEN_INSET[0]
+            y = self.root.winfo_screenheight() - height - SCREEN_INSET[1]
+        self.root.geometry(f'+{max(0, x)}+{max(0, y)}')
+
+    def refresh_status(self):
+        while True:
+            try:
+                kind, text = self.messages.get_nowait()
+            except queue.Empty:
+                break
+            if kind == 'reset':
+                self.release_mouse()
+                self.commands.put(('speed', self.speed))
+            self.status.set(text)
+        if not self.stopped.is_set():
+            self.root.after(STATUS_INTERVAL_MS, self.refresh_status)
+
+    def close(self):
+        if self.closed:
+            return
+        self.closed = True
+        self.stop_motion()
+        self.stopped.set()
+        self.root.destroy()
+        self.worker.join(timeout=WORKER_JOIN_TIMEOUT)
+        if self.worker.is_alive():
+            self.worker.terminate()
+            self.worker.join(timeout=WORKER_TERMINATE_TIMEOUT)
+        self.commands.close()
+        self.messages.close()
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--host', default=DEFAULT_HOST, help='CARLA 地址')
+    parser.add_argument('--port', type=int, default=DEFAULT_PORT, help='CARLA RPC 端口')
+    parser.add_argument('--speed', type=float, default=DEFAULT_SPEED, help=f'初始移动速度，米/秒，默认 {DEFAULT_SPEED:g}')
+    parser.add_argument('--turn-speed', type=float, default=DEFAULT_TURN_SPEED, help=f'按钮转头速度，度/秒，默认 {DEFAULT_TURN_SPEED:g}')
+    args = parser.parse_args()
+    if not 1 <= args.port <= 65535 or not MIN_SPEED <= args.speed <= MAX_SPEED or not 0 < args.turn_speed <= MAX_TURN_SPEED:
+        parser.error(f'端口为 1～65535，速度为 {MIN_SPEED:g}～{MAX_SPEED:g}，转头速度大于 0 且不超过 {MAX_TURN_SPEED:g}。')
+    root = tk.Tk()
+    panel = CameraPanel(root, args)
+    try:
+        root.mainloop()
+    finally:
+        panel.close()
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except KeyboardInterrupt:
+        raise SystemExit(130)
+    except (RuntimeError, OSError, ImportError, tk.TclError) as error:
+        raise SystemExit(f'错误：{error}')

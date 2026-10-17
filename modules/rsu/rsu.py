@@ -1,188 +1,158 @@
-"""从同一份配置在 CARLA 创建 RSU 实体，在 SUMO 创建图标；Ctrl+C 同时清理。"""
-
+"""Independent foreground RSU process; no clock or simulator lifetime ownership."""
 import argparse
 import fcntl
 import hashlib
-import json
 import logging
 import math
 from pathlib import Path
-import re
 import signal
 import sys
 import threading
 import time
-import uuid
 
-
-MODULE_DIR = Path(__file__).resolve().parent
-PROJECT_DIR = MODULE_DIR.parents[1]
-sys.path.insert(0, str(PROJECT_DIR))
-from carla_rsu import RsuBody
-from rsu_marker import draw_marker
-from rsu_label import draw_label, label_text
-from sumo_rsu import SumoRsu
-from simuenv.sumo.traci.client import owner_alive, process_identity
-
+# 路径与可调参数
+PROJECT_DIR = Path(__file__).resolve().parents[2]
+CONFIG_FILE = PROJECT_DIR / 'foundation' / 'cobridge' / 'rsu' / 'config' / 'town04.json'
 RUNTIME_DIR = PROJECT_DIR / '.runtime' / 'rsu'
+STATE_FILE = RUNTIME_DIR / 'session.json'
+LEGACY_STATE_FILE = PROJECT_DIR / '.runtime' / 'cobridge' / 'rsu-session.json'
+LOCK_FILE = RUNTIME_DIR / 'session.lock'
+LOG_FILE = RUNTIME_DIR / 'rsu.log'
+DEFAULT_HOST = '127.0.0.1'
+DEFAULT_PORT = 2000
+DEFAULT_DURATION = 0.0
+DEFAULT_TIMEOUT = 2.0
+DEFAULT_RPC_TIMEOUT = 10.0
+STATUS_INTERVAL = 1.0
+DRAW_INTERVAL = 0.05
+RETRY_INTERVAL = 1.0
+COMPONENT_NAME = 'RSU'
+
+sys.path.insert(0, str(PROJECT_DIR))
+from foundation.console import Console
+from foundation.module_status import ModuleReporter, DEFAULT_SOCKET as STATUS_SOCKET_FILE
+from foundation.cobridge.rsu.rsu import RsuBridge, read_configuration
+from foundation.cobridge.network import read_network
+from foundation.sumo.client import SumoClient, SOCKET_FILE
 
 
-def save_state(path, state):
-    temporary = path.with_suffix('.tmp')
-    temporary.write_text(json.dumps(state, ensure_ascii=False, indent=2))
-    temporary.replace(path)
+CONSOLE = Console(COMPONENT_NAME)
 
 
-def clean_previous_session(world, sumo, state_file):
-    """上次异常退出后，再次启动时按会话前缀回收遗留实体。"""
-    if not state_file.exists():
-        return
-    state = json.loads(state_file.read_text())
-    if owner_alive(state['owner']):
-        raise RuntimeError('上一个 RSU 进程仍在运行。')
-    if state.get('world_id') == world.id:
-        world.wait_for_tick(3)
-        prefix = f'rsu_{state["session"]}_'
-        for actor in world.get_actors():
-            if actor.attributes.get('role_name', '').startswith(prefix):
-                if not actor.destroy():
-                    raise RuntimeError(f'无法清理上次遗留的 RSU actor {actor.id}')
-    sumo.remove(state['session'])
-    state_file.unlink()
-    logging.info('已回收上次遗留的 RSU 会话：%s', state['session'])
-
-
-def read_configuration(path):
-    config = json.loads(path.read_text())
-    if config.get('coordinate_system', 'carla') != 'carla':
-        raise ValueError('RSU 配置应使用 CARLA 世界坐标，单位为米。')
-    rsus = config['rsus']
-    if not rsus:
-        raise ValueError('rsus 列表不能为空。')
-    names = set()
-    for rsu in rsus:
-        name = rsu['id']
-        if not re.fullmatch(r'[A-Za-z0-9_]+', name) or name in names:
-            raise ValueError(f'RSU ID 无效或重复：{name}')
-        names.add(name)
-        for key in ('x', 'y', 'z', 'base_z'):
-            rsu[key] = float(rsu[key])
-            if not math.isfinite(rsu[key]):
-                raise ValueError(f'{name}.{key} 必须为有限数值。')
-        if not 0 < rsu['z'] - rsu['base_z'] <= 200:
-            raise ValueError(f'{name} 塔身高度必须在 0～200 米之间。')
-        radius = float(rsu.get('beacon_radius', 5))
-        if not math.isfinite(radius) or not 0 < radius <= 50:
-            raise ValueError(f'{name}.beacon_radius 必须在 0～50 米之间。')
-        rsu['beacon_radius'] = radius
-    return config
-
-
-def run(args, stopped):
+def open_session(args):
     import carla
-
-    config = read_configuration(args.config)
-    sumo = SumoRsu()
     client = carla.Client(args.host, args.port)
-    client.set_timeout(5)
+    client.set_timeout(args.timeout)
     world = client.get_world()
-    current_map = world.get_map()
-    map_name = Path(current_map.name).name
-    if config['map'] != map_name or sumo.status['map'] != map_name:
-        raise RuntimeError(f'地图不一致：CARLA={map_name}，SUMO={sumo.status["map"]}，RSU={config["map"]}')
-    fingerprint = hashlib.sha256(current_map.to_opendrive().strip().encode()).hexdigest()
-    if fingerprint != sumo.status['xodr_sha256']:
-        raise RuntimeError('SUMO 路网所用 .xodr 与当前 CARLA 地图不一致，请重新转换并重启 SUMO。')
-
-    session = uuid.uuid4().hex
-    bodies = []
-    state_file = RUNTIME_DIR / 'session.json'
-    clean_previous_session(world, sumo, state_file)
-    state = dict(session=session, owner=process_identity(), host=args.host, port=args.port,
-                 world_id=world.id, map=map_name, rsus=config['rsus'], actors=[])
-    save_state(state_file, state)
+    sumo = SumoClient(args.sumo_socket, args.rpc_timeout)
+    component = None
     try:
-        # 同名 POI 会报错，避免覆盖其他模块创建的对象。
-        sumo.add(session, config['rsus'])
-        for rsu in config['rsus']:
-            body = RsuBody(session)
-            bodies.append(body)  # 立即记录，生成到一半失败也能清理。
-            body.spawn(world, rsu, rsu['base_z'])
-            state['actors'].extend(actor.id for actor in body.actors)
-            save_state(state_file, state)
-        logging.info('已创建 %s，实体 actor IDs=%s', [r['id'] for r in config['rsus']], state['actors'])
-        print('RSU 已同步到 CARLA 和 SUMO：' + ', '.join(r['id'] for r in config['rsus']))
-        print('Ctrl+C 删除本次 RSU；CARLA 和 SUMO 保持运行。')
-        started = time.monotonic()
-        next_check = 0
-        next_marker = 0
-        while not stopped.is_set():
-            now = time.monotonic()
-            if args.duration and now - started >= args.duration:
-                break
-            if time.monotonic() >= next_check:
-                sumo.check()
-                if world.id != client.get_world().id:
-                    raise RuntimeError('CARLA 已切换世界，结束本次 RSU 会话。')
-                next_check = time.monotonic() + 1
-            for rsu in config['rsus']:
-                if now >= next_marker:
-                    draw_marker(world, rsu, rsu['base_z'], lifetime=.8)
-                label_z = rsu['z'] + max(2, rsu['beacon_radius'] * 1.6) + 5
-                draw_label(world, rsu['x'], rsu['y'], label_z, label_text(rsu['id']),
-                           lifetime=.06, elapsed=time.monotonic() - started)
-            if now >= next_marker:
-                next_marker = now + .25
-            # 文字约 20 Hz 更新；短寿命减少旋转时旧角度文字的残影。
-            stopped.wait(max(0, .05 - (time.monotonic() - now)))
-    finally:
-        errors = []
-        for body in reversed(bodies):
+        status = sumo.status()
+        network = read_network(status['config'])
+        fingerprint = hashlib.sha256(world.get_map().to_opendrive().strip().encode()).hexdigest()
+        if fingerprint != network['xodr_sha256']:
+            raise RuntimeError('RSU 等待地图一致的 CARLA 与 SUMO。')
+        component = RsuBridge(world, sumo.connection, network, args.config, STATE_FILE)
+        component.setup()
+        return client, world, sumo, component
+    except BaseException:
+        if component is not None:
             try:
-                body.destroy()
-            except Exception as error:
-                errors.append(str(error))
+                component.close()
+            except Exception:
+                logging.exception('RSU 创建失败后的清理未完成')
+        sumo.close()
+        raise
+
+
+def run(args, stopped, reporter):
+    started = time.monotonic()
+    last_error = None
+    while not stopped.is_set():
+        if args.duration and time.monotonic() - started >= args.duration:
+            break
         try:
-            sumo.remove(session)
-        except RuntimeError as error:
-            logging.warning('SUMO POI 清理：%s', error)
-            errors.append(str(error))
-        if errors:
-            logging.error('清理未完全确认：%s', errors)
-            print(f'RSU 清理未完全确认，状态保留在 {state_file}，下次启动时重试。')
-        else:
-            state_file.unlink(missing_ok=True)
-            print('本次 CARLA RSU 实体和 SUMO 图标已移除。')
-        logging.info('会话结束：%s，清理错误=%s', session, errors)
+            client, world, sumo, component = open_session(args)
+        except Exception as error:
+            message = str(error)
+            reporter.set_state('waiting', message)
+            if message != last_error:
+                CONSOLE.info(f'等待依赖就绪：{message}')
+                last_error = message
+            stopped.wait(RETRY_INTERVAL)
+            continue
+        reporter.set_state('running', '实体已创建')
+        CONSOLE.info(f'实体已创建，会话 {component.session}。Ctrl+C 清理本次实体并退出。')
+        last_error = None
+        next_check = 0
+        try:
+            while not stopped.is_set():
+                now = time.monotonic()
+                if args.duration and now - started >= args.duration:
+                    return
+                if now >= next_check:
+                    if client.get_world().id != world.id:
+                        raise RuntimeError('CARLA 世界已切换。')
+                    sumo.status()
+                    next_check = now + STATUS_INTERVAL
+                component.after_step(now - started, DRAW_INTERVAL)
+                stopped.wait(max(0, DRAW_INTERVAL - (time.monotonic() - now)))
+        except Exception as error:
+            reporter.set_state('recovering', str(error))
+            CONSOLE.warning(f'依赖断开：{error}；等待恢复。', exc_info=True)
+        finally:
+            try:
+                component.close()
+                CONSOLE.info('本次实体已移除。')
+            except Exception as error:
+                reporter.set_state('error', f'清理未完成：{error}')
+                CONSOLE.warning(f'清理未完成，保留恢复记录：{error}', exc_info=True)
+            finally:
+                sumo.close()
+        stopped.wait(RETRY_INTERVAL)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--host', default='127.0.0.1', help='CARLA 地址')
-    parser.add_argument('--port', type=int, default=2000, help='CARLA RPC 端口')
-    parser.add_argument('--config', type=Path, default=MODULE_DIR / 'config' / 'town04.json',
-                        help='RSU 配置，默认使用旧版 Town04 位置')
-    parser.add_argument('--duration', type=float, default=0, help='运行指定秒数后清理；0 表示直到 Ctrl+C')
+    parser.add_argument('--host', default=DEFAULT_HOST)
+    parser.add_argument('--port', type=int, default=DEFAULT_PORT)
+    parser.add_argument('--config', type=Path, default=CONFIG_FILE)
+    parser.add_argument('--duration', type=float, default=DEFAULT_DURATION)
+    parser.add_argument('--timeout', type=float, default=DEFAULT_TIMEOUT)
+    parser.add_argument('--rpc-timeout', type=float, default=DEFAULT_RPC_TIMEOUT)
+    parser.add_argument('--sumo-socket', type=Path, default=SOCKET_FILE)
+    parser.add_argument('--status-socket', type=Path, default=STATUS_SOCKET_FILE)
     args = parser.parse_args()
-    if not 1 <= args.port <= 65535 or not math.isfinite(args.duration) or args.duration < 0:
-        parser.error('端口必须在 1～65535，duration 不能为负数。')
+    if (not 1 <= args.port <= 65535 or not math.isfinite(args.duration) or args.duration < 0
+            or not all(math.isfinite(v) and v > 0 for v in (args.timeout, args.rpc_timeout))):
+        parser.error('端口、duration 或超时无效。')
+    args.config = args.config.resolve()
+    read_configuration(args.config)
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-    logging.basicConfig(filename=RUNTIME_DIR / 'rsu.log', level=logging.INFO,
+    logging.basicConfig(filename=LOG_FILE, level=logging.INFO,
                         format='%(asctime)s %(levelname)s %(message)s')
     stopped = threading.Event()
     for signum in (signal.SIGINT, signal.SIGTERM):
         signal.signal(signum, lambda *_: stopped.set())
-    with (RUNTIME_DIR / 'session.lock').open('a') as lock:
+    with LOCK_FILE.open('a') as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise RuntimeError('已有 RSU 命令运行，请先在原终端退出。')
-        run(args, stopped)
+            raise RuntimeError('已有 RSU 命令运行，请在原终端退出。')
+        if LEGACY_STATE_FILE.exists() and not STATE_FILE.exists():
+            LEGACY_STATE_FILE.replace(STATE_FILE)
+        reporter = ModuleReporter(COMPONENT_NAME, args.status_socket)
+        try:
+            run(args, stopped, reporter)
+        finally:
+            reporter.close()
 
 
 if __name__ == '__main__':
     try:
         main()
-    except (RuntimeError, OSError, ValueError, KeyError, ImportError) as error:
-        logging.exception('RSU 会话失败')
-        raise SystemExit(f'错误：{error}')
+    except KeyboardInterrupt:
+        raise SystemExit(130)
+    except Exception as error:
+        CONSOLE.error(f'运行失败：{error}', exc_info=True)
+        raise SystemExit(1)
