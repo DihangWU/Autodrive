@@ -10,6 +10,7 @@ CARLA、SUMO、CoBridge、RSU 分别占用一个终端，各自通过 Ctrl+C 退
 | `run_sumo` | 前台 SUMO 运行层、唯一 TraCI 连接 | 固定步长自主推进 | 退出本次 SUMO 运行层和子进程 |
 | `run_cobridge` | 独立时钟、发现并接管可用仿真器 | 自己可空载运行 | 释放接管；CARLA、SUMO、RSU 不退出 |
 | `run_rsu` | 手动创建、显示和清理 RSU | 可直接使用 CARLA 与 SUMO | 只清理本次 RSU，不退出其他进程 |
+| `add_lincoln` | CARLA Lincoln、传感器、驾驶及向桥登记 | 车辆在 CARLA 独立运行，等待登记 | 清理本车和窗口，请求桥删除 SUMO 投影 |
 
 CoBridge 不再创建 RSU、不持有 RSU 生命周期，也不拥有任何仿真器进程。RSU 进程不调用 `world.tick()`、不改变 CARLA 同步设置、不申请 SUMO 时钟控制权。
 
@@ -49,16 +50,16 @@ foundation/
     │   ├── rsu_label.py           # 文字显示
     │   ├── config/town04.json     # RSU 专属参数
     │   └── assets/rsu.png         # SUMO 图标
-    ├── lincoln/                   # 仅目录及空实现、空配置
+    ├── lincoln/                   # 车辆登记、CARLA → SUMO 投影
     └── npcvehicules/              # 仅目录及空实现、空配置，沿用已有拼写
 modules/
 ├── rsu/rsu.py                      # 独立 RSU 命令与重连循环
-├── lincoln/lincoln.py               # 空文件
+├── lincoln/add_lincoln.py           # Lincoln 入口；其余功能分类放入子目录
 ├── npcvehicules/npcvehicules.py      # 空文件
 └── omnet/                          # 预留
 ```
 
-实体桥接实现仍按对象分类放置；`cobridge/rsu/` 的目录归属不代表其运行生命周期属于 CoBridge。Lincoln、NPC、OMNeT++ 和 ROS 2 尚未实现，空配置不会加载。
+实体桥接实现仍按对象分类放置；`cobridge/rsu/` 的目录归属不代表其运行生命周期属于 CoBridge。Lincoln 已恢复旧版车辆、传感器与 ROS 2/RViz，并向 CoBridge 登记实现 CARLA → SUMO 同步；NPC、OMNeT++ 仍未实现，空配置不会加载。
 
 ## SUMO 连接与通用接口
 
@@ -102,11 +103,11 @@ CoBridge 启动不加载 CARLA API、不读取地图、不连接 SUMO；先创�
 
 CARLA 接入后设置同步模式与固定步长；SUMO 接入后申请对应步长的控制权。默认步长 0.05 秒，SUMO 与 CoBridge 的步长需相同。单个仿真器可先接入；另一端随后接入时检查地图指纹，地图不一致则拒绝该次接入并继续等待。
 
-每轮尝试发现 → 推进当前已接入的 CARLA → 推进当前已接入的 SUMO → 增加本地帧号。只比较各自每步的时间增量，不强行将已经独立运行过的仿真器绝对时间归零。每次接入建立新的时间基准，不代表空载时段或接入前的历史已同步。默认按现实时间预算等待；`--fast` 取消等待。连接尝试和接口调用的耗时可能降低实际运行速率。
+每轮尝试发现 → 推进当前已接入的 CARLA → 提交已登记 Lincoln 的最新 SUMO 姿态 → 推进当前已接入的 SUMO → 增加本地帧号。只比较各自每步的时间增量，不强行将已经独立运行过的仿真器绝对时间归零。每次接入建立新的时间基准，不代表空载时段或接入前的历史已同步。默认按现实时间预算等待；`--fast` 取消等待。连接尝试和接口调用的耗时可能降低实际运行速率。
 
 一端退出或世界切换后，CoBridge 释放该端并继续管理其他可用端，周期重试接入。单端失效时不声称整个实验仍是完整联仿，终端和日志会明确显示断开状态。两端步进不是原子事务，不回滚已经完成的帧。
 
-CoBridge 正常退出：恢复同一 CARLA 世界的原设置、释放 SUMO 时钟控制权、关闭自己的状态入口。CARLA、SUMO、RSU 进程继续运行。文件锁防止本项目重复启动时钟。强杀 CoBridge 可以通过 SUMO socket 断开恢复自主步进，但 CARLA 无法保证自动恢复同步设置；SIGKILL 不等同于正常 Ctrl+C。
+CoBridge 正常退出：恢复同一 CARLA 世界的原设置、释放 SUMO 时钟控制权、关闭自己的状态入口。CARLA、SUMO、RSU、Lincoln 进程继续运行；桥退出只清理 Lincoln 的 SUMO 投影。文件锁防止本项目重复启动时钟。强杀 CoBridge 可以通过 SUMO socket 断开恢复自主步进，但 CARLA 无法保证自动恢复同步设置；SIGKILL 不等同于正常 Ctrl+C。
 
 OMNeT++ 未来可保留事件调度，再与时间边界协调；50 ms 不作为通信事件的精度。当前没有实现通信联仿。
 
@@ -168,6 +169,6 @@ SUMO 运行层默认 `.runtime/sumo/control.sock`，CoBridge 状态入口默认 
 
 真实 CARLA/SUMO 验证覆盖：CoBridge 空载运行、RSU 先启动等待、SUMO 晚启动接入、CoBridge 退出后三者继续运行、实际 CARLA/SUMO 再次接入与释放、SUMO 独立 Ctrl+C、SUMO 重启后 RSU 恢复、RSU Ctrl+C 仅清理自身，以及仿真器恢复自主推进。
 
-另有回归测试覆盖接管与释放、实体客户端不能推进时钟、通用 RPC 错误隔离、晚接入、清理异常保留等。CARLA 新启动脚本的前台附着和 Ctrl+C 清理通过假 Docker CLI 验证；没有为了测试而重启现有 GPU 容器。Lincoln、NPC、OMNeT++、ROS 2、长时间压力运行与 CARLA 实际重启恢复尚未验证。
+另有回归测试覆盖接管与释放、实体客户端不能推进时钟、通用 RPC 错误隔离、晚接入、清理异常保留等。CARLA 新启动脚本的前台附着和 Ctrl+C 清理通过假 Docker CLI 验证；没有为了测试而重启现有 GPU 容器。Lincoln 的新增实现、运行方式和验证范围见根目录 README；NPC、OMNeT++、长时间压力运行与 CARLA 实际重启恢复尚未验证。
 
 已额外通过独立真实 SUMO 实例验证对象创建与删除，经 CoBridge 适配器接收、确认后在 SUMO 终端输出；重复轮询和确认不会重复输出。操作失败不误报、断开后补发、确认权限及缓冲分批由回归测试覆盖。

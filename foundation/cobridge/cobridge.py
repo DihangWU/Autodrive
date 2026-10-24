@@ -30,6 +30,7 @@ from foundation.module_status import ModuleRegistry
 from foundation.cobridge.adapters.carla import CarlaAdapter
 from foundation.cobridge.adapters.sumo import SumoAdapter
 from foundation.cobridge.control import ControlServer, SOCKET_FILE
+from foundation.cobridge.lincoln.vehicle_registry import LincolnVehicleRegistry
 from foundation.sumo.client import SOCKET_FILE as SUMO_SOCKET_FILE
 
 
@@ -45,6 +46,7 @@ class BridgeRuntime:
         self.last_errors = {}
         self.frames = 0
         self.modules = ModuleRegistry(CONSOLE.info)
+        self.lincoln = LincolnVehicleRegistry()
 
     def report(self, name, error):
         message = str(error)
@@ -89,7 +91,13 @@ class BridgeRuntime:
         self.next_discovery = 0
 
     def step(self):
+        self.lincoln.prepare_traffic_managers(self.carla)
         for name in ('CARLA', 'SUMO'):
+            if name == 'SUMO':
+                try:
+                    self.lincoln.synchronize_before_sumo_step(self.carla, self.sumo)
+                except Exception:
+                    logging.exception('Lincoln 投影同步失败；保留车辆并在下帧重试')
             adapter = getattr(self, name.lower())
             if adapter is not None:
                 try:
@@ -102,16 +110,23 @@ class BridgeRuntime:
         if command['action'] == 'status':
             return dict(carla_connected=self.carla is not None, sumo_connected=self.sumo is not None,
                         frame=self.frames, time=self.frames * self.args.step_length,
-                        modules=self.modules.snapshot())
+                        modules=self.modules.snapshot(), lincolns=self.lincoln.snapshot())
+        if command['action'].startswith('lincoln.'):
+            return self.lincoln.handle_request(command, owner)
         if command['action'] == 'module.status':
             return self.modules.update(command, owner)
         raise ValueError(f"未知时钟控制请求：{command['action']}")
 
     def disconnected(self, owner):
         self.modules.disconnected(owner)
+        self.lincoln.disconnected(owner)
 
     def close(self):
         errors = []
+        try:
+            self.lincoln.close(self.sumo)
+        except Exception as error:
+            errors.append(f'清理 Lincoln 投影：{error}')
         for name in ('carla', 'sumo'):
             adapter = getattr(self, name)
             if adapter is not None:

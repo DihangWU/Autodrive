@@ -1,0 +1,175 @@
+"""鼠标/键盘驾驶面板，复用 f511f80 的驾驶交互。"""
+import math
+import tkinter as tk
+
+
+def run_mouse_driving_panel(node, done):
+    window = tk.Tk()
+    window.title('Lincoln mouse drive — ' + node.uid)
+    tk.Label(window, text=f'{node.uid}\n鼠标按住驾驶；W 油门 / S 刹车 / A D 转向 / Q 切换前进倒车'
+                          '\n油门右键：定速／取消；非定速时松开或失焦收油滑行').pack(pady=8)
+    pressed_keys = set()
+    pending_releases = {}
+    def stop_driving(event=None):
+        pressed_keys.clear()
+        for callback in pending_releases.values():
+            window.after_cancel(callback)
+        pending_releases.clear()
+        node.active = None
+        node.drive()
+    grid = tk.Frame(window)
+    grid.pack()
+    def activate(action):
+        node.set_autopilot(False)
+        stop_driving()
+        node.active = action
+        node.drive()
+    def toggle_cruise(event=None):
+        node.set_autopilot(False)
+        if node.cruise_speed is not None:
+            node.cruise_speed = None
+        else:
+            velocity = node.car.get_velocity()
+            node.cruise_speed = math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
+            node.cruise_integral = node.car.get_control().throttle
+            node.cruise_time = None
+        stop_driving()
+        return 'break'
+    for i, (label, action) in enumerate([('油门', 'go'), ('左转', 'left'),
+                                       ('刹车', 'brake'), ('右转', 'right')]):
+        button = tk.Button(grid, text=label, width=12, height=3)
+        if i == 0:
+            button.grid(row=0, column=1, padx=4, pady=4)
+        else:
+            button.grid(row=1, column=i - 1, padx=4, pady=4)
+        button.bind('<ButtonPress-1>',
+                    lambda event, a=action: activate(a))
+        if action == 'go':
+            button.bind('<ButtonPress-3>', toggle_cruise)
+    speed_input = tk.Frame(grid)
+    speed_input.grid(row=0, column=2, padx=4, pady=4)
+    tk.Label(speed_input, text='目标速度 km/h').pack()
+    target_entry = tk.Entry(speed_input, width=12)
+    target_entry.pack()
+    target_hint = tk.Label(speed_input, text='输入后按 Enter')
+    target_hint.pack()
+    def set_target_speed(event=None):
+        try:
+            kmh = float(target_entry.get().strip())
+            if not math.isfinite(kmh) or kmh < 0:
+                raise ValueError
+        except ValueError:
+            target_hint.config(text='请输入非负数字', fg='red')
+            return 'break'
+        node.set_autopilot(False)
+        node.cruise_speed = kmh / 3.6
+        node.cruise_integral = node.car.get_control().throttle
+        node.cruise_time = None
+        stop_driving()
+        target_hint.config(text=f'目标 {kmh:g} km/h', fg='black')
+        window.focus_set()
+        return 'break'
+    target_entry.bind('<Return>', set_target_speed)
+    target_entry.bind('<KP_Enter>', set_target_speed)
+    def toggle_autopilot():
+        stop_driving()
+        node.set_autopilot(not node.autopilot)
+    autopilot_button = tk.Button(grid, text='开启自动驾驶', width=12, height=3,
+                                 command=toggle_autopilot)
+    autopilot_button.grid(row=0, column=0, padx=4, pady=4)
+    def release(event=None):
+        stop_driving()
+    window.bind_all('<ButtonRelease-1>', release)
+    def focus_out(event=None):
+        # Moving focus between buttons must not cancel a command.
+        window.after_idle(lambda: stop_driving() if window.focus_get() is None else None)
+    window.bind('<FocusOut>', focus_out)
+    window.bind('<Leave>', lambda event: release() if event.widget == window else None)
+    def reverse():
+        node.set_autopilot(False)
+        node.cruise_speed = None
+        node.active = None
+        velocity = node.car.get_velocity()
+        if math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2) > .5:
+            return
+        node.reverse = not node.reverse
+        gear.config(text='当前：倒车' if node.reverse else '当前：前进')
+    gear = tk.Button(window, text='当前：前进', command=reverse)
+    gear.pack(pady=5)
+    def keyboard_drive():
+        if pressed_keys & {'w', 'a', 's', 'd'}:
+            node.set_autopilot(False)
+        parts = []
+        if 's' in pressed_keys:
+            parts.append('brake')
+        elif 'w' in pressed_keys:
+            parts.append('go')
+        if ('a' in pressed_keys) != ('d' in pressed_keys):
+            parts.append('left' if 'a' in pressed_keys else 'right')
+        node.active = '-'.join(parts) or None
+        node.drive()
+    def key_press(event):
+        key = event.keysym.lower()
+        if key not in ('w', 'a', 's', 'd', 'q'):
+            return
+        callback = pending_releases.pop(key, None)
+        if callback is not None:
+            window.after_cancel(callback)
+        if key not in pressed_keys:
+            pressed_keys.add(key)
+            if key == 'q':
+                reverse()
+            keyboard_drive()
+        return 'break'
+    def key_release(event):
+        key = event.keysym.lower()
+        if key not in pressed_keys:
+            return
+        def finish():
+            pending_releases.pop(key, None)
+            pressed_keys.discard(key)
+            keyboard_drive()
+        # X11 auto-repeat can emit release/press pairs for a held key.
+        if key not in pending_releases:
+            pending_releases[key] = window.after(20, finish)
+        return 'break'
+    window.bind('<KeyPress>', key_press)
+    window.bind('<KeyRelease>', key_release)
+    from modules.lincoln.ui.free_camera_controls import FreeCameraControls
+    def toggle_camera_mode():
+        stop_driving()
+        node.set_camera_mode(not node.follow)
+        free_camera.mode_changed()
+        camera_button.config(text='释放视角' if node.follow else '跟随本车')
+    camera_button = tk.Button(window, text='释放视角' if node.follow else '跟随本车',
+                              command=toggle_camera_mode)
+    camera_button.pack()
+    node.set_camera_mode(node.follow, acquire=node.follow, replace=False)
+    free_camera = FreeCameraControls(window, node)
+    free_camera.mode_changed()
+    speed = tk.Label(window)
+    speed.pack(pady=8)
+    def close():
+        free_camera.clear()
+        node.stop_requested = True
+    window.protocol('WM_DELETE_WINDOW', close)
+    # 退出信号由应用入口统一处理。
+    def poll():
+        if done():
+            window.destroy()
+            return
+        node.drive()
+        free_camera.update()
+        camera_button.config(text="释放视角" if node.follow else "跟随本车")
+        autopilot_button.config(text='关闭自动驾驶' if node.autopilot else '开启自动驾驶')
+        velocity = node.car.get_velocity()
+        control = node.car.get_control()
+        speed.config(text=f'{math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)*3.6:.1f} km/h'
+                     + (f'  定速目标：{node.cruise_speed*3.6:.1f} km/h' if node.cruise_speed is not None else '')
+                     + f'\n指令：{node.active or "收油／滑行"}  油门：{control.throttle:.2f}  刹车：{control.brake:.2f}')
+        window.after(30, poll)
+    window.after(30, poll)
+    try:
+        window.mainloop()
+    finally:
+        free_camera.close()
