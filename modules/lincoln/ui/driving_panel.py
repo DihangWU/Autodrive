@@ -7,7 +7,7 @@ def run_mouse_driving_panel(node, done):
     window = tk.Tk()
     window.title('Lincoln 驾驶与视角 — ' + node.uid)
     driving = tk.Frame(window)
-    driving.pack(side='left', anchor='n', padx=6)
+    driving.pack(side='left', anchor='n', fill='y', padx=6)
     tk.Label(driving, text=f'{node.uid}\n鼠标按住驾驶；W 油门 / S 刹车 / A D 转向 / Q 切换前进倒车'
                           '\n油门右键：定速／取消；非定速时松开或失焦收油滑行').pack(pady=8)
     pressed_keys = set()
@@ -160,8 +160,8 @@ def run_mouse_driving_panel(node, done):
     window.bind('<MouseWheel>', free_camera.wheel)
     window.bind('<Button-4>', free_camera.wheel)
     window.bind('<Button-5>', free_camera.wheel)
-    speed = tk.Label(driving)
-    speed.pack(pady=(4, 0))
+    speed = tk.Label(driving, borderwidth=0, pady=0)
+    speed.pack(side='bottom', pady=(16, 10))
     def close():
         free_camera.close()
         node.stop_requested = True

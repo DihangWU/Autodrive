@@ -9,6 +9,7 @@ from foundation.carla.mouse_move.mouse_move import (
     SPEED_FACTOR, MIN_SPEED, MAX_SPEED, move_camera, preset_view,
 )
 
+HORIZONTAL_TURN_SPEED = 180.0  # 左右转头速度，度/秒。
 KEY_ACTIONS = {'w': 'forward', 's': 'back', 'a': 'left', 'd': 'right',
                'q': 'down', 'e': 'up'}
 
@@ -29,11 +30,14 @@ class FreeCameraControls(CameraPanel):
         self.build_controls()
         # 车辆驾驶区在左，自由视角区在右；仍然只有一个顶层窗口。
         self.controls = window.winfo_children()[-1]
-        self.controls.pack_configure(side='right', anchor='n')
+        self.controls.pack_configure(side='right', anchor='n', fill='y')
+        self.controls.winfo_children()[-1].pack_configure(side='bottom')
         header = self.controls.winfo_children()[0]
         for widget in header.winfo_children():
             if isinstance(widget, tk.Label) and widget.cget('text') == '拖动\n视角':
                 widget.destroy()
+            elif 'wraplength' in widget.keys():
+                widget.configure(wraplength=0)
         self.mode_changed()
 
     def clear_keyboard(self):
@@ -59,7 +63,7 @@ class FreeCameraControls(CameraPanel):
                     child.configure(state='normal' if enabled else 'disabled')
                 configure_children(child)
         configure_children(self.controls)
-        self.status.set('自由视角：WASD 平移，Q 下降 / E 上升；Shift 加速' if enabled else
+        self.status.set('自由视角：WASD 平移 · Q/E 升降 · Shift 加速' if enabled else
                         '跟随模式：WASD 驾驶车辆；释放视角后启用下方控件')
 
     def send_actions(self):
@@ -148,7 +152,8 @@ class FreeCameraControls(CameraPanel):
             if view is not None:
                 pose = preset_view(pose, view)
             speed = self.speed * (4 if self.keys & {'shift_l', 'shift_r'} else 1)
-            pose = move_camera(pose, actions, elapsed, speed, DEFAULT_TURN_SPEED, (0., 0.))
+            turn_speed = HORIZONTAL_TURN_SPEED if actions & {'look_left', 'look_right'} else DEFAULT_TURN_SPEED
+            pose = move_camera(pose, actions, elapsed, speed, turn_speed, (0., 0.))
             self.node.free_pose = (pose.location.x, pose.location.y, pose.location.z,
                                    pose.rotation.pitch, pose.rotation.yaw)
 
