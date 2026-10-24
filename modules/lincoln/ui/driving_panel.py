@@ -1,6 +1,7 @@
 """Lincoln 综合面板：跟随时键盘驾驶，释放后键盘控制自由视角。"""
 import math
 import tkinter as tk
+from tkinter import ttk
 
 
 def run_mouse_driving_panel(node, done):
@@ -162,6 +163,22 @@ def run_mouse_driving_panel(node, done):
     window.bind('<Button-5>', free_camera.wheel)
     speed = tk.Label(driving, borderwidth=0, pady=0)
     speed.pack(side='bottom', pady=(16, 10))
+    docking = ttk.Button(driving, text='贴靠 CARLA', command=free_camera.place_panel)
+    def align_docking_button(event=None):
+        """展开时对齐右侧按钮行；收起时位于驾驶状态文字上方右侧。"""
+        reference = free_camera.speed_buttons.winfo_children()[0]
+        width = max(reference.winfo_reqwidth(), reference.winfo_width())
+        height = reference.winfo_reqheight()
+        if free_camera.controls.winfo_ismapped():
+            y = free_camera.speed_buttons.winfo_rooty() - driving.winfo_rooty()
+        else:
+            y = max(0, speed.winfo_y() - height - 8)
+        docking.place(relx=1., x=-4, y=y, anchor='ne', width=width, height=height)
+    free_camera.speed_buttons.bind('<Configure>', align_docking_button)
+    free_camera.speed_buttons.bind('<Map>', align_docking_button)
+    free_camera.speed_buttons.bind('<Unmap>', align_docking_button)
+    driving.bind('<Configure>', align_docking_button)
+    window.after_idle(align_docking_button)
     def close():
         free_camera.close()
         node.stop_requested = True

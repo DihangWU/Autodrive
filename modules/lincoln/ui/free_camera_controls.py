@@ -32,6 +32,15 @@ class FreeCameraControls(CameraPanel):
         self.controls = window.winfo_children()[-1]
         self.controls.pack_configure(side='right', anchor='n', fill='y')
         self.controls.winfo_children()[-1].pack_configure(side='bottom')
+        self.speed_buttons = self.controls.winfo_children()[-2]
+        for widget in self.speed_buttons.winfo_children():
+            if widget.cget('text') == '贴靠 CARLA':
+                widget.destroy()  # 由综合面板在驾驶区提供，跟随时仍可使用。
+        for widget in self.speed_buttons.winfo_children():
+            widget.pack_forget()
+        for column, widget in enumerate(self.speed_buttons.winfo_children()):
+            self.speed_buttons.columnconfigure(column, weight=1, uniform='speed_buttons')
+            widget.grid(row=0, column=column, sticky='ew')
         header = self.controls.winfo_children()[0]
         for widget in header.winfo_children():
             if isinstance(widget, tk.Label) and widget.cget('text') == '拖动\n视角':
@@ -57,6 +66,11 @@ class FreeCameraControls(CameraPanel):
         if enabled == self.enabled:
             return
         self.enabled = enabled
+        if enabled:
+            self.controls.pack(side='right', anchor='n', fill='y')
+        else:
+            self.controls.pack_forget()
+        self.root.geometry('')  # 按可见控件重新计算窗口尺寸，不留下右侧空白。
         def configure_children(widget):
             for child in widget.winfo_children():
                 if 'state' in child.keys():
