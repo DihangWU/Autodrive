@@ -63,9 +63,14 @@ class LincolnVehicleRegistry:
             return dict(removed=True)
         raise ValueError(f'未知 Lincoln 请求：{action}')
 
-    @staticmethod
-    def vehicle_status(record):
-        return {key: record[key] for key in ('actor_id', 'world_id', 'sumo_id', 'state', 'detail')}
+    def vehicle_status(self, record):
+        status = {key: record[key] for key in ('actor_id', 'world_id', 'sumo_id', 'state', 'detail')}
+        port = record.get('tm_port')
+        clock = self.traffic_managers
+        status['tm_ready'] = port is None or (
+            port in clock.managers and clock.carla_adapter is not None
+            and clock.carla_adapter.world.id == record['world_id'])
+        return status
 
     @staticmethod
     def validate_tm_port(port):

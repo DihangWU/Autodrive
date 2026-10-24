@@ -32,7 +32,11 @@ def launch_vehicle_rviz(node):
     folder = RUNTIME_DIR / node.uid
     folder.mkdir(parents=True, exist_ok=True)
     config = folder / 'lincoln.rviz'
-    config.write_text(yaml.safe_dump(adapt_rviz_namespace(saved, node.uid),
+    saved = adapt_rviz_namespace(saved, node.uid)
+    view = saved['Visualization Manager'].get('Views', {}).get('Current', {})
+    if view.get('Target Frame') == node.frame():
+        view['Target Frame'] = node.model.header.frame_id
+    config.write_text(yaml.safe_dump(saved,
                                      sort_keys=False, allow_unicode=True))
     log = folder / 'rviz.log'
     with log.open('a') as output:

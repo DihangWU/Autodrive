@@ -1,166 +1,161 @@
-"""Embedded free-spectator controls; input stays scoped to its Tk canvas."""
-import math
+"""Lincoln 内嵌自由视角：复用独立面板控件和运算，不启动额外窗口或进程。"""
+import queue
 import time
 import tkinter as tk
+from types import SimpleNamespace
+import carla
+from foundation.carla.mouse_move.mouse_move import (
+    CameraPanel, DEFAULT_SPEED, DEFAULT_TURN_SPEED, MAX_ELAPSED,
+    SPEED_FACTOR, MIN_SPEED, MAX_SPEED, move_camera, preset_view,
+)
+
+KEY_ACTIONS = {'w': 'forward', 's': 'back', 'a': 'left', 'd': 'right',
+               'q': 'down', 'e': 'up'}
 
 
-class FreeCameraControls:
+class FreeCameraControls(CameraPanel):
     def __init__(self, window, node):
-        self.node, self.window = node, window
-        self.keys, self.releases = set(), {}
-        self.speed = 20.
-        self.captured = False
-        self.last_mouse = None
-        self.reset_pose = None
+        # 只复用控件，不调用会创建独立相机进程的 CameraPanel.__init__。
+        self.root, self.node = window, node
+        self.args = SimpleNamespace(host=node.args.host, port=node.args.port)
+        self.commands = queue.SimpleQueue()
+        self.actions, self.keys, self.releases = set(), set(), {}
+        self.auto_forward = False
+        self.speed = DEFAULT_SPEED
+        self.closed = False
+        self.drag_position = None
         self.last_time = time.monotonic()
-        self.render_input = None
-        try:
-            from modules.lincoln.ui.carla_window_input import CarlaWindowInput
-            self.render_input = CarlaWindowInput(node)
-        except (OSError, RuntimeError) as error:
-            print(f'CARLA-window input unavailable; panel controls remain available: {error}', flush=True)
-        self.canvas = tk.Canvas(window, width=400, height=100, background='#181d27', takefocus=True)
-        self.canvas.pack(padx=8, pady=6)
-        self.text = self.canvas.create_text(200, 50, fill='white', text='')
-        self.canvas.bind('<ButtonPress-1>', self.focus)
-        self.canvas.bind('<KeyPress>', self.press)
-        self.canvas.bind('<KeyRelease>', self.release)
-        self.canvas.bind('<Motion>', self.motion)
-        self.canvas.bind('<MouseWheel>', lambda e: self.wheel(e.delta / 120))
-        self.canvas.bind('<Button-4>', lambda e: self.wheel(1))
-        self.canvas.bind('<Button-5>', lambda e: self.wheel(-1))
-        self.canvas.bind('<FocusOut>', lambda e: self.clear())
-        self.canvas.bind('<Leave>', lambda e: self.clear() if not self.captured else None)
-        self.refresh()
+        self.enabled = None
+        self.build_controls()
+        # 车辆驾驶区在左，自由视角区在右；仍然只有一个顶层窗口。
+        self.controls = window.winfo_children()[-1]
+        self.controls.pack_configure(side='right', anchor='n')
+        header = self.controls.winfo_children()[0]
+        for widget in header.winfo_children():
+            if isinstance(widget, tk.Label) and widget.cget('text') == '拖动\n视角':
+                widget.destroy()
+        self.mode_changed()
 
-    def refresh(self):
-        self.canvas.itemconfigure(self.text, text=('跟随视角已开启' if self.node.follow else
-            '自由视角：点击 CARLA 窗口即可鼠标转向\nWASD 移动  Q/E 升降  Shift 加速\nF/Esc 释放鼠标；滚轮调速；此区域也可拖动转向\n'
-            f'移动速度：{self.speed:.1f} m/s'))
-
-    def clear(self):
+    def clear_keyboard(self):
         self.keys.clear()
         for callback in self.releases.values():
-            self.window.after_cancel(callback)
+            self.root.after_cancel(callback)
         self.releases.clear()
-        self.capture(False)
-        self.last_mouse = None
 
     def mode_changed(self):
-        self.clear()
-        if self.render_input:
-            self.render_input.release()
-        self.reset_pose = self.node.free_pose
-        self.refresh()
+        self.clear_keyboard()
+        self.stop_motion()
+        self.release_mouse()
+        self.last_time = time.monotonic()
+        self.set_controls_enabled(not self.node.follow and self.node.camera_control_enabled)
 
-    def focus(self, event):
-        if not self.node.follow:
-            self.node.set_camera_mode(False)
-            self.canvas.focus_set()
-            self.last_mouse = (event.x, event.y)
-        return 'break'
+    def set_controls_enabled(self, enabled):
+        if enabled == self.enabled:
+            return
+        self.enabled = enabled
+        def configure_children(widget):
+            for child in widget.winfo_children():
+                if 'state' in child.keys():
+                    child.configure(state='normal' if enabled else 'disabled')
+                configure_children(child)
+        configure_children(self.controls)
+        self.status.set('自由视角：WASD 平移，Q 下降 / E 上升；Shift 加速' if enabled else
+                        '跟随模式：WASD 驾驶车辆；释放视角后启用下方控件')
 
-    def capture(self, enabled):
-        self.captured = enabled and not self.node.follow
-        self.canvas.configure(cursor='none' if self.captured else '')
-        if self.captured:
-            self.canvas.grab_set()
-            self.center()
-        elif self.canvas.grab_current() == self.canvas:
-            self.canvas.grab_release()
-
-    def center(self):
-        x, y = self.canvas.winfo_width() // 2, self.canvas.winfo_height() // 2
-        self.last_mouse = (x, y)
-        self.canvas.event_generate('<Motion>', x=x, y=y, warp=True)
+    def send_actions(self):
+        keyboard = {KEY_ACTIONS[key] for key in self.keys if key in KEY_ACTIONS}
+        actions = self.actions | keyboard | ({'forward'} if self.auto_forward else set())
+        self.commands.put(('actions', actions))
 
     def press(self, event):
-        if self.node.follow:
-            return
         key = event.keysym.lower()
-        callback = self.releases.pop(key, None)
-        if callback:
-            self.window.after_cancel(callback)
-        if key in self.keys:
-            return 'break'
-        self.keys.add(key)
-        if key == 'f':
-            self.capture(not self.captured)
-        elif key == 'escape':
-            self.capture(False)
-        elif key == 'r' and self.reset_pose:
-            with self.node.camera_lock:
-                self.node.free_pose = self.reset_pose
+        if not self.enabled or key not in (*KEY_ACTIONS, 'shift_l', 'shift_r'):
+            return
+        pending = self.releases.pop(key, None)
+        if pending is not None:
+            self.root.after_cancel(pending)
+        if key not in self.keys:
+            if key == 's':
+                self.stop_motion()
+            self.keys.add(key)
+            self.send_actions()
         return 'break'
 
     def release(self, event):
-        if self.node.follow:
-            return
         key = event.keysym.lower()
+        if key not in self.keys:
+            return
         def finish():
             self.releases.pop(key, None)
             self.keys.discard(key)
+            self.send_actions()
         if key not in self.releases:
-            self.releases[key] = self.window.after(20, finish)
+            self.releases[key] = self.root.after(20, finish)
         return 'break'
 
-    def motion(self, event):
-        if self.node.follow or not (self.captured or event.state & 0x100):
-            self.last_mouse = (event.x, event.y)
+    def stop_motion(self):
+        self.clear_keyboard()
+        super().stop_motion()
+
+    def lose_focus(self):
+        if self.closed:
             return
-        if self.last_mouse is not None:
-            dx, dy = event.x - self.last_mouse[0], event.y - self.last_mouse[1]
-            if dx or dy:
-                with self.node.camera_lock:
-                    x, y, z, pitch, yaw = self.node.free_pose
-                    self.node.free_pose = (x, y, z, max(-89., min(89., pitch - dy * .18)), (yaw + dx * .18) % 360.)
-                if self.captured:
-                    self.center()
-                    return
-        self.last_mouse = (event.x, event.y)
+        focused = self.root.focus_displayof()
+        if focused is None or focused.winfo_toplevel() != self.root:
+            # 与独立面板一致，失焦只取消临时操作，保留明确开启的自动前进。
+            self.clear_keyboard()
+            self.release_mouse()
 
-    def wheel(self, steps):
-        if not self.node.follow:
-            self.speed = max(1., min(300., self.speed * 1.2 ** steps))
-            self.refresh()
+    def wheel(self, event):
+        if not self.enabled:
+            return
+        steps = (1 if event.num == 4 else -1) if getattr(event, 'num', None) in (4, 5) else event.delta / 120
+        if steps:
+            self.change_speed(SPEED_FACTOR ** steps)
         return 'break'
+
+    def change_speed(self, factor):
+        """立即更新速度，滑块回调未执行时也能供连续移动使用。"""
+        self.speed_slider.set(max(MIN_SPEED, min(MAX_SPEED, self.speed * factor)))
+        self.set_speed(self.speed_slider.get())
 
     def update(self):
         with self.node.camera_owner.access() as owned:
-            if not owned:
-                self.node.camera_control_enabled = False
-                self.node.follow = False
-                self.clear()
-        if self.render_input:
-            steps = self.render_input.wheel_steps()
-            if steps:
-                self.wheel(steps)
-            self.render_input.update(self.speed)
-        now = time.monotonic()
-        dt = min(now - self.last_time, .1)
-        self.last_time = now
-        if self.node.follow or not self.keys:
+            enabled = owned and self.node.camera_control_enabled and not self.node.follow
+        if not enabled and self.enabled:
+            self.mode_changed()
+        self.set_controls_enabled(enabled)
+        elapsed = min(time.monotonic() - self.last_time, MAX_ELAPSED)
+        self.last_time = time.monotonic()
+        view = None
+        # 每轮使用当前按键状态；队列只暂存本轮输入，不执行任何 CARLA RPC。
+        while not self.commands.empty():
+            command = self.commands.get_nowait()
+            if command[0] == 'view':
+                view = command[1]
+        if not enabled:
+            return
+        actions = self.actions | {KEY_ACTIONS[k] for k in self.keys if k in KEY_ACTIONS}
+        if self.auto_forward:
+            actions.add('forward')
+        if not actions and view is None:
             return
         with self.node.camera_lock:
+            if self.node.free_pose is None:
+                return
             x, y, z, pitch, yaw = self.node.free_pose
-            angle = math.radians(yaw)
-            forward = int('w' in self.keys) - int('s' in self.keys)
-            right = int('d' in self.keys) - int('a' in self.keys)
-            up = int('e' in self.keys) - int('q' in self.keys)
-            dx = forward * math.cos(angle) - right * math.sin(angle)
-            dy = forward * math.sin(angle) + right * math.cos(angle)
-            magnitude = math.sqrt(dx * dx + dy * dy + up * up)
-            if magnitude:
-                scale = self.speed * dt / magnitude
-                if self.keys & {'shift_l', 'shift_r'}:
-                    scale *= 4
-                self.node.free_pose = (x + dx * scale, y + dy * scale, z + up * scale, pitch, yaw)
+            pose = carla.Transform(carla.Location(x=x, y=y, z=z), carla.Rotation(pitch=pitch, yaw=yaw))
+            if view is not None:
+                pose = preset_view(pose, view)
+            speed = self.speed * (4 if self.keys & {'shift_l', 'shift_r'} else 1)
+            pose = move_camera(pose, actions, elapsed, speed, DEFAULT_TURN_SPEED, (0., 0.))
+            self.node.free_pose = (pose.location.x, pose.location.y, pose.location.z,
+                                   pose.rotation.pitch, pose.rotation.yaw)
 
     def close(self):
+        self.closed = True
         try:
-            self.clear()
+            self.clear_keyboard()
+            self.release_mouse()
         except tk.TclError:
-            pass  # Tk may already have destroyed the panel on normal exit.
-        if self.render_input:
-            self.render_input.close()
-            self.render_input = None
+            pass  # 顶层窗口可能已由应用退出流程销毁。

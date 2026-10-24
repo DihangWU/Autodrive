@@ -1,4 +1,4 @@
-"""原生传感器、静态 TF 与 ROS 2 发布，保持旧版传感器参数。"""
+"""原生传感器与 ROS 2 发布：同步模式采集单帧完整 LiDAR，异步模式拼包。"""
 import math
 import queue
 import time
@@ -7,9 +7,40 @@ import numpy as np
 from rclpy.qos import qos_profile_sensor_data
 from geometry_msgs.msg import TransformStamped
 from sensor_msgs.msg import Image, CameraInfo, PointCloud2, PointField
-from visualization_msgs.msg import MarkerArray
 from modules.lincoln.sensors.ros_messages import (camera_mosaic, stamp, set_rotation,
                                                  local_pose, camera_info, sensor_points)
+
+
+def collect_complete_lidar_scan(entry, data):
+    """同步模式直接取单帧完整扫描；异步模式才拼包，按配置频率输出。"""
+    if entry['scan_started'] is None or data.timestamp < entry['scan_started']:
+        entry['scan_started'] = data.timestamp
+        entry['scan_chunks'].clear()
+        entry['last_published'] = None
+        return None  # 第一包的起始时刻未知，从它结束后开始收集完整一轮。
+    entry['scan_chunks'].append(data)
+    if data.timestamp - entry['scan_started'] < entry['scan_period'] - 1e-6:
+        return None
+    chunks = list(entry['scan_chunks'])
+    entry['scan_chunks'].clear()
+    entry['scan_started'] = data.timestamp
+    if (entry['last_published'] is not None
+            and data.timestamp - entry['last_published'] < entry['publish_period'] - 1e-6):
+        return None  # 例如每帧20Hz完整采集，ROS仍按配置10Hz输出。
+    if len(chunks) == 1:
+        points = sensor_points(data, 'lidar')  # 同一个物理帧，没有半帧交界或运动拼接。
+    else:
+        reference_inverse = np.asarray(data.transform.get_inverse_matrix(), dtype=np.float32)
+        parts = []
+        for chunk in chunks:
+            points = np.frombuffer(chunk.raw_data, dtype=np.float32).reshape(-1, 4).copy()
+            relative = reference_inverse @ np.asarray(chunk.transform.get_matrix(), dtype=np.float32)
+            points[:, :3] = np.einsum('ij,nj->ni', relative[:3, :3], points[:, :3]) + relative[:3, 3]
+            points[:, 1] *= -1
+            parts.append(points)
+        points = np.concatenate(parts)
+    entry['last_published'] = data.timestamp
+    return data, points
 
 
 class SensorStreamsMixin:
@@ -22,7 +53,8 @@ class SensorStreamsMixin:
             'lidar': 'sensor.lidar.ray_cast', 'radar': 'sensor.other.radar'}[kind])
         rate = min(spec['rate'], 1 / self.dt)
         period = max(1, round(1 / rate / self.dt))
-        bp.set_attribute('sensor_tick', str(max(0., period * self.dt - 1e-6)))
+        # LiDAR 转速匹配初始化步长，使同步模式每个物理帧扫描完整视野。
+        bp.set_attribute('sensor_tick', '0' if kind == 'lidar' else str(max(0., period * self.dt - 1e-6)))
         if kind == 'camera':
             for key, value in [('image_size_x', spec['width']), ('image_size_y', spec['height']),
                                ('fov', math.degrees(spec['fov'])), ('motion_blur_intensity', 0),
@@ -47,6 +79,10 @@ class SensorStreamsMixin:
         actor = self.world.spawn_actor(bp, transform, attach_to=self.car)
         self.actors.append(actor)
         entry = dict(spec=spec, actor=actor, pose=pose, queue=queue.Queue(maxsize=1), received=0, published=0)
+        if kind == 'lidar':
+            entry.update(scan_started=None, scan_chunks=[], scan_period=self.dt,
+                         publish_period=1 / rate, last_published=None,
+                         sensor_mount_inverse=np.asarray(transform.get_inverse_matrix()))
         topic = f'/{self.uid}/{spec["name"]}'
         entry['pub'] = self.create_publisher(Image if kind == 'camera' else PointCloud2,
             topic + ('/image' if kind == 'camera' else '/points'), qos_profile_sensor_data)
@@ -55,6 +91,10 @@ class SensorStreamsMixin:
         self.sensors.append(entry)
         def receive(data):
             entry['received'] += 1
+            if kind == 'lidar':
+                data = collect_complete_lidar_scan(entry, data)
+                if data is None:
+                    return
             try:
                 entry['queue'].put_nowait(data)
             except queue.Full:
@@ -85,19 +125,6 @@ class SensorStreamsMixin:
             self.stop_requested = True
             return
         snapshot = self.world.get_snapshot()
-        if snapshot.frame != self.last_frame:
-            self.last_frame = snapshot.frame
-            actor = snapshot.find(self.car.id)
-            if actor:
-                transform = actor.get_transform()
-                tf = TransformStamped()
-                tf.header.frame_id, tf.child_frame_id = 'map', self.frame()
-                tf.header.stamp = stamp(snapshot.timestamp.elapsed_seconds)
-                loc, rot = transform.location, transform.rotation
-                tf.transform.translation.x, tf.transform.translation.y, tf.transform.translation.z = loc.x, -loc.y, loc.z
-                set_rotation(tf.transform.rotation, (math.radians(rot.roll), -math.radians(rot.pitch), -math.radians(rot.yaw)))
-                self.tf.sendTransform(tf)
-                self.markers.publish(MarkerArray(markers=[self.model] + self.mounts))
         for entry in self.sensors:
             try:
                 data = entry['queue'].get_nowait()
@@ -106,6 +133,8 @@ class SensorStreamsMixin:
             spec = entry['spec']
             entry['published'] += 1
             frame = self.frame(spec['name'])
+            if spec['kind'] == 'lidar':
+                data, points = data
             if spec['kind'] == 'camera':
                 rgba = np.frombuffer(data.raw_data, dtype=np.uint8).reshape(data.height, data.width, 4)
                 rgb = rgba[:, :, [2, 1, 0]].copy()
@@ -115,13 +144,16 @@ class SensorStreamsMixin:
                 entry['info'].publish(camera_info(spec, msg.header))
                 self.latest_images[spec['name']] = rgb
             else:
-                points = sensor_points(data, spec['kind'])
+                if spec['kind'] != 'lidar':
+                    points = sensor_points(data, spec['kind'])
                 msg = PointCloud2(height=1, width=len(points), is_bigendian=False, point_step=16,
                     row_step=len(points) * 16, is_dense=False, data=points.tobytes())
                 msg.header.frame_id, msg.header.stamp = frame, stamp(data.timestamp)
                 msg.fields = [PointField(name=name, offset=i * 4, datatype=PointField.FLOAT32, count=1)
                     for i, name in enumerate(('x', 'y', 'z', 'intensity' if spec['kind'] == 'lidar' else 'velocity'))]
                 entry['pub'].publish(msg)
+                if spec['kind'] == 'lidar':
+                    self.publish_lidar_aligned_vehicle(entry, data)
         if self.latest_images and time.monotonic() - self.last_mosaic > .1:
             specs = {e['spec']['name']: e['spec'] for e in self.sensors if e['spec']['kind'] == 'camera'}
             canvas = camera_mosaic(self.latest_images, specs, self.args.camera_rows)

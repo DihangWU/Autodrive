@@ -1,12 +1,15 @@
 """只向 CoBridge 登记 CARLA 车辆身份；不连接 SUMO，不提交过时的位置。"""
 import logging
 import threading
+import time
 
 from foundation.cobridge.control import ControlClient
 
 RECONNECT_INTERVAL = 1.0
 REQUEST_TIMEOUT = 1.0
 JOIN_TIMEOUT = REQUEST_TIMEOUT * 2 + 1
+PREPARATION_TIMEOUT = 15.0
+PREPARATION_POLL_INTERVAL = 0.1
 
 
 class LincolnBridgeRegistration:
@@ -14,6 +17,8 @@ class LincolnBridgeRegistration:
         self.node, self.path, self.reporter = node, path, reporter
         self.sumo_id = None
         self.state = None
+        self.first_attempt = threading.Event()
+        self.latest_status = None
         self.stop = threading.Event()
         self.thread = threading.Thread(target=self.run_registration_loop,
                                        name='lincoln-bridge-registration', daemon=True)
@@ -43,8 +48,10 @@ class LincolnBridgeRegistration:
                                                 role_name=self.node.uid, sumo_id=self.sumo_id)
                     else:
                         status = client.command('lincoln.status', **self.vehicle_identity())
+                    self.latest_status = status
                     self.publish_registration_state(status)
                 except Exception as error:
+                    self.latest_status = None
                     if client is not None:
                         client.close()
                         client = None
@@ -52,6 +59,7 @@ class LincolnBridgeRegistration:
                     if self.state != ('disconnected', str(error)):
                         logging.info('等待 CoBridge：%s', error)
                         self.state = ('disconnected', str(error))
+                self.first_attempt.set()
                 self.stop.wait(RECONNECT_INTERVAL)
         finally:
             if client is not None:
@@ -61,6 +69,28 @@ class LincolnBridgeRegistration:
                     logging.info('登记连接已断开，桥通过断线检查清理 SUMO 投影')
                 finally:
                     client.close()
+
+    def wait_for_driver_preparation(self, stopped):
+        """复用登记线程的状态，前台等待已接入桥完成 TM 准备，不另开线程。"""
+        if self.node.driver.traffic_manager_port is None:
+            return  # 自定义算法不使用 TM。
+        while not self.first_attempt.wait(PREPARATION_POLL_INTERVAL):
+            if stopped.is_set():
+                return
+        deadline = time.monotonic() + PREPARATION_TIMEOUT
+        while not stopped.is_set():
+            status = self.latest_status
+            if status is None:
+                print('[Lincoln] CoBridge 尚未接入，本车 TM 已完成本地准备。', flush=True)
+                return
+            if 'tm_ready' not in status:
+                raise RuntimeError('CoBridge 仍是旧进程，请重启桥后再启动 Lincoln。')
+            if status['tm_ready']:
+                print('[Lincoln] CoBridge 的 TM 连接已准备，驾驶开关可直接使用。', flush=True)
+                return
+            if time.monotonic() >= deadline:
+                raise RuntimeError('CoBridge 的 TM 准备超时，请检查桥端日志。')
+            stopped.wait(PREPARATION_POLL_INTERVAL)
 
     def close(self):
         self.stop.set()

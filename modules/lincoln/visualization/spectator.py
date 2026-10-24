@@ -34,12 +34,13 @@ class SpectatorMixin:
     def _update_camera(self, snapshot=None):
         # Match the simulation cadence, rather than the unrelated GUI cadence.
         if not self.follow:
-            self.camera_pose = None
             self.camera_time = None
-            if self.free_pose is not None and self.camera_control_enabled:
+            if (self.free_pose is not None and self.camera_control_enabled
+                    and self.free_pose != self.camera_pose):
                 x, y, z, pitch, yaw = self.free_pose
                 self.spectator.set_transform(carla.Transform(carla.Location(x=x, y=y, z=z),
                                                             carla.Rotation(pitch=pitch, yaw=yaw)))
+                self.camera_pose = self.free_pose
             return
         actor = (snapshot or self.world.get_snapshot()).find(self.car.id)
         if actor is None:

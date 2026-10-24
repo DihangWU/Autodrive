@@ -24,7 +24,6 @@ DEFAULT_PORT = 8813
 DEFAULT_STEP_LENGTH = 0.05
 DEFAULT_HEADLESS = False
 SUMO_BINARY = 'sumo'
-SUMO_GUI_BINARY = 'sumo-gui'
 SUMO_START = 'true'
 SUMO_QUIT_ON_END = 'false'
 STARTUP_TIMEOUT = 20.0
@@ -40,6 +39,7 @@ from foundation.ipc import JsonServer
 from foundation.sumo.client import SOCKET_FILE
 from foundation.sumo.traci import connect
 from foundation.sumo.runtime import SumoRuntime
+from foundation.sumo.init.build_low_latency_sumo_gui import ensure_low_latency_sumo_gui
 
 
 CONSOLE = Console(COMPONENT_NAME)
@@ -85,10 +85,6 @@ def run(args, stopped):
     config = (args.config or find_configuration()).resolve()
     if not config.is_file() or config.suffix != '.sumocfg':
         raise ValueError(f'无效 SUMO 配置：{config}')
-    command = [SUMO_BINARY if args.headless else SUMO_GUI_BINARY, '-c', str(config),
-               '--remote-port', str(args.port), '--step-length', str(args.step_length),
-               '--start', SUMO_START, '--quit-on-end', SUMO_QUIT_ON_END,
-               '--log', str(LOG_FILE), '--error-log', str(ERROR_LOG_FILE)]
     connection, server, process = None, None, None
     lock_file = Path(str(args.control_socket) + '.lock')
     lock_file.parent.mkdir(parents=True, exist_ok=True)
@@ -98,6 +94,11 @@ def run(args, stopped):
         except BlockingIOError:
             raise RuntimeError('该 SUMO 控制入口已在运行。')
         try:
+            binary = SUMO_BINARY if args.headless else str(ensure_low_latency_sumo_gui())
+            command = [binary, '-c', str(config),
+                       '--remote-port', str(args.port), '--step-length', str(args.step_length),
+                       '--start', SUMO_START, '--quit-on-end', SUMO_QUIT_ON_END,
+                       '--log', str(LOG_FILE), '--error-log', str(ERROR_LOG_FILE)]
             with LAUNCH_LOG_FILE.open('w') as output:
                 process = subprocess.Popen(command, stdout=output, stderr=subprocess.STDOUT,
                                            stdin=subprocess.DEVNULL, start_new_session=True)

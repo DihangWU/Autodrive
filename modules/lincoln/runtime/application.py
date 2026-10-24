@@ -29,6 +29,7 @@ def run_vehicle_control_loop(node, stopped):
             except RuntimeError:
                 continue
             if snapshot.frame != last_frame:
+                node.publish_vehicle_transform(snapshot)
                 node.update_automatic_driving(snapshot)
                 node.update_camera(snapshot)
                 last_frame = snapshot.frame
@@ -36,7 +37,6 @@ def run_vehicle_control_loop(node, stopped):
                 node.stop_requested = True
                 return
             node.drive()
-            stopped.wait(CONTROL_INTERVAL)
     except Exception:
         logging.exception('驾驶/视角线程异常')
         node.stop_requested = True
@@ -65,8 +65,11 @@ def run_lincoln_application(args):
         node = LincolnNode(args)
         reporter = ModuleReporter(node.uid, args.bridge_socket)
         registration = LincolnBridgeRegistration(node, args.bridge_socket, reporter)
+        registration.wait_for_driver_preparation(stopped)
+        if stopped.is_set():
+            return
         if args.autopilot:
-            print(f'[{node.uid}] 正在准备驾驶控制器：{args.driver}', flush=True)
+            print(f'[{node.uid}] 开启驾驶控制器：{args.driver}', flush=True)
             node.set_autopilot(True)
         if not args.no_rviz:
             node.rviz = launch_vehicle_rviz(node)

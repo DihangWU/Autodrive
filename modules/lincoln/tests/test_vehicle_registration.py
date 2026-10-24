@@ -1,10 +1,12 @@
 """无仿真器的登记/归属回归测试。"""
+from contextlib import nullcontext
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
 from foundation.cobridge.lincoln.vehicle_registry import LincolnVehicleRegistry
 from modules.lincoln.driving.controller import DrivingController, load_driving_controller
+from modules.lincoln.driving.carla_autopilot import CarlaAutopilotController
 
 
 class VehicleRegistrationTests(unittest.TestCase):
@@ -65,6 +67,30 @@ class VehicleRegistrationTests(unittest.TestCase):
         with patch('importlib.import_module', return_value=SimpleNamespace(Bad=object)):
             with self.assertRaises(TypeError):
                 load_driving_controller('fake:Bad', None, None, None, None)
+
+
+    def test_tm_readiness_requires_bridge_connection_even_for_manual_car(self):
+        command = dict(self.command, tm_port=8000)
+        status = self.registry.handle_request(command, self.owner)
+        self.assertFalse(status['tm_ready'])
+        self.registry.traffic_managers.carla_adapter = SimpleNamespace(world=SimpleNamespace(id=20))
+        self.registry.traffic_managers.managers[8000] = object()
+        self.assertTrue(self.registry.handle_request(dict(command, action='lincoln.status'), self.owner)['tm_ready'])
+
+    def test_tm_is_prepared_while_vehicle_remains_manual(self):
+        client, vehicle, world = Mock(), Mock(), Mock()
+        world.get_settings.return_value.synchronous_mode = True
+        with patch('modules.lincoln.driving.carla_autopilot.reserve_traffic_manager_port', return_value=nullcontext(8000)):
+            controller = CarlaAutopilotController(client, world, vehicle, SimpleNamespace(tm_port=8000))
+        client.get_trafficmanager.assert_called_once_with(8000)
+        vehicle.set_autopilot.assert_not_called()
+        self.assertEqual(controller.traffic_manager_port, 8000)
+        controller.enable()
+        controller.disable()
+        controller.enable()
+        # 第一次和之后的开关均不能再次创建服务、选择端口。
+        client.get_trafficmanager.assert_called_once_with(8000)
+        self.assertEqual(vehicle.set_autopilot.call_args.args, (True, 8000))
 
 
 if __name__ == '__main__':

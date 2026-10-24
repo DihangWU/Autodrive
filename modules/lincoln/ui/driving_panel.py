@@ -1,12 +1,14 @@
-"""鼠标/键盘驾驶面板，复用 f511f80 的驾驶交互。"""
+"""Lincoln 综合面板：跟随时键盘驾驶，释放后键盘控制自由视角。"""
 import math
 import tkinter as tk
 
 
 def run_mouse_driving_panel(node, done):
     window = tk.Tk()
-    window.title('Lincoln mouse drive — ' + node.uid)
-    tk.Label(window, text=f'{node.uid}\n鼠标按住驾驶；W 油门 / S 刹车 / A D 转向 / Q 切换前进倒车'
+    window.title('Lincoln 驾驶与视角 — ' + node.uid)
+    driving = tk.Frame(window)
+    driving.pack(side='left', anchor='n', padx=6)
+    tk.Label(driving, text=f'{node.uid}\n鼠标按住驾驶；W 油门 / S 刹车 / A D 转向 / Q 切换前进倒车'
                           '\n油门右键：定速／取消；非定速时松开或失焦收油滑行').pack(pady=8)
     pressed_keys = set()
     pending_releases = {}
@@ -17,7 +19,7 @@ def run_mouse_driving_panel(node, done):
         pending_releases.clear()
         node.active = None
         node.drive()
-    grid = tk.Frame(window)
+    grid = tk.Frame(driving)
     grid.pack()
     def activate(action):
         node.set_autopilot(False)
@@ -79,10 +81,12 @@ def run_mouse_driving_panel(node, done):
     autopilot_button.grid(row=0, column=0, padx=4, pady=4)
     def release(event=None):
         stop_driving()
+        free_camera.release_mouse(event)
     window.bind_all('<ButtonRelease-1>', release)
     def focus_out(event=None):
         # Moving focus between buttons must not cancel a command.
         window.after_idle(lambda: stop_driving() if window.focus_get() is None else None)
+        window.after_idle(lambda: free_camera.lose_focus())
     window.bind('<FocusOut>', focus_out)
     window.bind('<Leave>', lambda event: release() if event.widget == window else None)
     def reverse():
@@ -94,7 +98,7 @@ def run_mouse_driving_panel(node, done):
             return
         node.reverse = not node.reverse
         gear.config(text='当前：倒车' if node.reverse else '当前：前进')
-    gear = tk.Button(window, text='当前：前进', command=reverse)
+    gear = tk.Button(driving, text='当前：前进', command=reverse)
     gear.pack(pady=5)
     def keyboard_drive():
         if pressed_keys & {'w', 'a', 's', 'd'}:
@@ -109,6 +113,10 @@ def run_mouse_driving_panel(node, done):
         node.active = '-'.join(parts) or None
         node.drive()
     def key_press(event):
+        if isinstance(event.widget, (tk.Entry, tk.Spinbox)):
+            return
+        if not node.follow:
+            return free_camera.press(event)
         key = event.keysym.lower()
         if key not in ('w', 'a', 's', 'd', 'q'):
             return
@@ -122,6 +130,8 @@ def run_mouse_driving_panel(node, done):
             keyboard_drive()
         return 'break'
     def key_release(event):
+        if not node.follow:
+            return free_camera.release(event)
         key = event.keysym.lower()
         if key not in pressed_keys:
             return
@@ -140,17 +150,20 @@ def run_mouse_driving_panel(node, done):
         stop_driving()
         node.set_camera_mode(not node.follow)
         free_camera.mode_changed()
+        window.focus_set()
         camera_button.config(text='释放视角' if node.follow else '跟随本车')
-    camera_button = tk.Button(window, text='释放视角' if node.follow else '跟随本车',
+    camera_button = tk.Button(driving, text='释放视角' if node.follow else '跟随本车',
                               command=toggle_camera_mode)
     camera_button.pack()
     node.set_camera_mode(node.follow, acquire=node.follow, replace=False)
     free_camera = FreeCameraControls(window, node)
-    free_camera.mode_changed()
-    speed = tk.Label(window)
-    speed.pack(pady=8)
+    window.bind('<MouseWheel>', free_camera.wheel)
+    window.bind('<Button-4>', free_camera.wheel)
+    window.bind('<Button-5>', free_camera.wheel)
+    speed = tk.Label(driving)
+    speed.pack(pady=(4, 0))
     def close():
-        free_camera.clear()
+        free_camera.close()
         node.stop_requested = True
     window.protocol('WM_DELETE_WINDOW', close)
     # 退出信号由应用入口统一处理。
