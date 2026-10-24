@@ -18,6 +18,10 @@ def adapt_rviz_namespace(value, uid):
         if isinstance(topic, dict) and str(topic.get('Value', '')).startswith(f'/{uid}/'):
             if topic['Value'].endswith(('/points', '/image', '/camera_info', '/cameras/mosaic')):
                 topic['Reliability Policy'] = 'Best Effort'
+        if 'Class' in result and 'Enabled' in result:
+            # RViz 先加载 Value，再加载 Topic/QoS，最后按 Enabled 启用显示。
+            # 避免 Value=true 提前创建默认 Reliable 订阅，保留最终 Enabled 状态。
+            result['Value'] = False
         return result
     return value
 

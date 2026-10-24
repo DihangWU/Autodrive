@@ -2,6 +2,9 @@
 import math
 import carla
 
+FORWARD_THROTTLE = 0.75
+REVERSE_THROTTLE = 0.45
+
 
 class ManualDrivingMixin:
     def drive(self):
@@ -11,7 +14,7 @@ class ManualDrivingMixin:
             active = self.active or ''
             if 'go' in active or 'brake' in active:
                 self.cruise_speed = None
-            throttle = .45 if 'go' in active else 0.
+            throttle = (REVERSE_THROTTLE if self.reverse else FORWARD_THROTTLE) if 'go' in active else 0.
             if self.cruise_speed is not None:
                 velocity = self.car.get_velocity()
                 speed = math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
