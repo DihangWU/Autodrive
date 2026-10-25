@@ -12,6 +12,7 @@ import threading
 import time
 
 import carla
+from modules.lincoln.driving.junction_local_controller import JunctionLocalController
 
 ROUTE_SPACING = 4.0
 MAX_SEARCH_NODES = 60000
@@ -24,9 +25,9 @@ BRAKING_DISTANCE = 18.0
 STOP_SPEED = 0.3
 TARGET_SNAP_LIMIT = 8.0
 TM_LOOKAHEAD_EXTENSION = 200.0
-NAVIGATION_SPEED_KMH = 40.0
-LANE_CHANGE_SPEED_KMH = 20.0
-TURN_SPEED_KMH = 25.0
+NAVIGATION_SPEED_KMH = 120.0
+LANE_CHANGE_SPEED_KMH = 80.0
+TURN_SPEED_KMH = 80.0
 SLOWDOWN_DECELERATION = 2.0  # 用于提前减速的规划减速度，m/s²。
 DEVIATION_SECONDS = 0.8  # 仿真秒；不受现实时间倍率或暂停影响。
 PREVIEW_INTERVAL = 0.2
@@ -162,6 +163,7 @@ class LincolnNavigation:
         self.stopping = None
         self.deviation_since = None
         self.next_preview = 0.
+        self.local_controller = None
 
     def snapshot(self):
         with self.lock:
@@ -212,11 +214,18 @@ class LincolnNavigation:
                 target = carla.Location(**{key: float(task['target'][key]) for key in ('x', 'y', 'z')})
                 route, goal = plan_route(self.road_map, self.node.car.get_location(), target,
                                          lambda: not self.is_current(identity))
-                outcome = (path_with_lookahead(route), goal, route, '')
+                lengths = [0.]
+                for first, second in zip(route, route[1:]):
+                    lengths.append(lengths[-1] + first.transform.location.distance(second.transform.location))
+                local = None
+                if (getattr(self.node.driver, 'supports_junction_local_control', False) is True
+                        and any(point.is_junction for point in route)):
+                    local = JunctionLocalController(self.node, route, self.road_map, lengths)
+                outcome = (path_with_lookahead(route), goal, route, '', local)
             except PlanningCancelled:
                 continue
             except Exception as error:
-                outcome = (None, None, [], str(error))
+                outcome = (None, None, [], str(error), None)
             with self.lock:
                 if self.status.get('id') == identity and self.status['state'] == 'planning':
                     self.result = (identity, outcome)
@@ -233,6 +242,9 @@ class LincolnNavigation:
         self.stopping = None
         self.route = []
         self.deviation_since = None
+        self.local_controller = None
+        with self.lock:
+            self.status['controller'] = 'manual'
         if active:
             self.node.driver.clear_route()
             view = getattr(self.node, 'navigation_view', None)
@@ -244,7 +256,7 @@ class LincolnNavigation:
             result, self.result = self.result, None
             if result is None:
                 return
-            identity, (route, goal, display_waypoints, error) = result
+            identity, (route, goal, display_waypoints, error, local) = result
             if not self.is_current(identity):
                 return
             if self.node.active:
@@ -254,15 +266,17 @@ class LincolnNavigation:
                 self.status.update(state='unreachable', detail=error)
                 return
             try:
-                self.node.driver.set_route(route)
+                if local is None or not local.should_take_over(0., 0.):
+                    self.node.driver.set_route(route)
                 self.node.autopilot = True
                 self.node.active = None
                 self.node.cruise_speed = None
                 self.node.reverse = False
                 self.goal = goal
                 self.prepare_route_tracking(display_waypoints)
+                self.local_controller = local
                 self.hold_brake = False
-                self.status.update(state='navigating', detail='Navigating to destination')
+                self.status.update(state='navigating', detail='Navigating to destination', controller='tm')
             except Exception as error:
                 self.node.driver.disable()
                 self.node.autopilot = False
@@ -332,6 +346,7 @@ class LincolnNavigation:
             self.node.driver.clear_route()
             with self.lock:
                 self.status['detail'] = 'Stopping at destination' if reason == 'destination' else reason
+                self.status['controller'] = 'stopping'
             logging.info('导航停车：%s，任务 %s', reason, self.status.get('id'))
 
     def update_stopping(self, speed, distance, matching_lane):
@@ -357,6 +372,41 @@ class LincolnNavigation:
             except Exception:
                 logging.exception('读取 TM 导航前瞻失败')
 
+    def set_controller_status(self, mode, wait_reason=''):
+        """面板直接读本车状态，桥和 SUMO 继续使用原有导航状态格式。"""
+        with self.lock:
+            if self.status.get('controller') != mode:
+                logging.info('导航控制权：%s → %s，任务 %s', self.status.get('controller'), mode, self.status.get('id'))
+            self.status.update(controller=mode, control_detail=wait_reason)
+
+    def update_junction_control(self, snapshot, transform, current, index, speed_limit):
+        """驾驶线程内切换唯一控制者；恢复 TM 时只上传当前位置之后的路线。"""
+        local = self.local_controller
+        if local is None:
+            return None
+        actor = snapshot.find(self.node.car.id)
+        if not local.active and local.should_take_over(self.route_progress, actor.get_velocity().length()):
+            self.node.driver.disable()
+            self.node.driver.clear_route()
+            local.activate(self.route_progress)
+            self.set_controller_status('local')
+            view = getattr(self.node, 'navigation_view', None)
+            if view is not None:
+                view.show_tm_path(transform.location, [])
+        if local.active:
+            control = local.run_step(snapshot, speed_limit)
+            self.set_controller_status('local', local.wait_reason)
+            if local.can_return_to_tm(self.route_progress, transform, current, snapshot.timestamp.elapsed_seconds):
+                remaining = self.route[min(index+1, len(self.route)-1):]
+                self.node.driver.set_navigation_speed(speed_limit)
+                self.node.driver.set_route(path_with_lookahead(remaining))
+                local.finish()
+                self.set_controller_status('tm')
+                return None
+            return control
+        self.set_controller_status('preparing' if local.is_preparing(self.route_progress) else 'tm')
+        return None
+
     def update(self, snapshot):
         """只由现有驾驶线程调用：路线监测、提前减速、单向进入终点停车。"""
         with self.lock:
@@ -367,6 +417,7 @@ class LincolnNavigation:
             self.node.autopilot = False
             self.goal = None
             self.stopping = None
+            self.local_controller = None
             self.hold_brake = True
         self.consume_plan()
         if self.goal is None or not self.node.autopilot:
@@ -408,7 +459,16 @@ class LincolnNavigation:
                     self.begin_stopping('Destination passed')
         if self.stopping is not None:
             return self.update_stopping(speed, distance, matching_lane)
-        self.node.driver.set_navigation_speed(self.planned_speed(index, remaining, speed))
+        speed_limit = self.planned_speed(index, remaining, speed)
+        try:
+            control = self.update_junction_control(snapshot, transform, current, index, speed_limit)
+        except Exception as error:
+            logging.exception('路口局部控制或 TM 交接失败')
+            self.begin_stopping('Local control failed: ' + str(error))
+            return self.update_stopping(speed, distance, matching_lane)
+        if control is not None:
+            return control
+        self.node.driver.set_navigation_speed(speed_limit)
         return None
 
     def close(self):

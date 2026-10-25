@@ -1,5 +1,6 @@
 """导航的坐标、身份隔离、合法路线、任务取消与停车检查；不启动仿真器。"""
 from pathlib import Path
+import importlib.util
 import tempfile
 import time
 import threading
@@ -144,7 +145,7 @@ class RouteTests(unittest.TestCase):
         node = SimpleNamespace(driver=Mock(), autopilot=False)
         navigation = LincolnNavigation(node)
         navigation.status = dict(id='task', state='planning')
-        navigation.result = ('task', ([carla.Location(x=40)], self.points[-1], self.points, ''))
+        navigation.result = ('task', ([carla.Location(x=40)], self.points[-1], self.points, '', None))
         navigation.cancel()
         navigation.consume_plan()
         node.driver.set_route.assert_not_called()
@@ -226,7 +227,20 @@ class RouteTests(unittest.TestCase):
     def test_upcoming_lane_change_reduces_target_speed(self):
         navigation, node, _, _ = self.active_navigation(0., 8.)
         navigation.route[3].lane_id = -2
-        self.assertLessEqual(navigation.planned_speed(0, 100, 8), 20.)
+        self.assertEqual(navigation.planned_speed(0, 1000, 8), 80.)
+
+    def test_normal_navigation_uses_higher_limit_without_exceeding_road_limit(self):
+        navigation, node, _, _ = self.active_navigation(0.,0.)
+        node.car.get_speed_limit = lambda:150.
+        self.assertEqual(navigation.planned_speed(0,1000.,0.),120.)
+        node.car.get_speed_limit = lambda:50.
+        self.assertEqual(navigation.planned_speed(0,1000.,0.),50.)
+
+    def test_junction_uses_eighty_kmh_cap(self):
+        navigation, node, _, _ = self.active_navigation(0.,8.)
+        node.car.get_speed_limit = lambda:150.
+        navigation.route[2].is_junction = True
+        self.assertEqual(navigation.planned_speed(0,1000.,8.),80.)
 
 
 class ManualNavigationTests(unittest.TestCase):
@@ -260,6 +274,140 @@ class ManualNavigationTests(unittest.TestCase):
         self.node.autopilot = True
         self.node.drive()
         self.node.car.apply_control.assert_not_called()
+
+
+@unittest.skipUnless(importlib.util.find_spec('geometry_msgs'), '需要加载 ROS 2 环境以复用绿色轨迹采样')
+class JunctionControlTests(unittest.TestCase):
+    def setUp(self):
+        from modules.lincoln.driving.junction_local_controller import JunctionLocalController
+        class Actors(list):
+            def filter(self, pattern):
+                return [actor for actor in self if actor.type_id.startswith('traffic.traffic_light')]
+        self.actors = Actors()
+        wheels = [SimpleNamespace(position=carla.Vector3D(x=x,y=y),max_steer_angle=70.)
+                  for x,y in ((150,80),(150,-80),(-150,80),(-150,-80))]
+        physics = SimpleNamespace(wheels=wheels,steering_curve=[carla.Vector2D(x=0,y=1),carla.Vector2D(x=20,y=.8)])
+        self.vehicle = SimpleNamespace(id=1,bounding_box=carla.BoundingBox(carla.Location(),carla.Vector3D(x=2.5,y=1,z=1)),
+                                       get_physics_control=lambda:physics,get_control=lambda:carla.VehicleControl())
+        self.world = SimpleNamespace(get_actors=lambda:self.actors)
+        self.route = [Waypoint(x) for x in range(0,121,4)]
+        for point in self.route:
+            point.lane_width = 3.5
+            point.is_junction = 40 <= point.s <= 60
+            point.road_id = 2 if point.is_junction else (3 if point.s>60 else 1)
+        self.node = SimpleNamespace(car=self.vehicle,world=self.world)
+        self.controller = JunctionLocalController(self.node,self.route,None,[p.s for p in self.route])
+
+    def sample(self, x, speed=0., now=10., other=None):
+        ego = SimpleNamespace(get_transform=lambda:carla.Transform(carla.Location(x=x)),
+                              get_velocity=lambda:carla.Vector3D(x=speed))
+        return SimpleNamespace(find=lambda actor_id:ego if actor_id==1 else other,
+                               timestamp=SimpleNamespace(elapsed_seconds=now))
+
+    def test_takeover_precedes_junction_and_return_requires_stable_correct_exit(self):
+        local = self.controller
+        self.assertFalse(local.should_take_over(0.,0.))
+        self.assertTrue(local.should_take_over(15.,0.))
+        local.activate(76.)
+        transform = carla.Transform(carla.Location(x=76))
+        current = self.route[19]
+        self.assertFalse(local.can_return_to_tm(76.,transform,current,10.))
+        self.assertTrue(local.can_return_to_tm(76.,transform,current,10.6))
+        wrong_lane = Waypoint(76.,lane=-2)
+        wrong_lane.road_id = 3
+        self.assertFalse(local.can_return_to_tm(76.,transform,wrong_lane,11.))
+
+    def test_red_and_yellow_stop_then_green_releases(self):
+        local = self.controller
+        light = SimpleNamespace(get_state=lambda:carla.TrafficLightState.Red)
+        local.signal_stops = [(32.,light)]
+        local.activate(29.)
+        control = local.run_step(self.sample(29.),20.)
+        self.assertEqual(control.brake,1.)
+        self.assertEqual(local.wait_reason,'traffic_light')
+        light.get_state = lambda:carla.TrafficLightState.Yellow
+        self.assertEqual(local.run_step(self.sample(29.,now=10.05),20.).brake,1.)
+        light.get_state = lambda:carla.TrafficLightState.Green
+        self.assertGreater(local.run_step(self.sample(29.,now=10.1),20.).throttle,0.)
+
+    def test_nearby_junctions_keep_local_control_without_tm_chatter(self):
+        local = self.controller
+        local.windows.append(dict(start=70.,entry=96.,exit=110.,exit_index=28))
+        local.activate(76.)
+        self.assertFalse(local.can_return_to_tm(76.,carla.Transform(carla.Location(x=76)),self.route[19],10.))
+        self.assertEqual(local.window_index,1)
+        self.assertTrue(local.active)
+
+    def test_destination_inside_junction_keeps_local_control_for_arrival_logic(self):
+        local = self.controller
+        local.windows[0]['exit'] = local.route_lengths[-1]
+        local.activate(118.)
+        self.assertFalse(local.can_return_to_tm(118.,carla.Transform(carla.Location(x=118)),self.route[-1],10.))
+
+    def test_blocking_vehicle_stops_but_adjacent_lane_and_overpass_do_not(self):
+        local = self.controller
+        obstacle = SimpleNamespace(id=2,type_id='vehicle.test',
+                                    bounding_box=carla.BoundingBox(carla.Location(),carla.Vector3D(x=2.5,y=1,z=1)))
+        self.actors.append(obstacle)
+        position = carla.Location(x=35)
+        state = SimpleNamespace(get_transform=lambda:carla.Transform(position))
+        local.activate(31.)
+        self.assertEqual(local.run_step(self.sample(31.,other=state),20.).brake,1.)
+        self.assertEqual(local.wait_reason,'obstacle')
+        position.y = 3.5
+        self.assertGreater(local.run_step(self.sample(31.,now=10.1,other=state),20.).throttle,0.)
+        position.y, position.z = 0., 6.
+        self.assertGreater(local.run_step(self.sample(31.,now=10.2,other=state),20.).throttle,0.)
+
+    def test_local_control_and_tm_are_never_written_in_the_same_update(self):
+        local = self.controller
+        node = SimpleNamespace(car=self.vehicle,driver=Mock(),navigation_view=Mock())
+        navigation = LincolnNavigation(node)
+        navigation.prepare_route_tracking(self.route)
+        navigation.local_controller = local
+        navigation.route_progress = 15.
+        snapshot = self.sample(15.)
+        control = navigation.update_junction_control(snapshot,carla.Transform(carla.Location(x=15)),self.route[4],3,20.)
+        self.assertIsInstance(control,carla.VehicleControl)
+        node.driver.disable.assert_called_once()
+        node.driver.set_route.assert_not_called()
+        navigation.cancel()
+        self.assertIsNone(navigation.local_controller)
+
+    def test_handoff_uploads_only_remaining_route_then_releases_local_control(self):
+        node = SimpleNamespace(car=self.vehicle,driver=Mock(),navigation_view=Mock())
+        navigation = LincolnNavigation(node)
+        navigation.prepare_route_tracking(self.route)
+        navigation.route_progress = 76.
+        local = self.controller
+        local.activate(76.)
+        local.exit_stable_since = 9.
+        navigation.local_controller = local
+        snapshot = self.sample(76.,now=10.)
+        control = navigation.update_junction_control(snapshot,carla.Transform(carla.Location(x=76)),self.route[19],19,20.)
+        self.assertIsNone(control)
+        self.assertFalse(local.active)
+        uploaded = node.driver.set_route.call_args.args[0]
+        self.assertGreaterEqual(min(p.x for p in uploaded),80.)
+        self.assertEqual(navigation.snapshot()['controller'],'tm')
+
+    def test_ui_distinguishes_local_waiting_and_tm(self):
+        from modules.lincoln.ui.driving_panel import navigation_control_display
+        text,color = navigation_control_display(dict(state='navigating',controller='local',control_detail='obstacle'),True)
+        self.assertIn('路口局部控制',text)
+        self.assertIn('障碍物',text)
+        tm_text,tm_color = navigation_control_display(dict(state='navigating',controller='tm'),True)
+        self.assertIn('TM',tm_text)
+        self.assertNotEqual(color,tm_color)
+
+    def test_speed_integral_can_compensate_for_cruising_resistance_and_resets_at_stop(self):
+        local = self.controller
+        for _ in range(160):
+            throttle,brake = local.longitudinal_control(7.,8.,.05)
+        self.assertGreater(throttle,.7)
+        self.assertEqual(brake,0.)
+        self.assertEqual(local.longitudinal_control(1.,0.,.05),(0.,1.))
+        self.assertEqual(local.integral,0.)
 
 
 if __name__ == '__main__':

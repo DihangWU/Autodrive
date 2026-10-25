@@ -9,6 +9,8 @@ DEFAULT_SPEED_DIFFERENCE = 30.0  # 官方 TM 默认比道路限速低 30%。
 
 
 class CarlaAutopilotController(DrivingController):
+    supports_junction_local_control = True
+
     def __init__(self, client, world, vehicle, args):
         super().__init__(client, world, vehicle, args)
         self.manager = None
@@ -50,8 +52,8 @@ class CarlaAutopilotController(DrivingController):
 
     def set_route(self, locations):
         """沿已验证的 CARLA 路线驾驶，交通规则和避障继续由 TM 负责。"""
-        self.enable()
         self.manager.set_path(self.vehicle, locations, True)
+        self.enable()
 
     def clear_route(self):
         self.manager.set_path(self.vehicle, [], True)

@@ -4,6 +4,30 @@ import tkinter as tk
 from tkinter import ttk
 
 
+def navigation_control_display(status, automatic):
+    """自动驾驶开关表示整项任务；此行单独说明实际控制者与等待原因。"""
+    state = status.get('state')
+    if state == 'unreachable':
+        return '导航失败：目的地不可达', '#b00020'
+    if state == 'error':
+        return '导航异常：已制动', '#b00020'
+    if state == 'arrived':
+        return '导航完成：停车保持', '#166534'
+    if state == 'planning':
+        return '导航控制：规划中，停车等待', '#946200'
+    mode = status.get('controller')
+    if state == 'navigating':
+        if mode == 'local':
+            waiting = {'traffic_light': ' · 红黄灯等待', 'obstacle': ' · 前方障碍物等待'}
+            return '导航控制：路口局部控制' + waiting.get(status.get('control_detail'), ''), '#b45309'
+        if mode == 'preparing':
+            return '导航控制：准备进入路口（TM）', '#946200'
+        if mode == 'stopping':
+            return '导航控制：正在制动停车', '#b00020'
+        return '导航控制：TM', '#1557b0'
+    return ('驾驶控制：TM（普通自动驾驶）', '#1557b0') if automatic else ('驾驶控制：手动', '#444444')
+
+
 def run_mouse_driving_panel(node, done):
     window = tk.Tk()
     window.title('Lincoln 驾驶与视角 — ' + node.uid)
@@ -11,6 +35,8 @@ def run_mouse_driving_panel(node, done):
     driving.pack(side='left', anchor='n', fill='y', padx=6)
     tk.Label(driving, text=f'{node.uid}\n鼠标按住驾驶；W 油门 / S 刹车 / A D 转向 / Q 切换前进倒车'
                           '\n油门右键：定速／取消；非定速时松开或失焦收油滑行').pack(pady=8)
+    navigation_status = tk.Label(driving, text='驾驶控制：手动', wraplength=450)
+    navigation_status.pack(pady=(0, 4))
     pressed_keys = set()
     pending_releases = {}
     def stop_driving(event=None):
@@ -221,6 +247,9 @@ def run_mouse_driving_panel(node, done):
         camera_button.config(text="释放视角" if node.follow else "跟随本车")
         free_follow_button.config(relief='sunken' if node.free_follow else 'raised')
         autopilot_button.config(text='关闭自动驾驶' if node.autopilot else '开启自动驾驶')
+        navigation_state = node.navigation.snapshot()
+        status_text, status_color = navigation_control_display(navigation_state, node.autopilot)
+        navigation_status.config(text=status_text, fg=status_color)
         velocity = node.car.get_velocity()
         control = node.car.get_control()
         xbox_active = node.control_source == 'xbox'
@@ -233,9 +262,12 @@ def run_mouse_driving_panel(node, done):
             button.config(relief='sunken' if pressed else 'raised',
                           bg='#b9dfef' if gamepad_pressed else window.cget('bg'))
         xbox_status.config(text=node.xbox.status)
+        command_source = 'Xbox' if xbox_active else node.active or '收油／滑行'
+        if node.autopilot:
+            command_source = '路口局部控制' if navigation_state.get('controller') == 'local' else 'TM 自动驾驶'
         speed.config(text=f'{math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)*3.6:.1f} km/h'
                      + (f'  定速目标：{node.cruise_speed*3.6:.1f} km/h' if node.cruise_speed is not None else '')
-                     + f'\n指令：{"Xbox" if xbox_active else node.active or "收油／滑行"}  油门：{control.throttle:.2f}  刹车：{control.brake:.2f}')
+                     + f'\n指令：{command_source}  油门：{control.throttle:.2f}  刹车：{control.brake:.2f}')
         window.after(30, poll)
     window.after(30, poll)
     try:
