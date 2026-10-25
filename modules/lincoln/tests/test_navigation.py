@@ -380,8 +380,8 @@ class JunctionControlTests(unittest.TestCase):
             point.is_junction = 40 <= point.s <= 60
             point.road_id = 2 if point.is_junction else (3 if point.s>60 else 1)
         self.node = SimpleNamespace(car=self.vehicle,world=self.world)
-        with patch('modules.lincoln.driving.junction_local_controller.ExitBranchClassifier') as classifier:
-            classifier.return_value.requires_exit_selection.return_value = True
+        with patch('modules.lincoln.driving.junction_local_controller.JunctionBranchClassifier') as classifier:
+            classifier.return_value.requires_local_control.return_value = True
             self.controller = JunctionLocalController(self.node,self.route,None,[p.s for p in self.route])
 
     def sample(self, x, speed=0., now=10., other=None):
@@ -492,22 +492,22 @@ class JunctionControlTests(unittest.TestCase):
     def test_ui_distinguishes_local_waiting_and_tm(self):
         from modules.lincoln.ui.driving_panel import navigation_control_display
         text,color = navigation_control_display(dict(state='navigating',controller='local',control_detail='obstacle'),True)
-        self.assertIn('出口局部控制',text)
+        self.assertIn('路口局部控制',text)
         self.assertIn('障碍物',text)
         tm_text,tm_color = navigation_control_display(dict(state='navigating',controller='tm'),True)
         self.assertIn('TM',tm_text)
         self.assertNotEqual(color,tm_color)
 
-    def test_ordinary_turn_guidance_stays_inside_tm(self):
+    def test_straight_guidance_stays_inside_tm(self):
         node = SimpleNamespace(driver=Mock(supports_junction_local_control=True))
         navigation = LincolnNavigation(node)
         navigation.prepare_route_tracking(self.route)
-        self.route[16].transform.rotation.yaw = -90.
+        self.route[16].transform.rotation.yaw = 0.
         navigation.prepare_tm_turns()
-        self.assertEqual(navigation.tm_turns[0]['action'],'Left')
+        self.assertEqual(navigation.tm_turns[0]['action'],'Straight')
         navigation.route_progress = 25.
         navigation.update_tm_turn_guidance(6,self.route[6])
-        node.driver.set_turn_guidance.assert_called_once_with(['Left'])
+        node.driver.set_turn_guidance.assert_called_once_with(['Straight'])
         node.driver.disable.assert_not_called()
         navigation.route_progress = 76.
         navigation.update_tm_turn_guidance(19,self.route[19])
@@ -524,11 +524,11 @@ class JunctionControlTests(unittest.TestCase):
         navigation.update_tm_turn_guidance(6,self.route[6])
         node.driver.set_turn_guidance.assert_not_called()
 
-    def test_non_exit_route_has_no_local_window_or_vehicle_physics_setup(self):
+    def test_straight_route_has_no_local_window_or_vehicle_physics_setup(self):
         from modules.lincoln.driving.junction_local_controller import JunctionLocalController
         self.vehicle.get_physics_control = Mock(side_effect=AssertionError('unneeded physics setup'))
-        with patch('modules.lincoln.driving.junction_local_controller.ExitBranchClassifier') as classifier:
-            classifier.return_value.requires_exit_selection.return_value = False
+        with patch('modules.lincoln.driving.junction_local_controller.JunctionBranchClassifier') as classifier:
+            classifier.return_value.requires_local_control.return_value = False
             local = JunctionLocalController(self.node,self.route,None,[p.s for p in self.route])
         self.assertFalse(local.should_take_over(1000.,30.))
         self.vehicle.get_physics_control.assert_not_called()
@@ -543,10 +543,10 @@ class JunctionControlTests(unittest.TestCase):
         self.assertEqual(local.integral,0.)
 
 
-class ExitBranchClassificationTests(unittest.TestCase):
+class JunctionBranchClassificationTests(unittest.TestCase):
     def setUp(self):
-        from modules.lincoln.driving.junction_local_controller import ExitBranchClassifier
-        self.classifier_type = ExitBranchClassifier
+        from modules.lincoln.driving.junction_local_controller import JunctionBranchClassifier
+        self.classifier_type = JunctionBranchClassifier
         self.incoming = Waypoint(0)
         self.entry = Waypoint(4)
         self.entry.road_id, self.entry.junction_id, self.entry.is_junction = 100,99,True
@@ -569,14 +569,51 @@ class ExitBranchClassificationTests(unittest.TestCase):
         if alternate:
             connections+='<connection incomingRoad="1" connectingRoad="200"><laneLink from="-1" to="-1"/></connection>'
         xml='<OpenDRIVE>'+road(1,3)+road(3,selected_lanes)+road(4,3)+connector(100,3)+connector(200,4)+f'<junction id="99">{connections}</junction></OpenDRIVE>'
-        return self.classifier_type(SimpleNamespace(to_opendrive=lambda:xml))
+        return self.classifier_type(SimpleNamespace(to_opendrive=lambda:xml, get_waypoint_xodr=lambda *args:self.incoming))
+
+    def test_ordinary_left_right_and_uturn_are_local_but_straight_is_tm(self):
+        classifier = self.classifier(selected_lanes=3)
+        for yaw in (-90., 90., 180.):
+            self.branch_probe.transform.rotation.yaw = yaw
+            self.assertTrue(classifier.requires_local_control(self.entry,self.incoming,self.branch_probe))
+        self.branch_probe.transform.rotation.yaw = 0.
+        self.assertFalse(classifier.requires_local_control(self.entry,self.incoming,self.branch_probe))
+
+    def test_equal_width_diverging_choice_is_local_but_mainline_is_tm(self):
+        self.branch_probe.transform.rotation.yaw = 20.
+        classifier = self.classifier(selected_lanes=3)
+        self.assertTrue(classifier.requires_local_control(self.entry,self.incoming,self.branch_probe))
+        self.assertFalse(classifier.requires_local_control(self.main,self.incoming,self.main_probe))
+
+    def test_curved_mainline_is_not_taken_over_for_a_straighter_narrow_exit(self):
+        self.main_probe.transform.rotation.yaw = -27.
+        classifier = self.classifier()
+        self.assertFalse(classifier.requires_local_control(self.main,self.incoming,self.main_probe))
+        self.assertTrue(classifier.requires_local_control(self.entry,self.incoming,self.branch_probe))
+
+    def test_real_classifier_builds_windows_for_turn_but_not_straight(self):
+        from modules.lincoln.driving.junction_local_controller import JunctionLocalController
+        local = JunctionLocalController.__new__(JunctionLocalController)
+        self.branch_probe.road_id = 3
+        local.route = [self.incoming,self.entry,self.branch_probe]
+        local.route_lengths = [0.,4.,22.]
+        local.branch_classifier = self.classifier(selected_lanes=3)
+        self.branch_probe.transform.rotation.yaw = 90.
+        self.assertEqual(len(local.find_junction_windows()),1)
+        self.branch_probe.transform.rotation.yaw = 0.
+        self.assertEqual(local.find_junction_windows(),[])
+
+    def test_starting_inside_turn_uses_true_incoming_heading(self):
+        self.entry.transform.rotation.yaw = 80.
+        self.branch_probe.transform.rotation.yaw = 90.
+        self.assertTrue(self.classifier(selected_lanes=3).requires_local_control(self.entry))
 
     def test_selected_narrow_exit_is_local_but_main_continuation_remains_tm(self):
         classifier=self.classifier()
         self.assertTrue(classifier.requires_exit_selection(self.entry,self.incoming))
         self.assertFalse(classifier.requires_exit_selection(self.main,self.incoming))
 
-    def test_normal_ninety_degree_turn_remains_tm(self):
+    def test_ninety_degree_turn_is_not_a_narrow_gentle_exit(self):
         self.branch_probe.transform.rotation.yaw=90.
         self.assertFalse(self.classifier().requires_exit_selection(self.entry,self.incoming))
 

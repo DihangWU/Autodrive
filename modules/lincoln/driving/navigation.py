@@ -380,7 +380,7 @@ class LincolnNavigation:
         return self.route_lengths[-1] - self.route_progress, distance, index
 
     def prepare_tm_turns(self):
-        """普通路口只给 TM 转向提示；已识别的分流出口留给局部控制。"""
+        """只给未接管的直行连接提供 TM 引导；转向与分支选择留给局部控制。"""
         self.tm_turns = []
         self.tm_turn_index = 0
         self.tm_turn_active = False

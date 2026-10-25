@@ -19,9 +19,9 @@ def navigation_control_display(status, automatic):
     if state == 'navigating':
         if mode == 'local':
             waiting = {'traffic_light': ' · 红黄灯等待', 'obstacle': ' · 前方障碍物等待'}
-            return '导航控制：出口局部控制' + waiting.get(status.get('control_detail'), ''), '#b45309'
+            return '导航控制：路口局部控制' + waiting.get(status.get('control_detail'), ''), '#b45309'
         if mode == 'preparing':
-            return '导航控制：准备驶入出口（TM）', '#946200'
+            return '导航控制：准备路口接管（TM）', '#946200'
         if mode == 'stopping':
             return '导航控制：正在制动停车', '#b00020'
         return '导航控制：TM', '#1557b0'
@@ -264,7 +264,7 @@ def run_mouse_driving_panel(node, done):
         xbox_status.config(text=node.xbox.status)
         command_source = 'Xbox' if xbox_active else node.active or '收油／滑行'
         if node.autopilot:
-            command_source = '出口局部控制' if navigation_state.get('controller') == 'local' else 'TM 自动驾驶'
+            command_source = '路口局部控制' if navigation_state.get('controller') == 'local' else 'TM 自动驾驶'
         speed.config(text=f'{math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)*3.6:.1f} km/h'
                      + (f'  定速目标：{node.cruise_speed*3.6:.1f} km/h' if node.cruise_speed is not None else '')
                      + f'\n指令：{command_source}  油门：{control.throttle:.2f}  刹车：{control.brake:.2f}')
