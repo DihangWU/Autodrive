@@ -31,6 +31,7 @@ from foundation.cobridge.adapters.carla import CarlaAdapter
 from foundation.cobridge.adapters.sumo import SumoAdapter
 from foundation.cobridge.control import ControlServer, SOCKET_FILE
 from foundation.cobridge.lincoln.vehicle_registry import LincolnVehicleRegistry
+from foundation.cobridge.traffic_lights.sumo_traffic_lights import SumoTrafficLights
 from foundation.sumo.client import SOCKET_FILE as SUMO_SOCKET_FILE
 
 
@@ -47,6 +48,7 @@ class BridgeRuntime:
         self.frames = 0
         self.modules = ModuleRegistry(CONSOLE.info)
         self.lincoln = LincolnVehicleRegistry()
+        self.traffic_lights = SumoTrafficLights(CONSOLE.info)
 
     def report(self, name, error):
         message = str(error)
@@ -85,12 +87,16 @@ class BridgeRuntime:
         adapter = getattr(self, field)
         setattr(self, field, None)
         try:
-            adapter.close()
+            try:
+                self.traffic_lights.close()
+            finally:
+                adapter.close()
         except Exception:
             logging.exception('释放 %s 接入失败', name)
         self.next_discovery = 0
 
     def step(self):
+        self.traffic_lights.synchronize(self.carla, self.sumo)
         self.lincoln.prepare_traffic_managers(self.carla)
         for name in ('CARLA', 'SUMO'):
             if name == 'SUMO':
@@ -110,7 +116,8 @@ class BridgeRuntime:
         if command['action'] == 'status':
             return dict(carla_connected=self.carla is not None, sumo_connected=self.sumo is not None,
                         frame=self.frames, time=self.frames * self.args.step_length,
-                        modules=self.modules.snapshot(), lincolns=self.lincoln.snapshot())
+                        modules=self.modules.snapshot(), lincolns=self.lincoln.snapshot(),
+                        traffic_lights=dict(self.traffic_lights.details))
         if command['action'].startswith('lincoln.'):
             return self.lincoln.handle_request(command, owner)
         if command['action'] == 'module.status':
@@ -123,6 +130,10 @@ class BridgeRuntime:
 
     def close(self):
         errors = []
+        try:
+            self.traffic_lights.close()
+        except Exception as error:
+            errors.append(f'恢复 CARLA 信号灯：{error}')
         try:
             self.lincoln.close(self.sumo)
         except Exception as error:

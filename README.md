@@ -1,6 +1,6 @@
 # Autodrive
 
-CARLA、SUMO 和 CoBridge 分别运行。CARLA 负责三维场景、物理和传感器；SUMO 负责路网与交通仿真；CoBridge 负责时间推进和已登记 Lincoln 的 CARLA → SUMO 同步。RSU 保留现有独立进程，生命周期由它自己管理。详细基础架构见 [architecture.md](architecture.md)。
+CARLA、SUMO 和 CoBridge 分别运行。CARLA 负责三维场景、物理和传感器；SUMO 负责路网与交通仿真；CoBridge 负责时间推进、已登记 Lincoln 的 CARLA → SUMO 同步，以及 SUMO → CARLA 红绿灯同步。RSU 保留现有独立进程，生命周期由它自己管理。详细基础架构见 [architecture.md](architecture.md)。
 
 ## 启动
 
@@ -33,6 +33,20 @@ add_lincoln
 ```
 
 `run_cobridge`、`run_sumo`、`run_rsu`、`add_lincoln` 保持前台运行，在各自终端按 Ctrl+C 退出。Lincoln 不会自动启动、关闭或切换 CARLA、SUMO、CoBridge，也不调用 `world.tick()`。SUMO 与 CoBridge 默认步长为 0.05 秒。
+
+## SUMO 自动控制两端红绿灯
+
+正常运行 `run_cobridge` 即启用，无需额外手动切换。CARLA 和 SUMO 完整接入且地图指纹一致后，桥会读取本次 SUMO 路网 `.net.xml` 中的 `tlLogic/param linkSignalID:<连接索引>`，通过 OpenDRIVE 地标对应 CARLA 信号灯实体。实现位于 `foundation/cobridge/traffic_lights/sumo_traffic_lights.py`，复用官方 `SumoTLLogic` 和 `BridgeHelper.get_carla_traffic_light_state()`，不修改官方源码，也不另开 SUMO 连接或推进线程。
+
+CARLA 0.9.16 的冻结接口作用于全场红绿灯，因此接管前必须覆盖全部 CARLA 信号灯实体，并检查 SUMO 控制器的映射；缺失的 actor ID、地标或控制器会明确报告，保持 CARLA 原控制，每秒重试。匹配成功后打印接管数量，冻结 CARLA 自主切灯；SUMO 继续执行现有程序，桥订阅实际灯色，每帧一次获取所有控制器的订阅结果，并只向发生变化的 CARLA 灯写入状态；退出时还原接管前的 SUMO 订阅变量。后续通过 SUMO 手动切相位、切程序或设置灯色也会被读取。不同程序对同一连接的地标映射必须一致，运行时新增或改写路网映射需要重启桥。
+
+保留原有推进顺序：在 CARLA 每次 tick 和 TM 控制计算之前，应用 SUMO 上一已完成步骤的灯色，再推进 CARLA 和 SUMO。因此这里是按 0.05 秒步长耦合，不是两端渲染画面的原子刷新；SUMO 本轮发生的相位变化会用于下一次 CARLA 帧。SUMO 自主车流依据 SUMO 信号灯通行，CARLA TM 依据同步后的 CARLA 灯行驶；手动驾驶及自定义算法仍需自行遵守信号。
+
+同一个 CARLA 灯若对应不同灯色的 SUMO 连接，会沿用官方保守取红灯规则，并报告冲突 actor ID；无法把多个车道方向的灯色无损显示为一盏实体灯。灯色枚举转换沿用官方规则，特殊的闪烁/右转信号可能转换为 Unknown，不能等同于普通绿灯。
+
+SUMO 失联、桥主动脱离或 Ctrl+C 正常退出时，恢复保存的 CARLA 灯色和接管前的全场冻结状态，原来的红黄绿时长未修改；CARLA 世界已切换时不会向旧世界写入。恢复的是原灯色和冻结状态，不回放接管期间的 CARLA 相位，也不精确重置内部计时器。信号灯 RPC 失败时会尝试恢复并报告；SIGKILL、CARLA 崩溃等情况下无法保证执行清理。桥状态查询的 `traffic_lights` 字段可查看接管状态、覆盖数量和冲突信息。
+
+Town04 实测匹配 43/43 个 CARLA 红绿灯、12 个 SUMO 控制器，手动改变 SUMO 相位后 CARLA 灯色随之改变。灯色切换边界曾观察到一帧快照差异，随后连续 29 帧、1247 次比较一致；RPC 写入和快照更新不是原子操作。正常退出后，CARLA 恢复原先异步运行和未冻结状态；SUMO 脱离后恢复、重新接入后再接管均通过。订阅读取版本在空载 Town04 的桥步进耗时中位数约 20.6 ms，取代逐个管理请求约 77.6 ms 的实现；有车辆和传感器时需另行测量。离线回归覆盖缺失映射、程序映射冲突、同灯多连接冲突、读取/写入失败恢复、原冻结状态保留及地图切换。启动中的旧桥不会加载此功能，需正常退出后重新运行 `run_cobridge`。
 
 ## SUMO GUI 的低延迟构建
 
@@ -247,7 +261,7 @@ add_lincoln
 
 模块端不连接 SUMO、不上传可能过时的位置流。桥端代码全部放在 `foundation/cobridge/lincoln/`，现有桥主文件仅增加登记分发、帧同步和退出清理等接入点；SUMO TraCI 层、RSU 和官方 CARLA 工具不改写。
 
-偏移取自本次转换路网的 `netOffset`。SUMO 的位置参考点是车头中心，CARLA 的参考点是 actor 原点；桥会处理包围盒位置和长度，不能直接把两端位置数值当作同一点比较。朝向为 `(CARLA yaw + 90) % 360`。SUMO 车辆由 CARLA 决定运动，禁用 SUMO 的自主换道和安全速度约束，每帧通过 `moveToXY` 更新，不把 SUMO 控制回传 CARLA。本轮不实现 SUMO NPC → CARLA、交通灯同步、OMNeT++ 或立交上下层的显式车道 ID 匹配。
+偏移取自本次转换路网的 `netOffset`。SUMO 的位置参考点是车头中心，CARLA 的参考点是 actor 原点；桥会处理包围盒位置和长度，不能直接把两端位置数值当作同一点比较。朝向为 `(CARLA yaw + 90) % 360`。SUMO 车辆由 CARLA 决定运动，禁用 SUMO 的自主换道和安全速度约束，每帧通过 `moveToXY` 更新，不把 SUMO 控制回传 CARLA。本轮不实现 SUMO NPC → CARLA、OMNeT++ 或立交上下层的显式车道 ID 匹配；红绿灯控制单独由 SUMO 同步到 CARLA，见上文。
 
 | 场景 | 行为 |
 |---|---|
