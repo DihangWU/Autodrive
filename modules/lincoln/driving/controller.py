@@ -35,6 +35,13 @@ class DrivingController(ABC):
     def clear_route(self):
         """导航取消时清除控制器保存的路线；自定义导航算法可覆盖。"""
 
+    def set_navigation_speed(self, speed_kmh):
+        """可选的导航限速接口；不接管自定义控制器的纵向算法。"""
+
+    def navigation_preview(self):
+        """返回控制器公开的前瞻路点；无此能力时不绘制虚构路径。"""
+        return []
+
 
 def load_driving_controller(spec, client, world, vehicle, args):
     if spec == DEFAULT_DRIVER:

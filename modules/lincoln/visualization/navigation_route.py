@@ -18,6 +18,30 @@ ARROW_COLOR = (1., 1., 1., 0.95)
 ARROW_INTERVAL = 12.0
 ARROW_FIRST_DISTANCE = 5.0
 FRAME_ID = 'map'
+TM_LINE_WIDTH = 0.12
+TM_LINE_HEIGHT = 0.12
+TM_LINE_LIFETIME = 0.8
+
+
+def tm_path_markers(location, waypoints):
+    """红色直线仅连接 TM 实际公开的动作路点，不进行路线推测或平滑。"""
+    marker = Marker()
+    marker.header.frame_id = FRAME_ID
+    marker.ns, marker.id = 'tm_action_path', 0
+    marker.type = Marker.LINE_STRIP
+    marker.pose.orientation.w = 1.
+    marker.scale.x = TM_LINE_WIDTH
+    marker.color.r, marker.color.g, marker.color.b, marker.color.a = 1., .05, .05, .95
+    marker.lifetime.nanosec = int(TM_LINE_LIFETIME * 1e9)
+    if waypoints:
+        for point in [location, *waypoints]:
+            converted = Point(x=point.x, y=-point.y, z=point.z + TM_LINE_HEIGHT)
+            if marker.points and sum((getattr(converted, axis)-getattr(marker.points[-1], axis))**2
+                                     for axis in ('x', 'y', 'z')) < .01:
+                continue
+            marker.points.append(converted)
+    marker.action = Marker.ADD if len(marker.points) >= 2 else Marker.DELETE
+    return MarkerArray(markers=[marker])
 
 
 @dataclass(frozen=True)

@@ -10,7 +10,8 @@ from unittest.mock import Mock
 import carla
 
 from foundation.cobridge.lincoln.navigation import LincolnNavigation as BridgeNavigation, resolve_destination
-from modules.lincoln.driving.navigation import LincolnNavigation, plan_route
+from modules.lincoln.driving.navigation import (LincolnNavigation, plan_route,
+                                               lane_change_finishes_before_junction, path_with_lookahead)
 from modules.lincoln.driving.manual_driving import ManualDrivingMixin
 
 
@@ -106,6 +107,39 @@ class RouteTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'height'):
             plan_route(self.road_map, carla.Location(x=0), carla.Location(x=40, z=15))
 
+    def test_lane_change_cannot_skip_entry_lane_into_junction(self):
+        adjacent, following = Waypoint(0, lane=-2), Waypoint(12, lane=-2)
+        following.is_junction = True
+        following.road_id = 1161
+        self.assertFalse(lane_change_finishes_before_junction(adjacent, following))
+
+    def test_lane_change_leaves_clearance_before_junction(self):
+        adjacent, following, ahead = Waypoint(0, lane=-2), Waypoint(12, lane=-2), Waypoint(24, lane=-2)
+        following.following = [ahead]
+        self.assertTrue(lane_change_finishes_before_junction(adjacent, following))
+        ahead.is_junction = True
+        self.assertFalse(lane_change_finishes_before_junction(adjacent, following))
+
+    def test_tm_path_uses_exit_road_without_mutating_green_route(self):
+        start, inside, exit_point, lookahead = [Waypoint(x) for x in (0,4,8,12)]
+        inside.is_junction = True
+        inside.road_id = 1161
+        exit_point.road_id = lookahead.road_id = 23
+        exit_point.following = [lookahead]
+        route = [start, inside, exit_point]
+        points = path_with_lookahead(route)
+        self.assertEqual([point.x for point in points], [0,8,12])
+        self.assertEqual([point.road_id for point in route], [1,1161,23])
+
+    def test_destination_inside_junction_can_use_an_exit_beyond_destination(self):
+        goal, after = Waypoint(0), Waypoint(4)
+        goal.is_junction = True
+        goal.following = [after]
+        self.assertEqual([point.x for point in path_with_lookahead([goal])], [4])
+        goal.following = []
+        with self.assertRaisesRegex(ValueError, 'exit guide'):
+            path_with_lookahead([goal])
+
     def test_late_plan_after_cancel_never_takes_control(self):
         node = SimpleNamespace(driver=Mock(), autopilot=False)
         navigation = LincolnNavigation(node)
@@ -126,7 +160,7 @@ class RouteTests(unittest.TestCase):
     def test_arrival_requires_correct_lane_and_stops_vehicle(self):
         actor = SimpleNamespace(get_transform=lambda: carla.Transform(carla.Location(x=40)),
                                 get_velocity=lambda: carla.Vector3D())
-        snapshot = SimpleNamespace(find=lambda _: actor)
+        snapshot = SimpleNamespace(find=lambda _: actor, timestamp=SimpleNamespace(elapsed_seconds=10.))
         node = SimpleNamespace(driver=Mock(), autopilot=True, car=SimpleNamespace(id=2))
         navigation = LincolnNavigation(node)
         navigation.status = dict(id='task', state='navigating')
@@ -137,6 +171,62 @@ class RouteTests(unittest.TestCase):
         self.assertFalse(node.autopilot)
         self.assertTrue(navigation.hold_brake)
         self.assertEqual(navigation.snapshot()['state'], 'arrived')
+
+    def active_navigation(self, x, speed, lane=-1):
+        actor = SimpleNamespace(get_transform=lambda: carla.Transform(carla.Location(x=x)),
+                                get_velocity=lambda: carla.Vector3D(x=speed))
+        node = SimpleNamespace(driver=Mock(), autopilot=True,
+                               car=SimpleNamespace(id=2, get_speed_limit=lambda: 90.))
+        navigation = LincolnNavigation(node)
+        navigation.status = dict(id='task', state='navigating')
+        navigation.goal = self.points[-1]
+        navigation.road_map = SimpleNamespace(get_waypoint=lambda *a, **kw: Waypoint(x, lane))
+        navigation.prepare_route_tracking(self.points)
+        return navigation, node, SimpleNamespace(find=lambda _: actor, timestamp=SimpleNamespace(elapsed_seconds=10.)), actor
+
+    def test_approach_caps_speed_without_toggling_autopilot(self):
+        navigation, node, snapshot, _ = self.active_navigation(25., 12.)
+        self.assertIsNone(navigation.update(snapshot))
+        node.driver.disable.assert_not_called()
+        node.driver.enable.assert_not_called()
+        self.assertLess(node.driver.set_navigation_speed.call_args.args[0], 40.)
+
+    def test_destination_braking_never_reenables_tm_even_after_overshoot(self):
+        navigation, node, snapshot, actor = self.active_navigation(37., 10.)
+        self.assertEqual(navigation.update(snapshot).brake, 1.)
+        actor.get_transform = lambda: carla.Transform(carla.Location(x=46))
+        actor.get_velocity = lambda: carla.Vector3D()
+        self.assertEqual(navigation.update(snapshot).brake, 1.)
+        self.assertEqual(navigation.snapshot()['state'], 'error')
+        self.assertFalse(node.autopilot)
+        self.assertTrue(navigation.hold_brake)
+        node.driver.disable.assert_called_once()
+        node.driver.enable.assert_not_called()
+
+    def test_wrong_destination_lane_stops_instead_of_driving_past(self):
+        navigation, node, snapshot, _ = self.active_navigation(38., 2., lane=-2)
+        self.assertEqual(navigation.update(snapshot).brake, 1.)
+        self.assertIn('lane missed', navigation.stopping)
+        node.driver.enable.assert_not_called()
+
+    def test_passed_destination_stops_even_without_previous_arrival_sample(self):
+        navigation, _, snapshot, _ = self.active_navigation(47., 8.)
+        self.assertEqual(navigation.update(snapshot).brake, 1.)
+        self.assertEqual(navigation.stopping, 'Destination passed')
+
+    def test_persistent_deviation_stops_and_does_not_report_arrival(self):
+        navigation, node, snapshot, actor = self.active_navigation(10., 8.)
+        actor.get_transform = lambda: carla.Transform(carla.Location(x=10, y=5))
+        self.assertIsNone(navigation.update(snapshot))
+        snapshot.timestamp.elapsed_seconds = 11.
+        self.assertEqual(navigation.update(snapshot).brake, 1.)
+        self.assertEqual(navigation.stopping, 'Route deviation')
+        node.driver.enable.assert_not_called()
+
+    def test_upcoming_lane_change_reduces_target_speed(self):
+        navigation, node, _, _ = self.active_navigation(0., 8.)
+        navigation.route[3].lane_id = -2
+        self.assertLessEqual(navigation.planned_speed(0, 100, 8), 20.)
 
 
 class ManualNavigationTests(unittest.TestCase):

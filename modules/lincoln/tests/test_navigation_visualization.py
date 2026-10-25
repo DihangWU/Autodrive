@@ -13,7 +13,7 @@ import carla
 try:
     import yaml
     from visualization_msgs.msg import Marker, MarkerArray
-    from modules.lincoln.visualization.navigation_route import navigation_route_markers
+    from modules.lincoln.visualization.navigation_route import navigation_route_markers, tm_path_markers
     from modules.lincoln.visualization.navigation_rviz import NavigationRviz
     from modules.lincoln.visualization import rviz_launcher
     from modules.lincoln.visualization.vehicle_markers import VehicleMarkersMixin
@@ -64,13 +64,24 @@ class GeometryTests(unittest.TestCase):
     def test_template_only_vehicle_lanes_and_route(self):
         config=yaml.safe_load(NAV_RVIZ_TEMPLATE_FILE.read_text())
         displays=config['Visualization Manager']['Displays']
-        self.assertEqual(len(displays), 3)
+        self.assertEqual(len(displays), 4)
         self.assertTrue(all(d['Class']=='rviz_default_plugins/MarkerArray' for d in displays))
         topics=[d['Topic']['Value'] for d in displays]
         self.assertTrue(any(t.endswith('/navigation/vehicle') for t in topics))
+        self.assertTrue(any(t.endswith('/navigation/tm_path') for t in topics))
         self.assertFalse(any('points' in t or 'image' in t or 'mosaic' in t for t in topics))
         self.assertEqual(config['Visualization Manager']['Views'],
                          yaml.safe_load(RVIZ_TEMPLATE_FILE.read_text())['Visualization Manager']['Views'])
+
+    def test_tm_preview_is_red_and_only_connects_real_action_points(self):
+        marker = tm_path_markers(carla.Location(x=1, y=2), [carla.Location(x=5, y=3, z=7),
+                                                           carla.Location(x=9, y=4, z=8)]).markers[0]
+        self.assertEqual(marker.type, Marker.LINE_STRIP)
+        self.assertEqual([(p.x,p.y) for p in marker.points], [(1.,-2.),(5.,-3.),(9.,-4.)])
+        self.assertGreater(marker.color.r, marker.color.g)
+        self.assertGreater(marker.points[1].z, 7.)
+        self.assertGreater(marker.lifetime.nanosec, 0)
+        self.assertEqual(tm_path_markers(carla.Location(), []).markers[0].action, Marker.DELETE)
 
     def test_namespace_adapts_wheels_and_lidar_display_frame(self):
         node=SimpleNamespace(uid='lincoln_1234567890',sensors=[],args=SimpleNamespace(no_rviz=True),

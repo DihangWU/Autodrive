@@ -51,6 +51,18 @@ Visualization Manager:
       Reliability Policy: Reliable
       Value: /lincoln_f5c9033aa2/navigation/route
     Value: true
+  - Class: rviz_default_plugins/MarkerArray
+    Enabled: true
+    Name: TM action preview - red straight segments
+    Namespaces:
+      tm_action_path: true
+    Topic:
+      Depth: 1
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /lincoln_f5c9033aa2/navigation/tm_path
+    Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48

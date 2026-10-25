@@ -13,7 +13,7 @@ from rclpy.qos import QoSProfile, DurabilityPolicy
 from visualization_msgs.msg import MarkerArray
 
 from modules.lincoln.runtime.paths import NAV_RVIZ_TEMPLATE_FILE
-from modules.lincoln.visualization.navigation_route import clear_route_markers, navigation_route_markers
+from modules.lincoln.visualization.navigation_route import clear_route_markers, navigation_route_markers, tm_path_markers
 from modules.lincoln.visualization.rviz_launcher import launch_rviz_template
 from modules.lincoln.visualization.road_map import road_markers
 
@@ -29,6 +29,7 @@ class NavigationRviz:
         self.route_pub = node.create_publisher(MarkerArray, f'/{node.uid}/navigation/route',
                             QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self.vehicle_pub = node.create_publisher(MarkerArray, f'/{node.uid}/navigation/vehicle', 2)
+        self.tm_path_pub = node.create_publisher(MarkerArray, f'/{node.uid}/navigation/tm_path', 1)
         self.lock = threading.RLock()
         self.stopped = threading.Event()
         self.tasks = queue.Queue(maxsize=1)
@@ -65,6 +66,11 @@ class NavigationRviz:
         with self.lock:
             self.generation += 1
             self.route_pub.publish(clear_route_markers())
+            self.tm_path_pub.publish(clear_route_markers())
+
+    def show_tm_path(self, location, waypoints):
+        """仅显示本车控制器刚返回的动作点；失效后自动清除。"""
+        self.tm_path_pub.publish(tm_path_markers(location, waypoints))
 
     def prepare_roads(self, road_map):
         if self.roads_ready:

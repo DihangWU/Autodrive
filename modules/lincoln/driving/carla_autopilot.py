@@ -5,6 +5,7 @@ from modules.lincoln.driving.controller import DrivingController
 from modules.lincoln.driving.traffic_manager_port import reserve_traffic_manager_port
 
 MODE_CHECK_INTERVAL = 0.5
+DEFAULT_SPEED_DIFFERENCE = 30.0  # 官方 TM 默认比道路限速低 30%。
 
 
 class CarlaAutopilotController(DrivingController):
@@ -15,6 +16,7 @@ class CarlaAutopilotController(DrivingController):
         self.enabled = False
         self.mode = None
         self.next_check = 0
+        self.navigation_speed = None
         # 车辆启动前台准备，不把创建服务、加载地图等冷启动留给驾驶按钮。
         started = time.monotonic()
         print('[Lincoln] 正在准备 Traffic Manager…', flush=True)
@@ -53,6 +55,30 @@ class CarlaAutopilotController(DrivingController):
 
     def clear_route(self):
         self.manager.set_path(self.vehicle, [], True)
+        if self.navigation_speed is not None:
+            self.manager.vehicle_percentage_speed_difference(self.vehicle, DEFAULT_SPEED_DIFFERENCE)
+            self.navigation_speed = None
+
+    def set_navigation_speed(self, speed_kmh):
+        """仅设置 TM 目标速度，减速时不注销车辆、不丢弃前瞻路点。"""
+        speed_kmh = max(0., round(speed_kmh, 1))
+        if speed_kmh != self.navigation_speed:
+            self.manager.set_desired_speed(self.vehicle, speed_kmh)
+            self.navigation_speed = speed_kmh
+
+    def navigation_preview(self):
+        """读取本车 TM 的真实动作路点；它们不是完整的内部轨迹。"""
+        if not self.enabled:
+            return []
+        actions = self.manager.get_all_actions(self.vehicle)
+        points = [waypoint.transform.location for _, waypoint in actions if waypoint is not None]
+        # 直道常只有缓冲起点；LaneFollow 的 next_action 指向缓冲末端。
+        action, waypoint = self.manager.get_next_action(self.vehicle)
+        if waypoint is not None and action == 'LaneFollow':
+            location = waypoint.transform.location
+            if not points or points[-1].distance(location) > .1:
+                points.append(location)
+        return points
 
     @property
     def traffic_manager_port(self):
