@@ -159,9 +159,9 @@ Town04 实测匹配 43/43 个 CARLA 红绿灯、12 个 SUMO 控制器，手动�
 
 已运行的 SUMO 管理进程不会热加载 Python 改动。应用到当前联仿时，先正常退出 NPC、CoBridge，再退出 SUMO；保留 CARLA 和 Lincoln。随后依次在独立终端重新运行原来的 `run_sumo`、`run_cobridge`、`add_npc -n 200`。SUMO 会话会重建，NPC 从新批次重新生成；Lincoln 保留在 CARLA 中，待桥恢复后重新登记并投影到 SUMO。无需重新启动 CARLA 或更改地图。
 
-## SUMO GUI：低延迟、双坐标复制与仿真倍率
+## SUMO GUI：低延迟、双坐标复制、仿真倍率与 Lincoln 跟踪
 
-三个功能同时集成到同一个项目 SUMO GUI，仍只执行 `run_sumo`，不需要单独启动面板或功能脚本。
+四个功能同时集成到同一个项目 SUMO GUI，仍只执行 `run_sumo`，不需要单独启动面板或功能脚本。
 
 ```text
 foundation/sumo/init/
@@ -171,10 +171,11 @@ foundation/sumo/init/
     ├── build_sumo_gui.py         # 统一构建、缓存、编译与链接
     ├── low_latency_sumo_gui.py   # 缩短 GUI 额外重绘等待
     ├── coordinate_sumo_gui.py    # 双坐标状态栏和两种坐标复制
-    └── simu_speed_sumo_gui.py    # 仿真时间相对真实时间的倍率
+    ├── simu_speed_sumo_gui.py    # 仿真时间相对真实时间的倍率
+    └── lincoln_track_sumo_gui.py # 按车辆增删动态生成 Lincoln 跟踪按钮
 ```
 
-调用链：`run_sumo` → `sumo_init.sh` → `sumo_init.py` → `gui/build_sumo_gui.py` 的 `ensure_sumo_gui()` → `.runtime/sumo/gui/sumo-gui`。三个功能文件仅通过 `source_patches()` 提供源码修改，不编译、不启动进程，也不推进时钟；构建器合并同一 C++ 文件的全部修改后只编译一次，避免覆盖。例如双坐标和倍率对 `GUIApplicationWindow.cpp` 的修改会一起生效。旧的 `init/build_low_latency_sumo_gui.py` 已移除，不保留旧入口或另一套构建流程。
+调用链：`run_sumo` → `sumo_init.sh` → `sumo_init.py` → `gui/build_sumo_gui.py` 的 `ensure_sumo_gui()` → `.runtime/sumo/gui/sumo-gui`。各功能文件仅通过 `source_patches()` 提供源码修改，不编译、不启动进程，也不推进时钟；构建器合并同一 C++ 文件的全部修改后只编译一次，避免覆盖。例如双坐标和倍率对 `GUIApplicationWindow.cpp` 的修改会一起生效。旧的 `init/build_low_latency_sumo_gui.py` 已移除，不保留旧入口或另一套构建流程。
 
 ### 界面功能
 
@@ -182,6 +183,9 @@ foundation/sumo/init/
 - **双坐标**：鼠标位于地图时，底部原 XY 位置显示 `SUMO x:… y:… | CARLA x:… y:…`。偏移实时取自当前加载路网的 `netOffset`，转换为 `CARLA x = SUMO x − offset_x`、`CARLA y = offset_y − SUMO y`；不修改路网坐标或翻转视图。
 - **右键复制**：地图右键菜单提供 `Copy SUMO coordinates` 和 `Copy CARLA coordinates`，复制六位小数的 `x, y`。使用右键打开菜单时保存的地图位置，鼠标之后移到菜单上不会改变复制坐标；原有地理坐标菜单保留。
 - **仿真倍率**：底部固定显示 `Sim/real: 0.85x` 等数值，表示仿真秒数÷真实秒数；使用单调时钟统计最近约 2 秒，每约 0.5 秒更新。样本不足时显示 `--`，约 1.2 秒无新步骤后显示 `0.00x`；重新加载、开始和停止时重置统计。倍率是 GUI 观测到的平均值，不是某一模块的独立 CPU 耗时。
+- **Lincoln 跟踪**：按钮与底部 SUMO/CARLA 双坐标显示位于同一状态栏，为每辆已同步到 SUMO 的 Lincoln 显示一个按钮（如 `lincoln0`、`lincoln1`），不再占用顶部独立工具栏。点击后，该车立即位于当前活动视图中央，并随车辆持续移动；保留当前缩放比例。正在跟踪的按钮保持按下状态，文字切换为 `Stop tracking`，再次点击即可取消并恢复车辆名称；悬停提示仍显示对应车辆名称。点击另一辆车直接切换跟踪目标，前一按钮恢复。车辆删除后，对应按钮在约 0.5 秒内移除；没有车辆时不显示车辆按钮。识别依据为现有代理的 `autodrive.lincoln.owner=lincoln:…` 归属参数，NPC 即使使用 Lincoln 车型也不会产生按钮。多个 SUMO 视图中，按钮只操作当前活动视图，并定时同步该视图的原生跟踪状态。
+
+跟踪功能只在 GUI 内每半秒检查车辆列表，增删按钮时更新布局；持续跟踪使用 SUMO 原有机制，不创建额外 TraCI 连接、不查询 CARLA，也不改变 CoBridge 的时钟。功能代码集中在 `foundation/sumo/init/gui/lincoln_track_sumo_gui.py`，由现有构建入口加载，无须单独运行。已运行的 GUI 需要正常重启 SUMO 才能加载。
 
 ### 构建环境和缓存
 
@@ -196,11 +200,11 @@ run_sumo
 
 只在项目内复制并编译 5 个源文件：`GUIRunThread.cpp`、`GUIApplicationWindow.cpp`、`GUISUMOAbstractView.cpp`、`GUIGlObject.cpp`、`GUIGLObjectPopupMenu.cpp`。分别使用对应 CMake 目标的 `flags.make`，在 GUI、窗口和图元三个静态库的副本中替换对象，再复用原 `CMakeFiles/sumo-gui.dir/link.txt` 链接项目程序。系统 SUMO 的源码、静态库和 `bin/sumo-gui` 不改写。
 
-构建器和全部三个功能文件的内容、实际修改文本、原源码、编译/链接参数、依赖库/对象信息都参加缓存校验，任一功能变化都会触发重新构建。每个修改锚点必须唯一，缺失或版本不匹配时明确报错，不静默忽略功能或退回系统 GUI。构建锁避免并发写入，编译与链接完成后原子替换项目程序，随后更新签名；编译或链接失败保留原程序和签名。只有发行版可执行文件、没有源码或 CMake 产物时不能进行这种构建。无变化时直接复用缓存。
+构建器和全部四个功能文件的内容、实际修改文本、原源码、编译/链接参数、依赖库/对象信息都参加缓存校验，任一功能变化都会触发重新构建。每个修改锚点必须唯一，缺失或版本不匹配时明确报错，不静默忽略功能或退回系统 GUI。构建锁避免并发写入，编译与链接完成后原子替换项目程序，随后更新签名；编译或链接失败保留原程序和签名。只有发行版可执行文件、没有源码或 CMake 产物时不能进行这种构建。无变化时直接复用缓存。
 
 ```text
 .runtime/sumo/gui/
-├── sumo-gui          # 同时包含三个功能的项目可执行文件
+├── sumo-gui          # 同时包含四个功能的项目可执行文件
 ├── build/            # 5 个修改后源码副本、对象、3 个库副本
 ├── build.log         # 编译、链接及错误输出
 ├── build.lock
@@ -222,6 +226,10 @@ run_sumo --headless
 已运行的旧 SUMO GUI 不会热加载新的可执行文件。新功能在下次 `run_sumo` 时生效；如果当前有联仿车辆，应先正常退出 NPC、CoBridge 和 SUMO，再启动 SUMO、CoBridge 并重新添加 NPC。首次构建时间不计入随后 SUMO 进程的启动等待。
 
 ### 验证记录
+
+状态栏布局已重新编译并通过独立界面验证：Lincoln 按钮与双坐标同栏，顶部不再占用一行；使用保持按下外观的切换按钮。连续点击同一按钮，查询到原生跟踪目标由 `lincoln0` 变为空；点击另一按钮后目标切为 `lincoln1`，原按钮恢复名称。
+
+Lincoln 跟踪已与原有功能一起编译通过，并在独立嵌套 X11 窗口中验证：两辆带归属标记的 Lincoln 分别生成按钮，普通 NPC 不生成；点击后通过 TraCI 查询确认原生跟踪目标正确，车辆移动时视图中心随之移动，切换和取消正常。删除正在跟踪的车辆后，原生跟踪解除、对应按钮消失；删除后同名重建也可重新跟踪。6 项构建检查再次通过，覆盖新增功能合并与缓存签名。测试未重启现有联仿会话。
 
 三个功能已一起编译进同一个程序，并在独立隐藏的嵌套 X11 测试界面中检查，不移动用户鼠标或读取、改写用户剪贴板。状态栏双坐标和右键两个复制项同时可见；同一右键位置分别复制出 `452.460000, 487.814929` 与 `-50.560000, -64.054929`，与本次 Town04 的实际路网偏移量一致。按不同真实间隔驱动私有 TraCI，界面分别显示 `0.50x`、`1.00x`、`2.00x`，暂停后显示 `0.00x`。6 项临时构建检查覆盖功能合并、原源码锚点、真实缓存命中、功能文件参与签名、构建失败保留旧程序以及未知版本拒绝替换。
 

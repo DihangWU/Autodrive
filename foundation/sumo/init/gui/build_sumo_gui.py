@@ -1,6 +1,6 @@
-"""统一构建带低延迟、双坐标复制和仿真倍率显示的项目 SUMO GUI。
+"""统一构建带低延迟、双坐标复制、仿真倍率和 Lincoln 跟踪的项目 SUMO GUI。
 
-三个功能模块仅提供源码修改。本文件合并同一源文件的修改、编译副本，
+各功能模块仅提供源码修改。本文件合并同一源文件的修改、编译副本，
 复用本机已有 SUMO 静态库完成链接，并维护 .runtime/sumo/gui/ 缓存。
 系统源码、静态库和可执行文件保持不动；无窗口模式不调用本构建入口。
 """
@@ -31,9 +31,9 @@ SOURCE_TARGETS = {
 }
 
 sys.path.insert(0, str(PROJECT_DIR))
-from foundation.sumo.init.gui import low_latency_sumo_gui, coordinate_sumo_gui, simu_speed_sumo_gui
+from foundation.sumo.init.gui import low_latency_sumo_gui, coordinate_sumo_gui, simu_speed_sumo_gui, lincoln_track_sumo_gui
 
-FEATURE_MODULES = (low_latency_sumo_gui, coordinate_sumo_gui, simu_speed_sumo_gui)
+FEATURE_MODULES = (low_latency_sumo_gui, coordinate_sumo_gui, simu_speed_sumo_gui, lincoln_track_sumo_gui)
 BUILD_MODULE_FILES = (MODULE_FILE, *(Path(module.__file__).resolve() for module in FEATURE_MODULES))
 
 
@@ -81,7 +81,7 @@ def read_sumo_link_command(link_file, sources):
 
 
 def calculate_build_signature(build_src, link_file, sources, link_command):
-    """四个 Python 文件、原源码、修改内容、参数和链接依赖都参加缓存校验。"""
+    """构建器与所有功能 Python 文件、原源码、修改内容、参数和链接依赖都参加缓存校验。"""
     digest = hashlib.sha256(str(build_src).encode())
     for module in BUILD_MODULE_FILES:
         digest.update(module.read_bytes())
@@ -170,7 +170,7 @@ def ensure_sumo_gui():
             return GUI_BINARY
         patched_sources = [patch_source_text(item) for item in sources]
         WORK_DIR.mkdir(exist_ok=True)
-        print('[SUMO] 正在构建 GUI：低延迟、双坐标与复制、仿真倍率…', flush=True)
+        print('[SUMO] 正在构建 GUI：低延迟、双坐标与复制、仿真倍率、Lincoln 跟踪…', flush=True)
         with BUILD_LOG_FILE.open('a') as log:
             objects = [compile_source_copy(build_src, item, text, command[0], log)
                        for item, text in zip(sources, patched_sources)]
