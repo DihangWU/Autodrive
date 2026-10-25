@@ -63,7 +63,17 @@ private:
             buttons.emplace(vehicle.first, button);
             changed = true;
         }
-        if (changed) { recalc(); getParent()->recalc(); }
+        if (changed) {
+            // 同数量的新旧按钮替换时，父容器尺寸可能不变。
+            // 不能只等待下次窗口缩放触发布局，否则新控件可能暂时留白。
+            if (buttons.empty()) hide(); else show();
+            recalc();
+            getParent()->recalc();
+            getParent()->layout();
+            layout();
+            update();
+            getParent()->update();
+        }
         updateTrackingState(fleet);
     }
 
@@ -84,6 +94,7 @@ public:
     explicit LincolnTrackBar(FXComposite* parent, GUIApplicationWindow* application) :
         FXHorizontalFrame(parent, LAYOUT_RIGHT | LAYOUT_CENTER_Y, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0),
         window(application) {
+        hide();  // 没有车辆时不保留空白占位。
         getApp()->addTimeout(this, ID_REFRESH, 500);
     }
     ~LincolnTrackBar() override { getApp()->removeTimeout(this, ID_REFRESH); }
