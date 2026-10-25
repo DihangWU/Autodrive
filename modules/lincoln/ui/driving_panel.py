@@ -14,6 +14,8 @@ def navigation_control_display(status, automatic):
     if state == 'arrived':
         return '导航完成：停车保持', '#166534'
     if state == 'planning':
+        if status.get('display_preparing'):
+            return '导航控制：准备地图与 RViz，停车等待', '#946200'
         return '导航控制：规划中，停车等待', '#946200'
     mode = status.get('controller')
     if state == 'navigating':

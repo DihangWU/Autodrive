@@ -279,7 +279,9 @@ class LincolnNavigation:
                     local = JunctionLocalController(self.node, route, self.road_map, lengths)
                     if not local.windows:
                         local = None
-                outcome = (path_with_lookahead(route), goal, route, '', local)
+                locations = path_with_lookahead(route)
+                self.prepare_navigation_display(identity, route)
+                outcome = (locations, goal, route, '', local)
             except PlanningCancelled:
                 continue
             except Exception as error:
@@ -287,6 +289,22 @@ class LincolnNavigation:
             with self.lock:
                 if self.status.get('id') == identity and self.status['state'] == 'planning':
                     self.result = (identity, outcome)
+
+    def prepare_navigation_display(self, identity, waypoints):
+        """规划阶段准备可视化；成功后才把路线交给驾驶线程启用自动驾驶。"""
+        view = getattr(self.node, 'navigation_view', None)
+        if view is None:
+            return
+        with self.lock:
+            if not self.is_current(identity):
+                raise PlanningCancelled()
+            self.status.update(display_preparing=True, detail='Preparing map and RViz; holding brakes')
+        try:
+            ready = view.prepare_navigation(waypoints, self.road_map, lambda: not self.is_current(identity))
+        except Exception as error:
+            raise RuntimeError('Navigation display: ' + str(error)) from error
+        if not ready:
+            raise PlanningCancelled()
 
     def cancel(self, detail='Navigation cancelled by manual control'):
         with self.lock:
@@ -323,7 +341,8 @@ class LincolnNavigation:
                 self.cancel()
                 return
             if error:
-                self.status.update(state='unreachable', detail=error)
+                self.status.update(state='error' if error.startswith('Navigation display:') else 'unreachable',
+                                   detail=error, display_preparing=False)
                 return
             try:
                 if local is None or not local.should_take_over(0., 0.):
@@ -337,18 +356,13 @@ class LincolnNavigation:
                 self.local_controller = local
                 self.prepare_tm_turns()
                 self.hold_brake = False
-                self.status.update(state='navigating', detail='Navigating to destination', controller='tm')
+                self.status.update(state='navigating', detail='Navigating to destination', controller='tm',
+                                   display_preparing=False)
             except Exception as error:
                 self.node.driver.disable()
                 self.node.autopilot = False
                 self.status.update(state='error', detail=str(error))
                 return
-            view = getattr(self.node, 'navigation_view', None)
-            if view is not None:
-                try:
-                    view.show_route(display_waypoints, self.road_map)
-                except Exception:
-                    logging.exception('导航可视化提交失败；车辆导航继续运行')
 
     def prepare_route_tracking(self, waypoints):
         """累计路线里程；只沿车辆附近的路线段推进，避免跳到交叉处的终点。"""

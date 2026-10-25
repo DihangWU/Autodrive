@@ -8,6 +8,7 @@ import queue
 import signal
 import subprocess
 import threading
+import time
 
 from rclpy.qos import QoSProfile, DurabilityPolicy
 from visualization_msgs.msg import MarkerArray
@@ -19,6 +20,9 @@ from modules.lincoln.visualization.road_map import road_markers
 
 RVIZ_EXIT_TIMEOUT = 3.0
 WORKER_JOIN_TIMEOUT = 5.0
+PREPARATION_TIMEOUT = 30.0
+READINESS_POLL_INTERVAL = 0.05
+SUBSCRIBER_SETTLE_SECONDS = 0.5
 CONFIG_NAME = 'lincoln_nav.rviz'
 LOG_NAME = 'lincoln_nav_rviz.log'
 
@@ -36,6 +40,9 @@ class NavigationRviz:
         self.worker = None
         self.process = None
         self.generation = 0
+        self.prepared_generation = 0
+        self.preparation_error = None
+        self.window_ready = False
         self.roads_ready = bool(node.roads.markers)
 
     def has_vehicle_subscribers(self):
@@ -53,6 +60,7 @@ class NavigationRviz:
                 return
             self.generation += 1
             generation = self.generation
+            self.preparation_error = None
             try:
                 self.tasks.get_nowait()
             except queue.Empty:
@@ -61,6 +69,44 @@ class NavigationRviz:
             if self.worker is None:
                 self.worker = threading.Thread(target=self.prepare_views, name='lincoln-navigation-rviz', daemon=True)
                 self.worker.start()
+            return generation
+
+    def prepare_navigation(self, waypoints, road_map, cancelled):
+        """仅规划线程等待首次地图、路线和 RViz 订阅就绪，驾驶线程持续制动。"""
+        generation = self.show_route(waypoints, road_map)
+        deadline = time.monotonic() + PREPARATION_TIMEOUT
+        connected_since = None
+        while time.monotonic() < deadline and not self.stopped.is_set() and not cancelled():
+            with self.lock:
+                if generation != self.generation:
+                    return False
+                error = self.preparation_error
+                prepared = self.prepared_generation == generation
+                process, ready = self.process, self.window_ready
+            if error is not None and error[0] == generation:
+                raise RuntimeError(error[1])
+            if prepared and process is not None:
+                if process.poll() is not None:
+                    raise RuntimeError("RViz exited during startup; check lincoln_nav_rviz.log.")
+                if ready:
+                    return True
+                # 订阅出现后留出短暂稳定时间；没有从驾驶线程等待窗口的循环。
+                connected = (self.has_vehicle_subscribers()
+                             and self.route_pub.get_subscription_count() > 0
+                             and self.node.map_pub.get_subscription_count() > 0)
+                if connected:
+                    if connected_since is None:
+                        connected_since = time.monotonic()
+                    if time.monotonic() - connected_since >= SUBSCRIBER_SETTLE_SECONDS:
+                        with self.lock:
+                            self.window_ready = True
+                        return True
+                else:
+                    connected_since = None
+            self.stopped.wait(READINESS_POLL_INTERVAL)
+        if self.stopped.is_set() or cancelled():
+            return False
+        raise RuntimeError("RViz preparation timed out; check lincoln_nav_rviz.log.")
 
     def clear_route(self):
         with self.lock:
@@ -95,11 +141,15 @@ class NavigationRviz:
                         continue
                     self.route_pub.publish(markers)
                     if self.process is None or self.process.poll() is not None:
+                        self.window_ready = False
                         self.process = launch_rviz_template(self.node, NAV_RVIZ_TEMPLATE_FILE,
                                                             CONFIG_NAME, LOG_NAME,
                                                             ros_node_name=self.node.uid + '_navigation_rviz')
+                    self.prepared_generation = generation
             except Exception:
-                logging.exception('导航 RViz 准备失败；车辆导航继续运行，详情见 Lincoln 日志')
+                with self.lock:
+                    self.preparation_error = (generation, 'Map or RViz preparation failed; check Lincoln logs.')
+                logging.exception('导航 RViz 准备失败；车辆保持停车，详情见 Lincoln 日志')
 
     def close(self):
         self.stopped.set()

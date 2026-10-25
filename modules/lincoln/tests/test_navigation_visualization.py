@@ -107,6 +107,7 @@ class ViewLifecycleTests(unittest.TestCase):
         self.node=SimpleNamespace(uid='lincoln_1234567890',roads=MarkerArray(markers=[Marker()]),
                                   create_publisher=publisher,map_pub=Mock(),model=Marker(),
                                   wheel_markers=[Marker() for _ in range(4)],mounts=[Marker() for _ in range(31)])
+        self.node.map_pub.get_subscription_count.return_value=1
         self.view=NavigationRviz(self.node)
 
     def tearDown(self):
@@ -116,6 +117,49 @@ class ViewLifecycleTests(unittest.TestCase):
         deadline=time.monotonic()+2
         while not condition() and time.monotonic()<deadline:time.sleep(.01)
         self.assertTrue(condition())
+
+    def test_first_start_waits_for_map_generation_and_rviz_subscribers(self):
+        entered,release,finished=threading.Event(),threading.Event(),threading.Event()
+        self.node.roads=MarkerArray()
+        self.view.roads_ready=False
+        self.view.vehicle_pub.get_subscription_count.return_value=0
+        process=Mock();process.poll.return_value=None
+        result=[]
+        def generate(*args):entered.set();release.wait(2);return MarkerArray(markers=[Marker()])
+        def prepare():
+            result.append(self.view.prepare_navigation([waypoint(0),waypoint(20)],None,lambda:False))
+            finished.set()
+        with patch('modules.lincoln.visualization.navigation_rviz.road_markers',side_effect=generate), \
+                patch('modules.lincoln.visualization.navigation_rviz.launch_rviz_template',return_value=process), \
+                patch('modules.lincoln.visualization.navigation_rviz.SUBSCRIBER_SETTLE_SECONDS',0.):
+            thread=threading.Thread(target=prepare);thread.start()
+            try:
+                self.assertTrue(entered.wait(1))
+                self.assertFalse(finished.is_set())
+                release.set()
+                self.wait_until(lambda:self.view.prepared_generation>0)
+                self.assertFalse(finished.is_set())
+                self.view.vehicle_pub.get_subscription_count.return_value=1
+                self.assertTrue(finished.wait(1))
+                self.assertEqual(result,[True])
+                # 已有窗口复用，不重新经历首次订阅等待。
+                self.view.vehicle_pub.get_subscription_count.return_value=0
+                self.assertTrue(self.view.prepare_navigation([waypoint(0),waypoint(30)],None,lambda:False))
+            finally:
+                release.set();self.view.stopped.set();thread.join(2)
+
+    def test_rviz_failure_and_timeout_do_not_report_ready(self):
+        process=Mock();process.poll.return_value=1
+        with patch('modules.lincoln.visualization.navigation_rviz.launch_rviz_template',return_value=process):
+            with self.assertRaisesRegex(RuntimeError,'exited'):
+                self.view.prepare_navigation([waypoint(0),waypoint(20)],None,lambda:False)
+        process.poll.return_value=None
+        self.view.vehicle_pub.get_subscription_count.return_value=0
+        with patch('modules.lincoln.visualization.navigation_rviz.launch_rviz_template',return_value=process), \
+                patch('modules.lincoln.visualization.navigation_rviz.PREPARATION_TIMEOUT',.1):
+            with self.assertRaisesRegex(RuntimeError,'timed out'):
+                self.view.prepare_navigation([waypoint(0),waypoint(20)],None,lambda:False)
+        self.assertFalse(self.view.prepare_navigation([waypoint(0),waypoint(20)],None,lambda:True))
 
     def test_reuses_body_and_wheels_without_mounts(self):
         self.view.publish_vehicle()

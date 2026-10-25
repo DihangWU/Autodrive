@@ -205,6 +205,48 @@ class RouteTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'exit guide'):
             path_with_lookahead([goal])
 
+    def test_navigation_cannot_start_until_display_preparation_completes(self):
+        entered,release=threading.Event(),threading.Event()
+        node=SimpleNamespace(driver=Mock(supports_junction_local_control=False),autopilot=False,
+                             active=None,car=Mock(),navigation_view=Mock())
+        navigation=LincolnNavigation(node);navigation.road_map=self.road_map
+        def prepare(*args):entered.set();release.wait(2);return True
+        node.navigation_view.prepare_navigation.side_effect=prepare
+        with patch('modules.lincoln.driving.navigation.plan_route',return_value=(self.points,self.points[-1])):
+            try:
+                navigation.submit(dict(id='ready',target=dict(x=40,y=0,z=0)))
+                self.assertTrue(entered.wait(1))
+                navigation.update(None)
+                self.assertTrue(navigation.hold_brake)
+                self.assertFalse(node.autopilot)
+                self.assertTrue(navigation.snapshot()['display_preparing'])
+                node.driver.set_route.assert_not_called()
+                release.set()
+                deadline=time.monotonic()+1
+                while navigation.result is None and time.monotonic()<deadline:time.sleep(.01)
+                navigation.consume_plan()
+                self.assertTrue(node.autopilot)
+                self.assertFalse(navigation.hold_brake)
+                node.driver.set_route.assert_called_once()
+            finally:release.set();navigation.close()
+
+    def test_display_failure_holds_brakes_without_starting_tm(self):
+        node=SimpleNamespace(driver=Mock(supports_junction_local_control=False),autopilot=False,
+                             active=None,car=Mock(),navigation_view=Mock())
+        node.navigation_view.prepare_navigation.side_effect=RuntimeError('RViz failed')
+        navigation=LincolnNavigation(node);navigation.road_map=self.road_map
+        with patch('modules.lincoln.driving.navigation.plan_route',return_value=(self.points,self.points[-1])):
+            try:
+                navigation.submit(dict(id='failed-view',target=dict(x=40,y=0,z=0)))
+                deadline=time.monotonic()+1
+                while navigation.result is None and time.monotonic()<deadline:time.sleep(.01)
+                navigation.update(None)
+                self.assertTrue(navigation.hold_brake)
+                self.assertFalse(node.autopilot)
+                self.assertEqual(navigation.snapshot()['state'],'error')
+                node.driver.set_route.assert_not_called()
+            finally:navigation.close()
+
     def test_late_plan_after_cancel_never_takes_control(self):
         node = SimpleNamespace(driver=Mock(), autopilot=False)
         navigation = LincolnNavigation(node)
