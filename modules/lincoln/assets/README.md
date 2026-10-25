@@ -12,3 +12,7 @@
 本项目独立实现驾驶、ROS 发布和 RViz 配置，不依赖 Demo 的地图、ROS 包或构建产物。
 
 本次从本工程 Git `f511f80` 迁入 `modules/lincoln/assets/`，模型文件保持原样；不需要连接或安装 CarlaDemo。
+
+RViz 车轮动画使用 `visualization/wheel_meshes.py` 从此原模型生成车身和四轮独立资源，
+缓存到工程 `.runtime/lincoln/wheel_meshes/`。本目录原 DAE 不改写；派生资源沿用原材质，
+由 CARLA 实际骨骼姿态驱动滚动、转向和悬挂位移。

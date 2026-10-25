@@ -9,6 +9,7 @@ GEOMETRY_CONFIG_FILE = CONFIG_DIR / 'vehicle_geometry.json'
 RVIZ_TEMPLATE_FILE = CONFIG_DIR / 'lincoln.rviz'
 VEHICLE_MESH_FILE = MODULE_DIR / 'assets' / 'lincoln.dae'
 RUNTIME_DIR = PROJECT_DIR / '.runtime' / 'lincoln'
+WHEEL_MESH_CACHE_DIR = RUNTIME_DIR / 'wheel_meshes'
 CAMERA_RUNTIME_DIR = RUNTIME_DIR / 'camera'
 PROC_DIR = Path('/proc')
 RVIZ_BINARY = 'rviz2'

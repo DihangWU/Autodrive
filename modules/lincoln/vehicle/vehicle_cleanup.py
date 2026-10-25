@@ -54,6 +54,8 @@ class VehicleCleanupMixin:
             entry['actor'] = None
         self.sensors.clear()
         self.sensor_display_frames.clear()
+        if hasattr(self, 'wheel_pose_frames'):
+            self.wheel_pose_frames.clear()
         self.latest_images.clear()
         self.driver = None
         self.car = self.spectator = self.world = None
