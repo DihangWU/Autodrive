@@ -31,6 +31,7 @@ from foundation.cobridge.adapters.carla import CarlaAdapter
 from foundation.cobridge.adapters.sumo import SumoAdapter
 from foundation.cobridge.control import ControlServer, SOCKET_FILE
 from foundation.cobridge.lincoln.vehicle_registry import LincolnVehicleRegistry
+from foundation.cobridge.npcvehicules.npcvehicules import NpcVehicleRegistry
 from foundation.cobridge.traffic_lights.sumo_traffic_lights import SumoTrafficLights
 from foundation.sumo.client import SOCKET_FILE as SUMO_SOCKET_FILE
 
@@ -48,6 +49,7 @@ class BridgeRuntime:
         self.frames = 0
         self.modules = ModuleRegistry(CONSOLE.info)
         self.lincoln = LincolnVehicleRegistry()
+        self.npc = NpcVehicleRegistry()
         self.traffic_lights = SumoTrafficLights(CONSOLE.info)
 
     def report(self, name, error):
@@ -96,6 +98,7 @@ class BridgeRuntime:
         self.next_discovery = 0
 
     def step(self):
+        self.npc.synchronize(self.carla, self.sumo)
         self.traffic_lights.synchronize(self.carla, self.sumo)
         self.lincoln.prepare_traffic_managers(self.carla)
         for name in ('CARLA', 'SUMO'):
@@ -117,9 +120,12 @@ class BridgeRuntime:
             return dict(carla_connected=self.carla is not None, sumo_connected=self.sumo is not None,
                         frame=self.frames, time=self.frames * self.args.step_length,
                         modules=self.modules.snapshot(), lincolns=self.lincoln.snapshot(),
+                        npc_batches=self.npc.snapshot(),
                         traffic_lights=dict(self.traffic_lights.details))
         if command['action'].startswith('lincoln.'):
             return self.lincoln.handle_request(command, owner)
+        if command['action'].startswith('npc.'):
+            return self.npc.handle_request(command, owner, self.carla, self.sumo)
         if command['action'] == 'module.status':
             return self.modules.update(command, owner)
         raise ValueError(f"未知时钟控制请求：{command['action']}")
@@ -127,9 +133,14 @@ class BridgeRuntime:
     def disconnected(self, owner):
         self.modules.disconnected(owner)
         self.lincoln.disconnected(owner)
+        self.npc.disconnected(owner)
 
     def close(self):
         errors = []
+        try:
+            self.npc.close(self.carla, self.sumo)
+        except Exception as error:
+            errors.append(f'清理 NPC：{error}')
         try:
             self.traffic_lights.close()
         except Exception as error:

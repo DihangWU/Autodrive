@@ -1,6 +1,6 @@
 # Autodrive
 
-CARLA、SUMO 和 CoBridge 分别运行。CARLA 负责三维场景、物理和传感器；SUMO 负责路网与交通仿真；CoBridge 负责时间推进、已登记 Lincoln 的 CARLA → SUMO 同步，以及 SUMO → CARLA 红绿灯同步。RSU 保留现有独立进程，生命周期由它自己管理。详细基础架构见 [architecture.md](architecture.md)。
+CARLA、SUMO 和 CoBridge 分别运行。CARLA 负责三维场景、物理和传感器；SUMO 负责路网与交通仿真；CoBridge 负责时间推进、已登记 Lincoln 的 CARLA → SUMO 同步，以及 SUMO → CARLA 的 NPC 与红绿灯同步。RSU 保留现有独立进程，生命周期由它自己管理。详细基础架构见 [architecture.md](architecture.md)。
 
 ## 启动
 
@@ -30,9 +30,68 @@ run_rsu
 
 # 按需添加一辆 Lincoln；再次执行会创建另一辆
 add_lincoln
+
+# 按需添加一批 SUMO 随机车流，并同步到 CARLA
+add_npc -n 20
 ```
 
-`run_cobridge`、`run_sumo`、`run_rsu`、`add_lincoln` 保持前台运行，在各自终端按 Ctrl+C 退出。Lincoln 不会自动启动、关闭或切换 CARLA、SUMO、CoBridge，也不调用 `world.tick()`。SUMO 与 CoBridge 默认步长为 0.05 秒。
+`run_cobridge`、`run_sumo`、`run_rsu`、`add_lincoln`、`add_npc` 保持前台运行，在各自终端按 Ctrl+C 退出。Lincoln 不会自动启动、关闭或切换 CARLA、SUMO、CoBridge，也不调用 `world.tick()`。SUMO 与 CoBridge 默认步长为 0.05 秒。
+
+## SUMO 随机 NPC 车流
+
+先启动当前地图对应的 CARLA、SUMO 和 CoBridge，再在独立终端执行：
+
+```bash
+source /home/maple/Desktop/Autodrive/setup.bash
+add_npc                         # 默认申请 10 辆
+add_npc -n 200 --seed 21         # 申请一批 200 辆随机车流
+add_npc -n 20 --filter 'vehicle.audi.*'
+add_npc --help
+
+# 不加载 setup.bash 时的等价入口
+bash modules/npcvehicules/npcvehicules.sh -n 20
+
+# 有限时长运行，结束后清理本批车辆
+add_npc -n 10 --duration 30
+```
+
+每次执行创建一个独立批次；Ctrl+C 请求删除本批两端车辆，随后释放批次连接。客户端异常退出时，桥也会检测连接断开并清理。退出 NPC 不关闭 CARLA、SUMO 或 CoBridge，不删除其他批次、Lincoln 或 RSU。正常退出桥时会清理其管理的 NPC；重启后需要重新执行 `add_npc`。桥或仿真器被强制杀死时不能保证立即完成清理。
+
+NPC 业务由 `modules/npcvehicules/traffic/` 实现，在桥主循环中调用，使用当前 SUMO 的通用 TraCI RPC 连接；入口通过现有 CoBridge 控制 socket 发起 `npc.start/status/stop` 请求。无需为 NPC 增加专用 SUMO 管理端、另一个 TraCI 客户端或额外时钟。`--bridge-socket` 可选择另一个已运行的桥；目标 CARLA 和 SUMO 由该桥的启动参数决定，NPC 入口不再单独选择一套地址。
+
+```text
+modules/npcvehicules/
+├── npcvehicules.py          # 参数、批次控制、状态显示与退出
+├── npcvehicules.sh          # 独立启动入口，无 ROS 环境依赖
+└── traffic/
+    ├── vehicle_types.py    # 读取官方车型 XML，按需加入 SUMO
+    ├── spawn_traffic.py    # 分帧创建、路线维护及本批车辆清理
+    └── routes.py           # 按实际路网允许的道路连接生成并续接路线
+
+foundation/cobridge/npcvehicules/
+├── npcvehicules.py          # 批次归属、帧边界调用及清理协调
+├── official_tools.py        # 加载官方 BridgeHelper、车型数据结构及 SUMO 工具
+├── vehicle_sync.py          # SUMO 订阅、CARLA 实体、批量姿态与车灯同步
+└── config.json              # 每帧加入数量、总申请数量上限、车灯同步开关
+```
+
+复用 `foundation/carla/carla-official/Co-Simulation/Sumo/` 中的官方 `examples/carlavtypes.rou.xml`、`BridgeHelper.get_carla_blueprint()`、`get_carla_transform()` 和 `get_carla_lights_state()`。只选择官方 XML 与当前 CARLA 都支持的四轮轿车，车型筛选使用通配符；不修改官方文件，也不直接运行会重新启动 SUMO、导出地图和推进时钟的官方 `spawn_npc_sumo.py`。随机种子控制车型、配色、出生道路和随机路线选择，不保证所有交通互动完全确定。
+
+车辆命名为 `npc_<批次>_<序号>`，与 Lincoln 的登记和 CARLA → SUMO 投影分开。SUMO 决定 NPC 的跟车、换道、速度和信号灯通行；CARLA 代理关闭动力学，由桥提交姿态并保留实体显示，未配置额外传感器或联网功能。它们不是由 CARLA Traffic Manager 驾驶的车辆，也不是通过油门控制在 CARLA 中独立行驶的车辆。
+
+每辆车先生成一段合法随机道路路线，接近终点时继续沿允许的连接延长；续接时保留尚未驶完的路径，路口内不改写路线。道路尽头没有出口时车辆由 SUMO 正常驶离，并删除 CARLA 代理，不自动补车。
+
+### 创建速度、同步顺序与状态
+
+`foundation/cobridge/npcvehicules/config.json` 默认每帧最多向 SUMO 加入 2 辆、所有批次合计最多申请 200 辆，车灯同步开启。上限为当前本地 JSON RPC 回复容量预留空间：每帧集中读取一次全部 NPC 的少量动态订阅变量，避免逐车读取位置；提高上限前需要检查订阅回复大小及运行开销。无 NPC 批次时不额外查询车辆状态。
+
+出生道路先检查是否允许该车型通行、是否有出口，以及道路长度是否至少为车长加 5 米；避免把车辆放进短于车身的 OpenDRIVE 路段后一直等待。SUMO 仍自行判断出生位置是否有空位，因此“申请/已提交”数量可能大于“SUMO 上路/CARLA 实体”数量；等待插入不会在 CARLA 创建空壳。状态还会显示等待插入和已驶离数量。路线、车型定义会保留在当前 SUMO 会话中，退出批次删除车辆实体，不重载 SUMO 地图。
+
+现有桥仍是唯一时钟：在 CARLA 每次 tick 前，将 SUMO 上一已完成步骤的 NPC 姿态同步过去，然后执行原有 CARLA → SUMO 时序。动态姿态和车灯使用 CARLA 批量命令，所有 `apply_batch_sync` 都传入 `False`，不额外 tick。因此存在步骤边界上的一帧差异，不承诺两个 GUI 原子刷新。CARLA 或 SUMO 断开时停止该批继续创建，待可连接时清理；不会把旧 CARLA 世界的 actor ID 写到新世界，也不会自动把本批重新生成到另一地图。
+
+日志位于 `.runtime/npcvehicules/npcvehicules.log` 和 `.runtime/cobridge/bridge.log`，SUMO 底层日志沿用 `.runtime/sumo/`。更新桥代码后需正常退出并重新运行 `run_cobridge`；`add_npc` 不会替你停止已有桥。
+
+本轮 Town04 实测：两辆 NPC 都在 SUMO 和 CARLA 中生成并移动，约 1.2 秒采样区间内各移动约 5 米，非原子查询的位置对照误差最大约 0.22 米；两个批次同时运行时，断开第一批连接只删除第一批，第二批保留，其他连接不能删除不属于它的批次。修正过短出生道路后，200 辆在约 20 秒内全部上路并生成 CARLA 代理，动态订阅 JSON 约 30 KB；退出后两端 NPC 数量均为 0，删除前取消订阅后该批未再刷出旧车辆 ID 查询错误。另验证了创建过程中强制结束 NPC 客户端、有限时长退出，以及带有两辆 NPC 时正常退出桥：本批均清理，CARLA 和 SUMO 保留运行并释放时钟。清理仅取消实际建立过的订阅，删除失败后的重试不会重复取消同一订阅。桥先退出时，NPC 客户端会报告连接断开并退出。此结果验证加入和清理，不代表携带完整传感器时的 200 车性能保证，也未完成长时间拥堵或多地图压力测试。18 项临时 NPC 生命周期/路径专项检查及原有 15 项 Lincoln 回归通过。
 
 ## SUMO 自动控制两端红绿灯
 

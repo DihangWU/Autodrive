@@ -1,0 +1,5 @@
+{
+  "spawn_per_step": 2,
+  "max_vehicles": 200,
+  "sync_vehicle_lights": true
+}

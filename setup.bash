@@ -10,6 +10,7 @@ SUMO_ENTRY="$AUTODRIVE_ROOT/foundation/sumo/init/sumo_init.sh"
 BRIDGE_ENTRY="$AUTODRIVE_ROOT/foundation/cobridge/run_cobridge.sh"
 RSU_ENTRY="$AUTODRIVE_ROOT/modules/rsu/rsu.sh"
 LINCOLN_ENTRY="$AUTODRIVE_ROOT/modules/lincoln/add_lincoln.sh"
+NPC_ENTRY="$AUTODRIVE_ROOT/modules/npcvehicules/npcvehicules.sh"
 CAMERA_ENTRY="$AUTODRIVE_ROOT/foundation/carla/mouse_move/mouse_move.sh"
 
 run_carla() {
@@ -42,4 +43,8 @@ mouse_move_carla() {
 
 add_lincoln() {
     bash "$LINCOLN_ENTRY" "$@"
+}
+
+add_npc() {
+    bash "$NPC_ENTRY" "$@"
 }
