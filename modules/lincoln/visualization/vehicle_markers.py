@@ -32,7 +32,9 @@ class VehicleMarkersMixin:
 
     def capture_wheel_poses(self, snapshot):
         """一次读取四轮骨骼，只有世界仍处于该帧时才登记为同帧数据。"""
-        if self.markers.get_subscription_count() == 0:
+        navigation_view = getattr(self, 'navigation_view', None)
+        if self.markers.get_subscription_count() == 0 and not (
+                navigation_view is not None and navigation_view.has_vehicle_subscribers()):
             return
         try:
             poses = self.car.get_bone_relative_transforms()
@@ -60,6 +62,9 @@ class VehicleMarkersMixin:
         for marker in markers:
             marker.header.stamp = timestamp
         self.markers.publish(MarkerArray(markers=markers))
+        navigation_view = getattr(self, 'navigation_view', None)
+        if navigation_view is not None:
+            navigation_view.publish_vehicle()
 
     def publish_lidar_aligned_vehicle(self, entry, data):
         """显示位姿取自本次点云的采集位姿；真实车辆 TF 仍独立更新。"""

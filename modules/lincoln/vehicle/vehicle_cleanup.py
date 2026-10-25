@@ -28,6 +28,10 @@ class VehicleCleanupMixin:
             self.rviz.kill()
             self.rviz.wait()
 
+    def close_navigation_rviz(self):
+        if self.navigation_view is not None:
+            self.navigation_view.close()
+
     def stop_sensor_streams(self):
         for entry in self.sensors:
             try:
@@ -70,7 +74,8 @@ class VehicleCleanupMixin:
         """某一步清理失败也继续其余步骤，最后统一报告错误。"""
         errors = []
         for cleanup in (self.camera_owner.release, self.stop_vehicle_controller,
-                        self.close_vehicle_rviz, self.stop_sensor_streams, self.destroy_owned_actors):
+                        self.close_navigation_rviz, self.close_vehicle_rviz,
+                        self.stop_sensor_streams, self.destroy_owned_actors):
             try:
                 cleanup()
             except Exception as error:

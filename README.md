@@ -224,6 +224,56 @@ run_sumo
 
 导航验证：29 项 Lincoln 检查通过，其中新增检查覆盖坐标与高度、远离道路／重叠层拒绝、地图及车辆身份隔离、过期状态拒绝、有向路线不可逆行、手动接管及迟到规划取消、到达停车和刹车保持。独立嵌套 X11 中验证了英文菜单、选点请求、Esc 取消和 tracking 目标不变；通过实际桥请求处理器与实际 Lincoln 登记线程完成 GUI→桥→后台规划→驾驶接口→到达状态回传。CARLA Town04 多组只读路线规划约 6～74 ms；另使用临时无传感器 Lincoln、复用当前 CoBridge 时钟完成约 45 米导航，车辆实际前进、减速并到达停车，随后清理该车和登记。全城任意交通条件下的长距离通行仍取决于地图连接、信号灯和 TM 行驶行为。
 
+### 导航专用 RViz：不依赖传感器
+
+有效路线规划成功后，每辆 Lincoln 自动打开一个独立的导航 RViz 窗口。普通 `add_lincoln`、`--no-sensors`、`--no-rviz` 均适用：这些选项继续决定原有传感器与普通 RViz 的启动，不禁止导航窗口。导航窗口不会创建任何传感器，也不需要单独执行命令；已打开普通 RViz 时，两个窗口可同时存在。
+
+导航模板为 `modules/lincoln/config/lincoln_nav.rviz`，只包含三个显示项：
+
+| 显示项 | 内容与话题 |
+|---|---|
+| Lincoln body and rotating wheels | `/<uid>/navigation/vehicle`，复用原车身和四轮 mesh、材质、比例、真实骨骼姿态与显示时间，不包含传感器安装点 |
+| CARLA lane markings | `/<uid>/roads`，复用已有全图车道标线，不显示实心路面 |
+| Navigation lane and arrows | `/<uid>/navigation/route`，半透明绿色车道宽引导带与带内白色方向箭头 |
+
+引导带按沿途实际 `lane_width` 展开，不使用固定默认宽度；同道路沿 OpenDRIVE 原始曲线细分，跨道路及换道段采用连续切线插值。保留道路的高度和横坡，不压平立交；引导带抬高 0.012 米，箭头比带面再抬高 0.007 米，均低于现有抬高约 0.03 米的车道线，减少相互遮挡与闪烁。绿色透明度默认 **0.35**，每面颜色不再重复乘透明度；箭头在带内约每 12 米排列，末端留出箭头长度，避免越出引导带。只显示从当前车辆到目的地的实际规划路线，**不显示 TM 使用的目标后方前瞻缓冲**。
+
+车模及跟随视角沿用现有 `lincoln.rviz` 配置与显示帧。没有 LiDAR 时跟随真实车辆帧，有 LiDAR 时沿用现有的 LiDAR 对齐显示帧；不改变任何传感器频率。导航车模单独使用话题，以排除原有安装点小球，但直接复用同一份车身和四轮 Marker。只有导航窗口订阅时，也会启用现有四轮骨骼读取，因此 `--no-sensors` 下车轮仍正常转动，不依赖普通 RViz 的订阅。
+
+生命周期与开销：
+
+- 每车最多一个导航窗口；新目的地更新引导带，复用已有进程。手动关闭窗口后，下次成功规划新路线会重新打开。
+- 新目标开始规划时清除旧带；取消导航后清空路线、保留窗口和车模；到达后保留路线供查看；车辆退出时关闭导航窗口。
+- 模型、TF、车道与原有显示共用数据，不复制车辆可视化实现。无普通 RViz 时，第一次导航才在后台生成全图车道标线，并随后缓存复用。
+- 路线网格生成和窗口启动在独立可视化工作线程处理，驾驶线程只提交任务。取消或更新目的地时带有版本校验，旧网格不会覆盖新任务；不新增仿真时钟，不修改 CoBridge/SUMO。
+
+代码分工：
+
+```text
+modules/lincoln/config/lincoln_nav.rviz
+    导航专用模板，保留原有车模跟随视角，移除全部传感器显示
+modules/lincoln/visualization/navigation_rviz.py
+    独立窗口、后台地图与路线准备、车模发布和退出清理
+modules/lincoln/visualization/navigation_route.py
+    车道宽绿色带、曲线/高度/横坡、带内箭头与路线清空消息
+modules/lincoln/visualization/rviz_launcher.py
+    普通与导航窗口共用的命名空间替换、配置生成和进程启动
+```
+
+可调外观参数集中在 `navigation_route.py` 文件头：`RIBBON_COLOR`、`RIBBON_HEIGHT`、`ARROW_HEIGHT`、`ARROW_INTERVAL`、`SAMPLE_DISTANCE`。运行产物分别保存，不覆盖原有传感器 RViz 配置：
+
+```text
+.runtime/lincoln/<车辆 uid>/
+├── lincoln.rviz             # 原有普通 RViz 配置
+├── rviz.log                 # 原有普通 RViz 日志
+├── lincoln_nav.rviz         # 替换本车命名空间后的导航配置
+└── lincoln_nav_rviz.log     # 导航 RViz 日志
+```
+
+模板与消息使用本车独立命名空间，导航 RViz 采用独立 ROS 节点名。窗口需在具备图形显示的环境启动；图形环境异常记录到日志，不终止车辆导航。此功能更新后，**只需正常重启 Lincoln**，CARLA、SUMO 和 CoBridge 可以继续运行。
+
+验证记录：加载 ROS 2 后共 39 项 Lincoln 检查通过，新增内容包括实际车道宽度、透明度只应用一次、立交高度、弯道正面、箭头不越出带边及末端、模板不含传感器、四轮命名空间替换、窗口复用／清理与取消后的旧任务拒绝。Town04 中分别实测 `--no-sensors` 和 `--sensors lidar`：两种情况下均收到车道、绿色带及箭头、且仅有车身与四轮的 5 个 Marker；连续 26 个车模样本中四轮姿态发生 25 次变化。LiDAR 情况下普通与导航 RViz 同时运行，导航目标帧沿用原 LiDAR 显示帧。更换目的地后导航窗口 PID 不变，退出后测试车辆、传感器及两个窗口均清理，原车辆保留。
+
 ### 构建环境和缓存
 
 需要 Linux、本机 SUMO 完整源码、已完成的 GUI CMake 编译产物，以及原编译器和 `ar`。当前环境示例：
@@ -585,6 +635,8 @@ modules/lincoln/
 │   ├── sensor_streams.py           # 原生传感器与 ROS 发布
 │   └── ros_messages.py             # 图像、点云、时间和坐标转换
 ├── visualization/
+│   ├── navigation_rviz.py          # 导航专用 RViz 生命周期与模型复用
+│   ├── navigation_route.py         # 半透明车道宽路线带及箭头
 │   ├── vehicle_markers.py          # 车身、四轮动画与传感器安装点
 │   ├── wheel_meshes.py             # 原车轮拆分与派生模型缓存
 │   ├── road_map.py                 # CARLA 车道标线，不绘制实心路面

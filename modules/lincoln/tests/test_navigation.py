@@ -110,7 +110,7 @@ class RouteTests(unittest.TestCase):
         node = SimpleNamespace(driver=Mock(), autopilot=False)
         navigation = LincolnNavigation(node)
         navigation.status = dict(id='task', state='planning')
-        navigation.result = ('task', ([carla.Location(x=40)], self.points[-1], ''))
+        navigation.result = ('task', ([carla.Location(x=40)], self.points[-1], self.points, ''))
         navigation.cancel()
         navigation.consume_plan()
         node.driver.set_route.assert_not_called()

@@ -5,6 +5,7 @@
 """
 import heapq
 import itertools
+import logging
 import math
 import queue
 import threading
@@ -141,6 +142,9 @@ class LincolnNavigation:
             self.tasks.get_nowait()
         except queue.Empty:
             pass
+        view = getattr(self.node, 'navigation_view', None)
+        if view is not None:
+            view.clear_route()
         self.tasks.put_nowait(task)
         if self.worker is None:
             self.worker = threading.Thread(target=self.plan_tasks, name='lincoln-navigation', daemon=True)
@@ -165,11 +169,11 @@ class LincolnNavigation:
                 target = carla.Location(**{key: float(task['target'][key]) for key in ('x', 'y', 'z')})
                 route, goal = plan_route(self.road_map, self.node.car.get_location(), target,
                                          lambda: not self.is_current(identity))
-                outcome = (path_with_lookahead(route), goal, '')
+                outcome = (path_with_lookahead(route), goal, route, '')
             except PlanningCancelled:
                 continue
             except Exception as error:
-                outcome = (None, None, str(error))
+                outcome = (None, None, [], str(error))
             with self.lock:
                 if self.status.get('id') == identity and self.status['state'] == 'planning':
                     self.result = (identity, outcome)
@@ -185,13 +189,16 @@ class LincolnNavigation:
         self.hold_brake = False
         if active:
             self.node.driver.clear_route()
+            view = getattr(self.node, 'navigation_view', None)
+            if view is not None:
+                view.clear_route()
 
     def consume_plan(self):
         with self.lock:
             result, self.result = self.result, None
             if result is None:
                 return
-            identity, (route, goal, error) = result
+            identity, (route, goal, display_waypoints, error) = result
             if not self.is_current(identity):
                 return
             if self.node.active:
@@ -213,6 +220,13 @@ class LincolnNavigation:
                 self.node.driver.disable()
                 self.node.autopilot = False
                 self.status.update(state='error', detail=str(error))
+                return
+            view = getattr(self.node, 'navigation_view', None)
+            if view is not None:
+                try:
+                    view.show_route(display_waypoints, self.road_map)
+                except Exception:
+                    logging.exception('导航可视化提交失败；车辆导航继续运行')
 
     def update(self, snapshot):
         """只由现有驾驶线程调用：应用规划结果、接近目标减速、到达停车。"""

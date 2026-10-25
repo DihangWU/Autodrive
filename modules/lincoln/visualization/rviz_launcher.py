@@ -8,7 +8,7 @@ from modules.lincoln.runtime.paths import PROJECT_DIR, RUNTIME_DIR, RVIZ_BINARY
 
 def adapt_rviz_namespace(value, uid, display_sensors=()):
     if isinstance(value, str):
-        return re.sub(r'(?<![A-Za-z0-9_])lincoln_[0-9a-f]{10}(?=/|$)', uid, value)
+        return re.sub(r'(?<![A-Za-z0-9_])lincoln_[0-9a-f]{10}(?=/|_wheels$|$)', uid, value)
     if isinstance(value, list):
         return [adapt_rviz_namespace(item, uid, display_sensors) for item in value]
     if isinstance(value, dict):
@@ -30,7 +30,12 @@ def adapt_rviz_namespace(value, uid, display_sensors=()):
 
 
 def launch_vehicle_rviz(node):
-    template = node.args.rviz_config.expanduser()
+    return launch_rviz_template(node, node.args.rviz_config, 'lincoln.rviz', 'rviz.log')
+
+
+def launch_rviz_template(node, template, config_name, log_name, ros_node_name=None):
+    """共用命名空间、显示帧和启动方式，普通与导航窗口分别保存配置及日志。"""
+    template = Path(template).expanduser()
     if not template.is_absolute():
         template = PROJECT_DIR / template
     saved = yaml.safe_load(template.read_text())
@@ -38,7 +43,7 @@ def launch_vehicle_rviz(node):
         raise ValueError(f'无效 RViz 配置：{template}')
     folder = RUNTIME_DIR / node.uid
     folder.mkdir(parents=True, exist_ok=True)
-    config = folder / 'lincoln.rviz'
+    config = folder / config_name
     display_sensors = [entry['spec']['name'] for entry in node.sensors if 'display_pub' in entry]
     saved = adapt_rviz_namespace(saved, node.uid, display_sensors)
     view = saved['Visualization Manager'].get('Views', {}).get('Current', {})
@@ -46,6 +51,10 @@ def launch_vehicle_rviz(node):
         view['Target Frame'] = node.model.header.frame_id
     config.write_text(yaml.safe_dump(saved,
                                      sort_keys=False, allow_unicode=True))
-    log = folder / 'rviz.log'
+    log = folder / log_name
+    command = [RVIZ_BINARY, '-d', str(config)]
+    if ros_node_name:
+        command.extend(['--ros-args', '-r', '__node:=' + ros_node_name])
     with log.open('a') as output:
-        return subprocess.Popen([RVIZ_BINARY, '-d', str(config)], stdout=output, stderr=subprocess.STDOUT)
+        return subprocess.Popen(command, stdout=output, stderr=subprocess.STDOUT,
+                                start_new_session=bool(ros_node_name))
