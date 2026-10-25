@@ -21,10 +21,12 @@ LOOKAHEAD_MIN = 3.5
 LOOKAHEAD_MAX = 9.0
 LOOKAHEAD_SECONDS = 0.7
 STEER_RATE = 1.5
+STEERING_RESPONSE_SECONDS = 0.2
+STEERING_PREVIEW_MAX = 2.0
 OBSTACLE_REFRESH = 0.25
 OBSTACLE_MARGIN = 0.4
 BRAKING_DECELERATION = 2.5
-MAX_LATERAL_ACCELERATION = 10.0
+MAX_LATERAL_ACCELERATION = 8.0
 SPEED_KP, SPEED_KI, SPEED_KD = 0.9, 0.35, 0.05
 SPEED_INTEGRAL_LIMIT = 10.0
 MAX_THROTTLE = 1.0
@@ -341,15 +343,19 @@ class JunctionLocalController:
         return self.steering_curve[-1][1] if self.steering_curve else 1.
 
     def lateral_control(self, transform, speed, dt):
-        """Pure Pursuit 使用后轴参考点，CARLA 中正转角表示向右。"""
+        """预测短暂响应时间后的后轴位置，提前建立转角；正转角表示向右。"""
         index, _ = self.closest_sample(transform.location)
         self.progress = max(self.progress, self.distances[index])
         lookahead = max(LOOKAHEAD_MIN, min(LOOKAHEAD_MAX, LOOKAHEAD_MIN + speed*LOOKAHEAD_SECONDS))
         target_index = min(len(self.samples)-1, bisect.bisect_left(self.distances, self.progress+lookahead))
         target = self.samples[target_index].center
         yaw = math.radians(transform.rotation.yaw)
-        rear_x = transform.location.x - self.wheelbase*.5*math.cos(yaw)
-        rear_y = transform.location.y - self.wheelbase*.5*math.sin(yaw)
+        # 预测转向生效前车辆仍会前进的距离，从预测后轴计算转角。
+        # 路线里程和目标点仍取真实位置，避免把规划弯道本身往前挪。
+        lead = min(STEERING_PREVIEW_MAX, max(0., speed)*STEERING_RESPONSE_SECONDS)
+        rear_offset = lead - self.wheelbase*.5
+        rear_x = transform.location.x + rear_offset*math.cos(yaw)
+        rear_y = transform.location.y + rear_offset*math.sin(yaw)
         dx, dy = target[0]-rear_x, target[1]-rear_y
         alpha = math.atan2(dy, dx) - yaw
         angle = math.atan2(2.*self.wheelbase*math.sin(alpha), max(.5, math.hypot(dx,dy)))

@@ -432,6 +432,37 @@ class JunctionControlTests(unittest.TestCase):
         return SimpleNamespace(find=lambda actor_id:ego if actor_id==1 else other,
                                timestamp=SimpleNamespace(elapsed_seconds=now))
 
+    def test_response_preview_builds_turn_earlier_without_advancing_route_progress(self):
+        from modules.lincoln.visualization.navigation_route import sample_route
+        import math
+        local=self.controller
+        points=[Waypoint(0),Waypoint(8),Waypoint(12),Waypoint(16)]
+        for point in points:point.lane_width=3.5
+        points[2].transform=carla.Transform(carla.Location(x=12,y=2),carla.Rotation(yaw=45))
+        points[3].transform=carla.Transform(carla.Location(x=14,y=6),carla.Rotation(yaw=90))
+        local.samples=sample_route(points)
+        local.distances=[0.]
+        for first,second in zip(local.samples,local.samples[1:]):
+            local.distances.append(local.distances[-1]+math.dist(first.center,second.center))
+        transform=carla.Transform(carla.Location(x=4))
+        with patch('modules.lincoln.driving.junction_local_controller.STEERING_RESPONSE_SECONDS',0.):
+            original=local.lateral_control(transform,8.,1.)
+        progress=local.progress;local.steer=0.
+        preview=local.lateral_control(transform,8.,1.)
+        self.assertGreater(preview,original)
+        self.assertEqual(local.progress,progress)
+
+    def test_response_preview_preserves_straight_and_stationary_controls(self):
+        local=self.controller
+        transform=carla.Transform(carla.Location(x=20))
+        self.assertAlmostEqual(local.lateral_control(transform,8.,.05),0.)
+        offset=carla.Transform(carla.Location(x=20,y=1))
+        local.steer=0.
+        original=local.lateral_control(offset,0.,1.)
+        local.steer=0.
+        with patch('modules.lincoln.driving.junction_local_controller.STEERING_RESPONSE_SECONDS',0.):
+            self.assertAlmostEqual(local.lateral_control(offset,0.,1.),original)
+
     def test_takeover_precedes_junction_and_return_requires_stable_correct_exit(self):
         local = self.controller
         self.assertFalse(local.should_take_over(0.,0.))
