@@ -57,7 +57,7 @@ add_npc -n 10 --duration 30
 
 每次执行创建一个独立批次；Ctrl+C 请求删除本批两端车辆，随后释放批次连接。客户端异常退出时，桥也会检测连接断开并清理。退出 NPC 不关闭 CARLA、SUMO 或 CoBridge，不删除其他批次、Lincoln 或 RSU。正常退出桥时会清理其管理的 NPC；重启后需要重新执行 `add_npc`。桥或仿真器被强制杀死时不能保证立即完成清理。
 
-NPC 业务由 `modules/npcvehicules/traffic/` 实现，在桥主循环中调用，使用当前 SUMO 的通用 TraCI RPC 连接；入口通过现有 CoBridge 控制 socket 发起 `npc.start/status/stop` 请求。无需为 NPC 增加专用 SUMO 管理端、另一个 TraCI 客户端或额外时钟。`--bridge-socket` 可选择另一个已运行的桥；目标 CARLA 和 SUMO 由该桥的启动参数决定，NPC 入口不再单独选择一套地址。
+NPC 批次业务由 `modules/npcvehicules/traffic/` 实现，调用桥端官方算法副本，并使用当前 SUMO 的通用 TraCI RPC 连接；入口通过现有 CoBridge 控制 socket 发起 `npc.start/status/stop` 请求。无需为 NPC 增加专用 SUMO 管理端、另一个 TraCI 客户端或额外时钟。`--bridge-socket` 可选择另一个已运行的桥；目标 CARLA 和 SUMO 由该桥的启动参数决定，NPC 入口不再单独选择一套地址。
 
 ```text
 modules/npcvehicules/
@@ -65,21 +65,49 @@ modules/npcvehicules/
 ├── npcvehicules.sh          # 独立启动入口，无 ROS 环境依赖
 └── traffic/
     ├── vehicle_types.py    # 读取官方车型 XML，按需加入 SUMO
-    ├── spawn_traffic.py    # 分帧创建、路线维护及本批车辆清理
-    └── routes.py           # 按实际路网允许的道路连接生成并续接路线
+    └── spawn_traffic.py    # 批次记录、分帧调度、归属和退出清理；调用官方衍生算法
 
 foundation/cobridge/npcvehicules/
 ├── npcvehicules.py          # 批次归属、帧边界调用及清理协调
 ├── official_tools.py        # 加载官方 BridgeHelper、车型数据结构及 SUMO 工具
-├── vehicle_sync.py          # SUMO 订阅、CARLA 实体、批量姿态与车灯同步
+├── run_synchronization.py   # 官方同名脚本的 NPC 同步核心副本，移除独立时钟
+├── spawn_npc_sumo.py        # 官方同名脚本的随机生成、道路末端续路副本
+├── vehicle_sync.py          # 官方流程的 SUMO/CARLA 适配层、批量提交和贴地几何
 └── config.json              # 每帧加入数量、总申请数量上限、车灯同步开关
 ```
 
-复用 `foundation/carla/carla-official/Co-Simulation/Sumo/` 中的官方 `examples/carlavtypes.rou.xml`、`BridgeHelper.get_carla_blueprint()`、`get_carla_transform()` 和 `get_carla_lights_state()`。只选择官方 XML 与当前 CARLA 都支持的四轮轿车，车型筛选使用通配符；不修改官方文件，也不直接运行会重新启动 SUMO、导出地图和推进时钟的官方 `spawn_npc_sumo.py`。随机种子控制车型、配色、出生道路和随机路线选择，不保证所有交通互动完全确定。
+`foundation/carla/carla-official/Co-Simulation/Sumo/` 原目录保持不改。将其 `run_synchronization.py`、`spawn_npc_sumo.py` 复制到 `foundation/cobridge/npcvehicules/` 后，保留并适配其中的 NPC 同步与随机车流算法，版权和 MIT 许可说明保留在副本头部。继续复用原目录中的 `examples/carlavtypes.rou.xml`、`BridgeHelper.get_carla_blueprint()`、`get_carla_transform()` 和 `get_carla_lights_state()`。只选择官方 XML 与当前 CARLA 都支持的四轮轿车，车型筛选使用通配符。随机种子控制车型、配色、出生道路和随机路线选择，不保证所有交通互动完全确定。
 
 车辆命名为 `npc_<批次>_<序号>`，与 Lincoln 的登记和 CARLA → SUMO 投影分开。SUMO 决定 NPC 的跟车、换道、速度和信号灯通行；CARLA 代理关闭动力学，由桥提交姿态并保留实体显示，未配置额外传感器或联网功能。它们不是由 CARLA Traffic Manager 驾驶的车辆，也不是通过油门控制在 CARLA 中独立行驶的车辆。
 
-每辆车先生成一段合法随机道路路线，接近终点时继续沿允许的连接延长；续接时保留尚未驶完的路径，路口内不改写路线。道路尽头没有出口时车辆由 SUMO 正常驶离，并删除 CARLA 代理，不自动补车。
+车流生成和续接采用官方算法：随机选择车型及允许通行的出生道路，先建立单道路路线；行驶到当前路线最后一条道路时，从该道路允许的出口中随机选择下一条道路，将路线更新为“当前道路＋下一道路”。道路尽头没有出口时由 SUMO 正常驶离，并删除 CARLA 代理，不自动补车。旧的 32 道路预生成、提前续接算法及 `traffic/routes.py` 已删除，批次代码只调用官方衍生函数，不再保留第二套路线实现。
+
+### 官方副本如何跟随 CoBridge 时钟
+
+```text
+CoBridge 帧边界
+  → NPC 批次管理：分帧调用 spawn_npc_sumo.py 的生成函数
+  → 读取 SUMO 上一已完成步骤的订阅及生成、驶离、传送事件
+  → run_synchronization.py / SimulationSynchronization.synchronize_vehicles()
+      → 官方顺序：订阅与生成 → 删除驶离车辆 → 更新姿态和车灯
+      → vehicle_sync.py 的适配层合并 CARLA 命令并一次提交
+  → 调用 spawn_npc_sumo.py 的道路末端续路函数
+  → 返回 CoBridge，执行原有两端时钟推进
+```
+
+两个副本都没有独立 `main` 循环，不创建仿真器、不再次导出地图、不调用 `world.tick()` / `simulationStep()`，也不修改同步模式、创建 TM 或关闭仿真器。原脚本中的这些职责由现有 CoBridge 和 SUMO 管理进程继续持有。副本仅保留 SUMO → CARLA 的 NPC 阶段；原脚本的全场 CARLA → SUMO 扫描和信号灯接管不再执行，避免重复生成 Lincoln 或与现有控灯模块争抢控制。
+
+适配层将当前本地 JSON RPC、帧订阅、批量提交和车型几何接到官方接口上；不逐车每帧查询路线、车型、灯光或位置。新增车辆首次订阅时可单独读取初始订阅结果，后续帧集中读取；实际路线和路线索引来自同一订阅帧，静态车型使用本批记录。SUMO 在路口可能为新路线补入前一条道路，因此不能用自己缓存的两条道路替代官方 `getRoute()` 的实际返回值。原官方入口仍可作为参考，但不应与 `run_cobridge` 同时启动另一套联仿时钟。
+
+SUMO 自身可能因拥堵、碰撞或路线问题触发传送。新版分别处理生成、驶离及传送事件；传送中的同一 SUMO ID 不再因为暂时退出活动 ID 列表而销毁后重建 CARLA 代理。NPC 状态新增 `teleporting`、`teleports`，终端显示累计 SUMO 传送次数。传送结束后仍跟随 SUMO 的新位置，因此采用官方流程不等于禁止 SUMO 传送；这类源仿真位置跳变需与桥端更新异常区分。
+
+公共 SUMO 启动入口 `foundation/sumo/init/sumo_init.py` 现在与官方 `SumoSimulation` 一样传入 `--lateral-resolution 0.25`，开启连续横向子车道运动，GUI 和 headless 模式均生效。参数集中在文件头部 `SUMO_LATERAL_RESOLUTION`；它是横向决策分辨率，不表示车辆每次横移 0.25 米，也不改变 0.05 秒时间步长。车辆换道会经过中间横向位置，降低默认离散换道造成的整车道横向跳步；它不禁止拥堵等原因触发的 SUMO 传送。细化横向决策会增加 SUMO 计算开销，需要单独衡量性能。
+
+这个设置在 SUMO 进程启动时生效，已经运行的 SUMO 必须重启；建议先正常退出 NPC 和 CoBridge，再重启 SUMO、CoBridge，最后重新添加 NPC。CARLA、Lincoln 和传感器配置可保留。没有一起修改其他官方启动选项，例如路口碰撞检查。
+
+独立 SUMO 换道对照：同一条 Town04 道路、5 m/s 速度、0.05 秒步长，分别采集 100 个步骤。未启用时最大单步二维位移约 3.50 米，出现一次超过 1 米的整车道跳步；启用 0.25 后成功换到目标车道，最大单步二维位移约 0.31 米，没有超过 1 米的步骤。此处位移包含纵向前进，不是横向分辨率的定义。已检查实际 GUI 进程携带新参数，Lincoln 保留原 actor，桥接入正常且 SUMO 步长仍为 0.05 秒；100 辆 NPC 连续运行 20 秒并正常清理通过。
+
+本次官方衍生替换验证：从原官方源码提取同步与续路逻辑进行调用轨迹/结果对照，连同重试、传送保持身份、实际路口路线、贴地回退，共 11 项专项通过；15 项批次生命周期和 10 项贴地几何检查通过，原有 15 项 Lincoln 回归通过。真实 Town04 中两辆 NPC 可行驶，两个批次的归属清理通过；200 辆全部生成并清理，实际路线订阅后的 JSON 约 35 KB；100 辆连续运行 45 秒未再出现路线替换错误。官方原目录没有改动，测试不代表已经禁止 SUMO 传送或消除了所有可见跳变。
 
 ### 创建速度、同步顺序与状态
 
@@ -99,7 +127,7 @@ SUMO 转换路网中的高度和坡度不一定与 CARLA 实际车道完全重�
 
 `foundation/cobridge/npcvehicules/vehicle_sync.py` 保留官方转换得到的 XY 和 SUMO 航向，再用缓存的 CARLA 地图查询对应行车道，以道路局部平面修正 Z、俯仰和侧倾。换道时保留原航向，车身法线与路面法线对齐；车辆横向偏离车道中心时也按该道路平面计算高度。每种车型只读取一次实际 CARLA 模型包围盒的底部偏移，默认让模型底面距道路平面约 2 cm，不直接将车身高度的一半加到车辆原点。
 
-立交桥选层时查询保留原始三维位置，不将高度设为 0；水平距离超过 6 米、原始高度与候选道路相差超过 2 米，或道路姿态异常时，暂缓该车姿态更新并在 NPC 状态中报告。新车暂不生成，已有车辆保留上一处有效位置，避免强行吸附到另一层。该检查不是完整的 SUMO/CARLA 车道编号映射；地图高度误差超过上述容差时需要进一步核对路网。三个容差/间隙常量集中在该文件头部。
+立交桥选层时查询保留原始三维位置，不将高度设为 0；水平距离超过 6 米、原始高度与候选道路相差超过 2 米，或道路姿态异常时，不强行贴到该候选道路，而是使用官方转换得到的 SUMO 姿态并在 NPC 状态中报告。旧的“匹配失败后冻结，恢复后追上新位置”分支已删除。回退时不保证贴地，需要进一步核对路网；层级保护也不是完整的 SUMO/CARLA 车道编号映射。三个容差/间隙常量集中在该文件头部。
 
 贴地计算不启用 NPC 动力学、不添加传感器、不改变 SUMO 跟车换道或仿真步长，也不修改官方目录。地图只缓存一次，道路查询在客户端本地完成，模型几何按车型缓存；每帧不逐车向服务器发送射线或物理参数查询。射线仅用于此次独立验证。
 

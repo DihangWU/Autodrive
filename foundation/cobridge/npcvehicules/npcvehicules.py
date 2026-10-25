@@ -8,7 +8,8 @@ from pathlib import Path
 import uuid
 
 from foundation.cobridge.npcvehicules.official_tools import load_official_tools
-from foundation.cobridge.npcvehicules.vehicle_sync import NpcCarlaProjection
+from foundation.cobridge.npcvehicules.vehicle_sync import NpcSumoAdapter, NpcCarlaAdapter
+from foundation.cobridge.npcvehicules.run_synchronization import SimulationSynchronization
 from modules.npcvehicules.traffic.spawn_traffic import NpcTrafficBatch
 from modules.npcvehicules.traffic.vehicle_types import read_vehicle_types
 
@@ -39,8 +40,10 @@ class NpcVehicleRegistry:
         network = tools.sumolib.net.readNet(str(sumo.network['network_file']))
         name = uuid.uuid4().hex[:12]
         traffic = NpcTrafficBatch(sumo.connection, network, types, name, count, seed)
-        projection = NpcCarlaProjection(carla, sumo, tools, settings['sync_vehicle_lights'])
-        self.batches[name] = dict(owner=owner, traffic=traffic, projection=projection,
+        synchronization = SimulationSynchronization(
+            NpcSumoAdapter(sumo, traffic, tools), NpcCarlaAdapter(carla, tools), tools.helper,
+            sync_vehicle_lights=settings['sync_vehicle_lights'])
+        self.batches[name] = dict(owner=owner, traffic=traffic, synchronization=synchronization,
             carla=carla, sumo=sumo, spawn_per_step=settings['spawn_per_step'],
             state='starting', detail='', closing=False, active=0)
         return dict(batch_id=name, count=count)
@@ -61,12 +64,14 @@ class NpcVehicleRegistry:
 
     @staticmethod
     def batch_status(name, record):
-        traffic, projection = record['traffic'], record['projection']
-        detail = record['detail'] or next(iter(projection.errors.values()), '')
+        traffic, synchronization = record['traffic'], record['synchronization']
+        sumo = synchronization.sumo
+        detail = record['detail'] or next(iter(synchronization.carla.errors.values()), '')
         return dict(batch_id=name, state=record['state'], requested=traffic.count,
-            added=traffic.next_index, active=record['active'], carla=len(projection.actors),
-            pending=traffic.next_index - len(projection.subscribed),
-            finished=max(0, len(projection.subscribed) - record['active']), detail=detail)
+            added=traffic.next_index, active=record['active'], carla=len(synchronization.sumo2carla_ids),
+            pending=max(0, traffic.next_index - len(sumo.subscribed)),
+            finished=max(0, len(sumo.subscribed) - record['active'] - len(sumo.teleporting)),
+            teleporting=len(sumo.teleporting), teleports=sumo.teleport_count, detail=detail)
 
     def snapshot(self):
         return [self.batch_status(name, r) for name, r in self.batches.items()]
@@ -81,17 +86,19 @@ class NpcVehicleRegistry:
         """先清理所有能够连接的本批实体，任何失败都保留记录供重试。"""
         record = self.batches[name]
         errors = []
-        projection, traffic = record['projection'], record['traffic']
-        if projection.actors:
+        synchronization, traffic = record['synchronization'], record['traffic']
+        carla_view, sumo_view = synchronization.carla, synchronization.sumo
+        if carla_view.actors:
             try:
                 if carla is None:
                     raise RuntimeError('等待 CARLA 重新接入，以清理 NPC 实体。')
                 if carla.world.id == record['carla'].world.id:
-                    projection.carla = carla
-                    projection.close()
+                    carla_view.adapter = carla
+                    synchronization.close()
                 else:
                     # load_world 已销毁旧世界，不能把旧 ID 用到新世界。
-                    projection.actors.clear()
+                    carla_view.actors.clear()
+                    synchronization.sumo2carla_ids.clear()
             except Exception as error:
                 errors.append(str(error))
         if traffic.created:
@@ -101,7 +108,7 @@ class NpcVehicleRegistry:
                 if sumo.network['xodr_sha256'] != record['sumo'].network['xodr_sha256']:
                     raise RuntimeError('等待原地图的 SUMO 接入，以清理本批 NPC。')
                 traffic.connection = sumo.connection
-                traffic.remove_vehicles(projection.subscribed)
+                traffic.remove_vehicles(sumo_view.subscribed)
                 traffic.created.clear()
             except Exception as error:
                 errors.append(str(error))
@@ -126,23 +133,31 @@ class NpcVehicleRegistry:
                 self.report_error(record, error)
         if not self.batches or carla is None or sumo is None:
             return
+        active = [r for r in self.batches.values() if r['state'] != 'error' and not r['closing']]
+        if not active:
+            return
         try:
             present = set(sumo.connection.vehicle.getIDList())
-            for record in self.batches.values():
-                if record['state'] != 'error' and not record['closing']:
-                    record['projection'].subscribe_new_vehicles(record['traffic'], present)
             # 全部 NPC 的动态变量只读一次；不逐车请求位置和角度。
             states = sumo.connection.vehicle.getAllSubscriptionResults()
-            for record in self.batches.values():
-                if record['state'] == 'error' or record['closing']:
-                    continue
-                traffic, projection = record['traffic'], record['projection']
-                record['active'] = len(traffic.created.keys() & present)
-                projection.update_vehicles(traffic, states, present)
-                traffic.maintain_routes(states, projection.tools.constants)
-                record['state'] = 'running' if traffic.next_index == traffic.count else 'starting'
+            departed = set(sumo.connection.simulation.getDepartedIDList())
+            arrived = set(sumo.connection.simulation.getArrivedIDList())
+            teleport_start = set(sumo.connection.simulation.getStartingTeleportIDList())
+            teleport_end = set(sumo.connection.simulation.getEndingTeleportIDList())
         except Exception as error:
-            for record in self.batches.values():
+            for record in active:
+                self.report_error(record, error)
+            return
+        for record in active:
+            try:
+                traffic, synchronization = record['traffic'], record['synchronization']
+                view = synchronization.sumo
+                view.prepare_frame(present, states, departed, arrived, teleport_start, teleport_end)
+                synchronization.synchronize_vehicles()
+                record['active'] = len(view.available_actors)
+                traffic.maintain_routes(view.states, view.tools.constants)
+                record['state'] = 'running' if traffic.next_index == traffic.count else 'starting'
+            except Exception as error:
                 self.report_error(record, error)
 
     @staticmethod

@@ -48,11 +48,13 @@ def display_status(client, batch_id, previous):
     status = client.command('npc.status', batch_id=batch_id)
     if status['state'] == 'error':
         raise RuntimeError(status['detail'])
-    summary = (status['added'], status['active'], status['carla'], status['detail'])
+    summary = (status['added'], status['active'], status['carla'], status['detail'], status['teleports'])
     if summary != previous:
         message = (f"本批 {status['requested']} 辆，已提交 {status['added']}，"
                    f"SUMO 上路 {status['active']}，CARLA 实体 {status['carla']}，"
                    f"等待插入 {status['pending']}，已驶离 {status['finished']}")
+        if status['teleports']:
+            message += f"，SUMO 传送累计 {status['teleports']} 次"
         if status['detail']:
             message += f"；{status['detail']}"
         CONSOLE.info(message)

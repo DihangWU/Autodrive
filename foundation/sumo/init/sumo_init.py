@@ -23,6 +23,7 @@ RUNTIME_LOG_FILE = RUNTIME_DIR / 'runtime.log'
 DEFAULT_CONFIG = None
 DEFAULT_PORT = 8813
 DEFAULT_STEP_LENGTH = 0.05
+SUMO_LATERAL_RESOLUTION = 0.25
 DEFAULT_HEADLESS = False
 SUMO_BINARY = 'sumo'
 SUMO_START = 'true'
@@ -106,6 +107,7 @@ def run(args, stopped):
             binary = SUMO_BINARY if args.headless else str(ensure_low_latency_sumo_gui())
             command = [binary, '-c', str(config),
                        '--remote-port', str(args.port), '--step-length', str(args.step_length),
+                       '--lateral-resolution', str(SUMO_LATERAL_RESOLUTION),
                        '--start', SUMO_START, '--quit-on-end', SUMO_QUIT_ON_END,
                        '--log', str(LOG_FILE), '--error-log', str(ERROR_LOG_FILE)]
             with LAUNCH_LOG_FILE.open('w') as output:

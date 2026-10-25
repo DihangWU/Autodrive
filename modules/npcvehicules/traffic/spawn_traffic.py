@@ -4,11 +4,11 @@
 """
 import random
 
-from modules.npcvehicules.traffic.routes import RandomRoutes
 from modules.npcvehicules.traffic.vehicle_types import install_vehicle_type
+from foundation.cobridge.npcvehicules.spawn_npc_sumo import (
+    allowed_starting_edges, choose_vehicle_and_route, spawn_vehicle, update_vehicle_routes)
 
 OWNER_PARAMETER = 'autodrive.npc.batch'
-SPAWN_EXTRA_SPACE = 5.0
 
 
 class NpcTrafficBatch:
@@ -17,25 +17,23 @@ class NpcTrafficBatch:
         self.types = vehicle_types
         self.batch_id, self.count = batch_id, count
         self.rng = random.Random(seed)
-        self.routes = RandomRoutes(network, self.rng)
+        self.network = network
         self.created = {}
         self.existing_types = set(connection.vehicletype.getIDList())
         self.next_index = 0
         for spec in self.types.values():
-            self.routes.starting_edges(spec['vClass'], float(spec['length']) + SPAWN_EXTRA_SPACE)
+            if not allowed_starting_edges(network, spec['vClass'], float(spec['length'])):
+                raise ValueError(f"当前地图没有适合 {spec['id']} 出生的道路")
 
     def spawn_next_vehicles(self, limit):
         """分帧加入，避免一次创建大量车辆时长时间挡住共享时钟。"""
         for _ in range(min(limit, self.count - self.next_index)):
-            spec = self.rng.choice(list(self.types.values()))
+            spec, route = choose_vehicle_and_route(self.network, self.types, self.rng)
             install_vehicle_type(self.connection, spec, self.existing_types)
             name = f'npc_{self.batch_id}_{self.next_index}'
-            route = self.routes.create(spec['vClass'], float(spec['length']) + SPAWN_EXTRA_SPACE)
-            self.connection.route.add(name, route)
-            self.connection.vehicle.add(name, name, typeID=spec['id'],
-                depart='now', departLane='random', departPos='random_free', departSpeed='0')
+            spawn_vehicle(self.connection, name, route, spec['id'])
             # 立即记录，后续设置失败时仍可清理已加入的车辆。
-            self.created[name] = dict(spec=spec, route=route)
+            self.created[name] = dict(spec=spec)
             self.next_index += 1
             self.connection.vehicle.setParameter(name, OWNER_PARAMETER, self.batch_id)
             if spec['colors']:
@@ -46,11 +44,7 @@ class NpcTrafficBatch:
             self.created[name]['color'] = color + [255]
 
     def maintain_routes(self, states, constants):
-        for name, record in self.created.items():
-            state = states.get(name)
-            if state:
-                self.routes.continue_vehicle(self.connection, name, record,
-                    state[str(constants.VAR_ROUTE_INDEX)], state[str(constants.VAR_ROAD_ID)])
+        update_vehicle_routes(self.connection, self.network, self.created, states, constants, self.rng)
 
     def remove_vehicles(self, subscribed=None):
         """同时清理已上路和仍等待插入的本批车辆；保留其他批次和 Lincoln。"""
