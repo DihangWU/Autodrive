@@ -153,9 +153,16 @@ def run_mouse_driving_panel(node, done):
         free_camera.mode_changed()
         window.focus_set()
         camera_button.config(text='释放视角' if node.follow else '跟随本车')
-    camera_button = tk.Button(driving, text='释放视角' if node.follow else '跟随本车',
+    camera_row = tk.Frame(driving)
+    camera_row.rowconfigure(0, weight=1)
+    camera_button = tk.Button(camera_row, text='释放视角' if node.follow else '跟随本车',
                               command=toggle_camera_mode)
-    camera_button.pack()
+    def toggle_free_follow():
+        stop_driving()
+        node.set_camera_mode(False, free_follow=not node.free_follow)
+        free_camera.mode_changed()
+        window.focus_set()
+    free_follow_button = tk.Button(camera_row, text='自由跟随', command=toggle_free_follow)
     node.set_camera_mode(node.follow, acquire=node.follow, replace=False)
     free_camera = FreeCameraControls(window, node)
     window.bind('<MouseWheel>', free_camera.wheel)
@@ -163,22 +170,34 @@ def run_mouse_driving_panel(node, done):
     window.bind('<Button-5>', free_camera.wheel)
     speed = tk.Label(driving, borderwidth=0, pady=0)
     speed.pack(side='bottom', pady=(16, 10))
-    docking = ttk.Button(driving, text='贴靠 CARLA', command=free_camera.place_panel)
-    def align_docking_button(event=None):
-        """展开时对齐右侧按钮行；收起时位于驾驶状态文字上方右侧。"""
-        reference = free_camera.speed_buttons.winfo_children()[0]
-        width = max(reference.winfo_reqwidth(), reference.winfo_width())
-        height = reference.winfo_reqheight()
+    docking = ttk.Button(camera_row, text='贴靠 CARLA', command=free_camera.place_panel)
+    for column, button in enumerate((free_follow_button, camera_button, docking)):
+        camera_row.columnconfigure(column, weight=1, uniform='camera_buttons')
+        button.grid(row=0, column=column, sticky='nsew')
+    # 为收起右侧面板后的底部按钮预留高度，避免覆盖驾驶控件。
+    camera_row_space = tk.Frame(driving)
+    camera_row_space.pack(side='bottom', pady=8)
+    def align_camera_buttons(event=None):
+        """左侧三键等宽等高，展开时与右侧三键保持同一水平行。"""
+        references = free_camera.speed_buttons.winfo_children()
+        reference = references[0]
+        width = sum(max(button.winfo_reqwidth(), button.winfo_width()) for button in references)
+        height = reference.winfo_height() if reference.winfo_height() > 1 else reference.winfo_reqheight()
+        camera_row_space.configure(height=height)
         if free_camera.controls.winfo_ismapped():
             y = free_camera.speed_buttons.winfo_rooty() - driving.winfo_rooty()
         else:
-            y = max(0, speed.winfo_y() - height - 8)
-        docking.place(relx=1., x=-4, y=y, anchor='ne', width=width, height=height)
-    free_camera.speed_buttons.bind('<Configure>', align_docking_button)
-    free_camera.speed_buttons.bind('<Map>', align_docking_button)
-    free_camera.speed_buttons.bind('<Unmap>', align_docking_button)
-    driving.bind('<Configure>', align_docking_button)
-    window.after_idle(align_docking_button)
+            y = camera_row_space.winfo_y()
+        camera_row.place(relx=.5, y=y, anchor='n', width=width, height=height)
+        camera_row.lift()
+    free_camera.speed_buttons.bind('<Configure>', align_camera_buttons)
+    free_camera.speed_buttons.bind('<Map>', align_camera_buttons)
+    free_camera.speed_buttons.bind('<Unmap>', align_camera_buttons)
+    for button in free_camera.speed_buttons.winfo_children():
+        button.bind('<Configure>', align_camera_buttons)
+    camera_row_space.bind('<Configure>', align_camera_buttons)
+    driving.bind('<Configure>', align_camera_buttons)
+    window.after_idle(align_camera_buttons)
     def close():
         free_camera.close()
         node.stop_requested = True
@@ -191,6 +210,7 @@ def run_mouse_driving_panel(node, done):
         node.drive()
         free_camera.update()
         camera_button.config(text="释放视角" if node.follow else "跟随本车")
+        free_follow_button.config(relief='sunken' if node.free_follow else 'raised')
         autopilot_button.config(text='关闭自动驾驶' if node.autopilot else '开启自动驾驶')
         velocity = node.car.get_velocity()
         control = node.car.get_control()

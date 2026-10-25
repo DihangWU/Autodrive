@@ -35,6 +35,8 @@ class LincolnNode(SpawnVehicleMixin, SensorStreamsMixin, VehicleMarkersMixin,
         self.last_frame = -1
         self.last_mosaic = 0.
         self.follow = True
+        self.free_follow = False
+        self.camera_vehicle_position = None
         self.camera_pose = None
         self.camera_time = None
         self.spectator = None

@@ -143,6 +143,9 @@ class FreeCameraControls(CameraPanel):
         if not enabled and self.enabled:
             self.mode_changed()
         self.set_controls_enabled(enabled)
+        if enabled:
+            self.status.set(('自由跟随：位置随车移动，朝向自主控制' if self.node.free_follow else
+                             '自由视角：WASD 平移 · Q/E 升降 · Shift 加速'))
         elapsed = min(time.monotonic() - self.last_time, MAX_ELAPSED)
         self.last_time = time.monotonic()
         view = None
