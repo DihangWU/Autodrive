@@ -4,6 +4,7 @@ import fcntl
 import logging
 import math
 from pathlib import Path
+import select
 import signal
 import subprocess
 import sys
@@ -81,6 +82,14 @@ def process_listening(pid, port):
     return False
 
 
+def wait_for_control_requests(server, stopped):
+    """请求到达立即唤醒；空闲时最多等待 5 ms，继续检查退出和自主步进。"""
+    if stopped.is_set() or any(b'\n' in buffer for buffer in server.clients.values()):
+        return  # 缓冲区已有完整请求时，不必再等 socket 收到新数据。
+    readers = [server.socket, *server.clients]
+    select.select(readers, [], [], POLL_INTERVAL)
+
+
 def run(args, stopped):
     config = (args.config or find_configuration()).resolve()
     if not config.is_file() or config.suffix != '.sumocfg':
@@ -122,7 +131,7 @@ def run(args, stopped):
                     raise RuntimeError(f'SUMO 已退出，请查看 {ERROR_LOG_FILE}')
                 server.poll(runtime.handle, runtime.disconnected)
                 runtime.autonomous_step()
-                stopped.wait(POLL_INTERVAL)
+                wait_for_control_requests(server, stopped)
             CONSOLE.info('正在退出并释放本次仿真进程。')
         finally:
             if server is not None:
