@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Lincoln/RViz 大点云与拼图传输；仅改变缓冲，不改变话题 QoS 和采样频率。 -->
+<profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+  <transport_descriptors>
+    <transport_descriptor>
+      <transport_id>lincoln_shm</transport_id>
+      <type>SHM</type>
+      <!-- 每个参与者 64 MiB，避免默认约 512 KiB 的段被大消息快速耗尽。 -->
+      <segment_size>67108864</segment_size>
+      <port_queue_capacity>2048</port_queue_capacity>
+    </transport_descriptor>
+    <transport_descriptor>
+      <transport_id>lincoln_udp</transport_id>
+      <type>UDPv4</type>
+      <!-- 保留网络发现及跨机通信，缓冲请求不修改宿主机 sysctl。 -->
+      <sendBufferSize>4194304</sendBufferSize>
+      <receiveBufferSize>4194304</receiveBufferSize>
+    </transport_descriptor>
+  </transport_descriptors>
+  <participant profile_name="lincoln_sensor_transport" is_default_profile="true">
+    <rtps>
+      <userTransports>
+        <transport_id>lincoln_shm</transport_id>
+        <transport_id>lincoln_udp</transport_id>
+      </userTransports>
+      <useBuiltinTransports>false</useBuiltinTransports>
+    </rtps>
+  </participant>
+</profiles>
