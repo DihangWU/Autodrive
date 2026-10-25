@@ -12,7 +12,8 @@ import threading
 import time
 
 import carla
-from modules.lincoln.driving.junction_local_controller import JunctionLocalController
+from modules.lincoln.driving.junction_local_controller import JunctionLocalController, junction_spans
+from modules.lincoln.driving.controller import ROAD_SPEED_LIMIT_FACTOR
 
 ROUTE_SPACING = 4.0
 MAX_SEARCH_NODES = 60000
@@ -25,6 +26,10 @@ BRAKING_DISTANCE = 18.0
 STOP_SPEED = 0.3
 TARGET_SNAP_LIMIT = 8.0
 TM_LOOKAHEAD_EXTENSION = 200.0
+TM_EXIT_GUIDE_DISTANCE = 10.0  # 出口引导避开路口边缘重合的内部连接道路。
+TM_TURN_GUIDE_DISTANCE = 60.0
+TM_TURN_STRAIGHT_ANGLE = 35.0
+TM_LANE_CHANGE_MARGIN = 15.0
 NAVIGATION_SPEED_KMH = 120.0
 LANE_CHANGE_SPEED_KMH = 80.0
 TURN_SPEED_KMH = 80.0
@@ -137,7 +142,22 @@ def path_with_lookahead(route):
     # TM ImportPath 按路口后的 road_id 选分支。内部连接路点的 road_id
     # 与出口不同，且多个连接在入口可能重合，直接上传会使 TM 选错出口。
     # 跳过内部连接点，让下一处引导点落到已规划的出口道路上；不改绿色路线。
-    points = [point.transform.location for point in waypoints if not point.is_junction]
+    points = []
+    outside_distance = None
+    previous = None
+    for index, point in enumerate(waypoints):
+        if point.is_junction:
+            outside_distance = 0.
+            previous = point
+            continue
+        if outside_distance is not None and previous is not None and not previous.is_junction:
+            outside_distance += previous.transform.location.distance(point.transform.location)
+        next_is_junction = index+1 < len(waypoints) and waypoints[index+1].is_junction
+        # 很短的出口道路仍保留末端锚点，不悄悄跳过整条道路。
+        if (outside_distance is None or outside_distance >= TM_EXIT_GUIDE_DISTANCE
+                or next_is_junction or index == len(waypoints)-1):
+            points.append(point.transform.location)
+        previous = point
     if not points:
         raise ValueError('No junction exit guide is available for Traffic Manager.')
     return points
@@ -164,6 +184,9 @@ class LincolnNavigation:
         self.deviation_since = None
         self.next_preview = 0.
         self.local_controller = None
+        self.tm_turns = []
+        self.tm_turn_index = 0
+        self.tm_turn_active = False
 
     def snapshot(self):
         with self.lock:
@@ -221,6 +244,8 @@ class LincolnNavigation:
                 if (getattr(self.node.driver, 'supports_junction_local_control', False) is True
                         and any(point.is_junction for point in route)):
                     local = JunctionLocalController(self.node, route, self.road_map, lengths)
+                    if not local.windows:
+                        local = None
                 outcome = (path_with_lookahead(route), goal, route, '', local)
             except PlanningCancelled:
                 continue
@@ -243,6 +268,8 @@ class LincolnNavigation:
         self.route = []
         self.deviation_since = None
         self.local_controller = None
+        self.tm_turns = []
+        self.tm_turn_active = False
         with self.lock:
             self.status['controller'] = 'manual'
         if active:
@@ -275,6 +302,7 @@ class LincolnNavigation:
                 self.goal = goal
                 self.prepare_route_tracking(display_waypoints)
                 self.local_controller = local
+                self.prepare_tm_turns()
                 self.hold_brake = False
                 self.status.update(state='navigating', detail='Navigating to destination', controller='tm')
             except Exception as error:
@@ -318,6 +346,45 @@ class LincolnNavigation:
         self.route_progress = max(self.route_progress, progress)
         return self.route_lengths[-1] - self.route_progress, distance, index
 
+    def prepare_tm_turns(self):
+        """普通路口只给 TM 转向提示；已识别的分流出口留给局部控制。"""
+        self.tm_turns = []
+        self.tm_turn_index = 0
+        self.tm_turn_active = False
+        if getattr(self.node.driver, 'supports_junction_local_control', False) is not True:
+            return
+        local_entries = {window['entry'] for window in self.local_controller.windows} if self.local_controller else set()
+        for entry, exit_index in junction_spans(self.route):
+            if self.route_lengths[entry] in local_entries:
+                continue
+            if self.route[exit_index].is_junction:
+                continue
+            before = self.route[max(0,entry-1)].transform.rotation.yaw
+            after = self.route[exit_index].transform.rotation.yaw
+            angle = (after-before+180.) % 360. - 180.
+            action = 'Straight' if abs(angle) < TM_TURN_STRAIGHT_ANGLE else ('Right' if angle > 0. else 'Left')
+            self.tm_turns.append(dict(entry=self.route_lengths[entry],exit_index=exit_index,action=action))
+
+    def update_tm_turn_guidance(self, index, current):
+        """TM 始终持有驾驶权，仅在普通路口前后更新其原生行驶动作。"""
+        if self.tm_turn_index >= len(self.tm_turns):
+            return
+        turn = self.tm_turns[self.tm_turn_index]
+        if self.tm_turn_active:
+            if index >= turn['exit_index'] and current is not None and not current.is_junction:
+                remaining = self.route[min(index+1,len(self.route)-1):]
+                self.node.driver.set_turn_guidance([], path_with_lookahead(remaining))
+                self.tm_turn_index += 1
+                self.tm_turn_active = False
+            return
+        if self.route_progress >= self.route_lengths[turn['exit_index']]:
+            self.tm_turn_index += 1
+            return
+        if turn['entry']-self.route_progress <= TM_TURN_GUIDE_DISTANCE:
+            actions = [item['action'] for item in self.tm_turns[self.tm_turn_index:]]
+            self.node.driver.set_turn_guidance(actions)
+            self.tm_turn_active = True
+
     def planned_speed(self, index, remaining, speed):
         """在换道/转弯之前限速；终点速度按剩余里程持续降到零。"""
         limit = NAVIGATION_SPEED_KMH
@@ -333,10 +400,26 @@ class LincolnNavigation:
                 limit = min(limit, TURN_SPEED_KMH)
         road_limit = self.node.car.get_speed_limit()
         if road_limit > 0.:
-            limit = min(limit, road_limit)
+            limit = min(limit, road_limit * ROAD_SPEED_LIMIT_FACTOR)
         # 预留半秒控制响应距离及 2.4 m 的终点容差，不在减速中重新启用 TM。
         stopping_space = max(0., remaining - ARRIVAL_DISTANCE*.6 - speed*.5)
         return min(limit, math.sqrt(2.*SLOWDOWN_DECELERATION*stopping_space)*3.6)
+
+    def tm_lane_change_deviation(self, location, current, deviation):
+        """TM 可在计划换道附近调整时机；允许源/目标车道，不放过选错道路。"""
+        if current is None or (self.local_controller is not None and self.local_controller.active):
+            return deviation
+        for first, second in zip(self.route, self.route[1:]):
+            same_road = (first.road_id,first.section_id) == (second.road_id,second.section_id)
+            if not same_road or first.lane_id == second.lane_id:
+                continue
+            if (current.road_id,current.section_id) != (first.road_id,first.section_id):
+                continue
+            if current.lane_id not in (first.lane_id,second.lane_id):
+                continue
+            if min(first.s,second.s)-TM_LANE_CHANGE_MARGIN <= current.s <= max(first.s,second.s)+TM_LANE_CHANGE_MARGIN:
+                return min(deviation, location.distance(current.transform.location))
+        return deviation
 
     def begin_stopping(self, reason):
         """停止阶段只进入一次，保持制动，直到停车或收到显式新指令。"""
@@ -434,6 +517,7 @@ class LincolnNavigation:
         matching_lane = current is not None and (current.road_id, current.section_id, current.lane_id) == (
             self.goal.road_id, self.goal.section_id, self.goal.lane_id)
         remaining, deviation, index = self.track_route(transform.location, speed)
+        deviation = self.tm_lane_change_deviation(transform.location, current, deviation)
         now = time.monotonic()
         self.update_preview(now, transform.location)
         simulation_time = snapshot.timestamp.elapsed_seconds
@@ -462,9 +546,11 @@ class LincolnNavigation:
         speed_limit = self.planned_speed(index, remaining, speed)
         try:
             control = self.update_junction_control(snapshot, transform, current, index, speed_limit)
+            if control is None:
+                self.update_tm_turn_guidance(index, current)
         except Exception as error:
-            logging.exception('路口局部控制或 TM 交接失败')
-            self.begin_stopping('Local control failed: ' + str(error))
+            logging.exception('导航控制、TM 路口引导或交接失败')
+            self.begin_stopping('Navigation control failed: ' + str(error))
             return self.update_stopping(speed, distance, matching_lane)
         if control is not None:
             return control

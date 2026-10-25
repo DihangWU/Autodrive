@@ -1,11 +1,11 @@
 """默认控制器：使用 CARLA Traffic Manager，跟随世界的同步/异步状态。"""
 import logging
 import time
-from modules.lincoln.driving.controller import DrivingController
+from modules.lincoln.driving.controller import DrivingController, ROAD_SPEED_LIMIT_FACTOR
 from modules.lincoln.driving.traffic_manager_port import reserve_traffic_manager_port
 
 MODE_CHECK_INTERVAL = 0.5
-DEFAULT_SPEED_DIFFERENCE = 30.0  # 官方 TM 默认比道路限速低 30%。
+DEFAULT_SPEED_DIFFERENCE = round((1. - ROAD_SPEED_LIMIT_FACTOR)*100., 6)
 
 
 class CarlaAutopilotController(DrivingController):
@@ -26,6 +26,7 @@ class CarlaAutopilotController(DrivingController):
             self.manager = self.client.get_trafficmanager(port)
             self.port = port
         self.refresh_clock_mode()
+        self.manager.vehicle_percentage_speed_difference(self.vehicle, DEFAULT_SPEED_DIFFERENCE)
         logging.info('TM 初始化完成：端口 %s，耗时 %.3f 秒', self.port, time.monotonic() - started)
         print(f'[Lincoln] Traffic Manager 已就绪，端口 {self.port}', flush=True)
 
@@ -57,9 +58,19 @@ class CarlaAutopilotController(DrivingController):
 
     def clear_route(self):
         self.manager.set_path(self.vehicle, [], True)
+        self.manager.set_route(self.vehicle, [], True)
         if self.navigation_speed is not None:
             self.manager.vehicle_percentage_speed_difference(self.vehicle, DEFAULT_SPEED_DIFFERENCE)
             self.navigation_speed = None
+
+    def set_turn_guidance(self, actions, locations=()):
+        """在 TM 内切换路径/路口动作引导，不注销车辆、不施加外部控制。"""
+        if actions:
+            self.manager.set_path(self.vehicle, [], True)
+            self.manager.set_route(self.vehicle, list(actions), True)
+        else:
+            self.manager.set_route(self.vehicle, [], True)
+            self.manager.set_path(self.vehicle, list(locations), True)
 
     def set_navigation_speed(self, speed_kmh):
         """仅设置 TM 目标速度，减速时不注销车辆、不丢弃前瞻路点。"""

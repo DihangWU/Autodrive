@@ -1,11 +1,13 @@
-"""路口局部驾驶：沿绿色路线接管转向与速度，稳定驶出后交还 TM。
+"""分流出口局部驾驶：沿绿色路线接管转向与速度，稳定驶出后交还 TM。
 
 Pure Pursuit 负责转向，纵向 PID 负责速度；红黄灯及轨迹上的动态障碍物
 触发减速停车等待，不主动绕过障碍物。使用 CARLA 快照的仿真时间，
+普通路口直行、转弯及换道保持 TM；只为能确认的主线分流出口建立接管区间。
 不创建传感器、不推进世界、不修改地图或交通灯。控制权切换由 navigation.py 负责。
 """
 import bisect
 import math
+import xml.etree.ElementTree as ET
 
 import carla
 
@@ -26,11 +28,114 @@ MAX_LATERAL_ACCELERATION = 15.0
 SPEED_KP, SPEED_KI, SPEED_KD = 0.9, 0.35, 0.05
 SPEED_INTEGRAL_LIMIT = 10.0
 MAX_THROTTLE = 1.0
+EXIT_BRANCH_PROBE_DISTANCE = 18.0
+EXIT_BRANCH_MAX_ANGLE = 45.0
 
 
 def heading_error(first, second):
     """返回两个朝向的最小夹角，单位为度。"""
     return abs((first - second + 180.) % 360. - 180.)
+
+
+def junction_spans(waypoints):
+    """按 junction_id 分组，给出口识别与 TM 普通路口引导共用。"""
+    index = 0
+    while index < len(waypoints):
+        if not waypoints[index].is_junction:
+            index += 1
+            continue
+        entry = index
+        junction_id = waypoints[entry].junction_id
+        while (index < len(waypoints) and waypoints[index].is_junction
+               and waypoints[index].junction_id == junction_id):
+            index += 1
+        yield entry, min(index, len(waypoints)-1)
+
+
+class ExitBranchClassifier:
+    """识别驶离主线的较窄、缓分岔支路；普通十字路口转向不因此接管。"""
+    def __init__(self, road_map):
+        root = ET.fromstring(road_map.to_opendrive())
+        self.roads = {int(road.get('id')): road for road in root.findall('road')}
+        self.connections = {int(junction.get('id')): list(junction.findall('connection'))
+                            for junction in root.findall('junction')}
+        self.junction_pairs = {}
+
+    def lane_count(self, road_id, lane_id):
+        """只统计相同行驶侧的 driving 车道，避开对向车道与人行道。"""
+        road = self.roads.get(road_id)
+        if road is None:
+            return 0
+        side = 'left' if lane_id > 0 else 'right'
+        return max((sum(lane.get('type') == 'driving' for lane in section.findall(side+'/lane'))
+                    for section in road.findall('lanes/laneSection')), default=0)
+
+    def outgoing_lane(self, connection, incoming_id):
+        """连接道路的另一端给出出口道路及驶入方向，不能用 road_id 变化代表出口。"""
+        road = self.roads.get(int(connection.get('connectingRoad')))
+        if road is None:
+            return None
+        for link in road.findall('link/*'):
+            if link.get('elementType') != 'road' or int(link.get('elementId')) == incoming_id:
+                continue
+            outgoing_id = int(link.get('elementId'))
+            outgoing = self.roads.get(outgoing_id)
+            if outgoing is None or outgoing.get('junction', '-1') != '-1':
+                continue
+            lane_id = -1 if link.get('contactPoint') == 'start' else 1
+            if outgoing.get('rule', 'RHT') == 'LHT':
+                lane_id = -lane_id
+            return outgoing_id, lane_id
+        return None
+
+    def gentle_branch(self, entry, connector_id, incoming_yaw):
+        """看分岔起始一段的方向，排除普通约 90° 左右转。"""
+        junction_id = entry.junction_id
+        if junction_id not in self.junction_pairs:
+            self.junction_pairs[junction_id] = entry.get_junction().get_waypoints(carla.LaneType.Driving)
+        for start, _ in self.junction_pairs[junction_id]:
+            if start.road_id != connector_id or heading_error(start.transform.rotation.yaw, incoming_yaw) > EXIT_BRANCH_MAX_ANGLE:
+                continue
+            for probe in start.next(EXIT_BRANCH_PROBE_DISTANCE):
+                if heading_error(probe.transform.rotation.yaw, incoming_yaw) <= EXIT_BRANCH_MAX_ANGLE:
+                    return True
+        return False
+
+    def requires_exit_selection(self, entry, incoming=None):
+        """必须同时存在主线延续和较窄分流，且当前规划选择的是后者。"""
+        connections = self.connections.get(entry.junction_id, [])
+        selected = [connection for connection in connections
+                    if int(connection.get('connectingRoad')) == entry.road_id]
+        if incoming is not None:
+            selected = [connection for connection in selected
+                        if int(connection.get('incomingRoad')) == incoming.road_id]
+        for chosen in selected:
+            incoming_id = int(chosen.get('incomingRoad'))
+            links = chosen.findall('laneLink')
+            if not links:
+                continue
+            incoming_lane = incoming.lane_id if incoming is not None else int(links[0].get('from'))
+            incoming_count = self.lane_count(incoming_id, incoming_lane)
+            chosen_exit = self.outgoing_lane(chosen, incoming_id)
+            if chosen_exit is None or incoming_count < 2:
+                continue
+            chosen_count = self.lane_count(*chosen_exit)
+            incoming_yaw = incoming.transform.rotation.yaw if incoming is not None else entry.transform.rotation.yaw
+            if chosen_count < 1 or not self.gentle_branch(entry, entry.road_id, incoming_yaw):
+                continue
+            for alternative in connections:
+                if int(alternative.get('incomingRoad')) != incoming_id:
+                    continue
+                same_direction = any(int(link.get('from')) * incoming_lane > 0
+                                     for link in alternative.findall('laneLink'))
+                alternative_exit = self.outgoing_lane(alternative, incoming_id)
+                if not same_direction or alternative_exit is None or alternative_exit[0] == chosen_exit[0]:
+                    continue
+                count = self.lane_count(*alternative_exit)
+                if (count >= incoming_count and count > chosen_count
+                        and self.gentle_branch(entry, int(alternative.get('connectingRoad')), incoming_yaw)):
+                    return True
+        return False
 
 
 class JunctionLocalController:
@@ -40,10 +145,7 @@ class JunctionLocalController:
         self.vehicle, self.world = node.car, node.world
         self.route = waypoints
         self.route_lengths = route_lengths
-        self.samples = sample_route(waypoints, road_map)
-        self.distances = [0.]
-        for first, second in zip(self.samples, self.samples[1:]):
-            self.distances.append(self.distances[-1] + math.dist(first.center, second.center))
+        self.exit_classifier = ExitBranchClassifier(road_map)
         self.windows = self.find_junction_windows()
         self.window_index = 0
         self.active = False
@@ -52,6 +154,12 @@ class JunctionLocalController:
         self.last_time = None
         self.integral = self.previous_error = self.steer = 0.
         self.wait_reason = ''
+        if not self.windows:
+            return
+        self.samples = sample_route(waypoints, road_map)
+        self.distances = [0.]
+        for first, second in zip(self.samples, self.samples[1:]):
+            self.distances.append(self.distances[-1] + math.dist(first.center, second.center))
         self.obstacles = []
         self.next_obstacle_refresh = 0.
         self.front = self.vehicle.bounding_box.extent.x
@@ -71,17 +179,12 @@ class JunctionLocalController:
         self.signal_stops = self.find_signal_stops()
 
     def find_junction_windows(self):
-        """定位路口，并把入口前连续换道一并纳入局部控制区间。"""
+        """只为选中的分流出口建立接管区间；直行主线和普通转弯仍由 TM 驾驶。"""
         windows = []
-        index = 0
-        while index < len(self.route):
-            if not self.route[index].is_junction:
-                index += 1
+        for entry, exit_index in junction_spans(self.route):
+            incoming = self.route[entry-1] if entry > 0 and not self.route[entry-1].is_junction else None
+            if not self.exit_classifier.requires_exit_selection(self.route[entry], incoming):
                 continue
-            entry = index
-            while index < len(self.route) and self.route[index].is_junction:
-                index += 1
-            exit_index = min(index, len(self.route)-1)
             start = max(0., self.route_lengths[entry] - APPROACH_DISTANCE)
             for prior in range(entry-1, -1, -1):
                 first, second = self.route[prior:prior+2]

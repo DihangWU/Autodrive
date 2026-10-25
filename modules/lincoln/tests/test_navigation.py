@@ -6,7 +6,7 @@ import time
 import threading
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import carla
 
@@ -72,6 +72,7 @@ class Waypoint:
         self.road_id, self.section_id, self.lane_id, self.s = 1, 0, lane, x
         self.transform = carla.Transform(carla.Location(x=x))
         self.is_junction = False
+        self.junction_id = 2
         self.lane_change = carla.LaneChange.NONE
         self.lane_type = carla.LaneType.Driving
         self.following = []
@@ -129,7 +130,7 @@ class RouteTests(unittest.TestCase):
         exit_point.following = [lookahead]
         route = [start, inside, exit_point]
         points = path_with_lookahead(route)
-        self.assertEqual([point.x for point in points], [0,8,12])
+        self.assertEqual([point.x for point in points], [0,12])
         self.assertEqual([point.road_id for point in route], [1,1161,23])
 
     def test_destination_inside_junction_can_use_an_exit_beyond_destination(self):
@@ -229,18 +230,38 @@ class RouteTests(unittest.TestCase):
         navigation.route[3].lane_id = -2
         self.assertEqual(navigation.planned_speed(0, 1000, 8), 80.)
 
-    def test_normal_navigation_uses_higher_limit_without_exceeding_road_limit(self):
+    def test_normal_navigation_allows_thirty_percent_above_road_limit(self):
         navigation, node, _, _ = self.active_navigation(0.,0.)
         node.car.get_speed_limit = lambda:150.
         self.assertEqual(navigation.planned_speed(0,1000.,0.),120.)
         node.car.get_speed_limit = lambda:50.
-        self.assertEqual(navigation.planned_speed(0,1000.,0.),50.)
+        self.assertEqual(navigation.planned_speed(0,1000.,0.),65.)
 
     def test_junction_uses_eighty_kmh_cap(self):
         navigation, node, _, _ = self.active_navigation(0.,8.)
         node.car.get_speed_limit = lambda:150.
         navigation.route[2].is_junction = True
         self.assertEqual(navigation.planned_speed(0,1000.,8.),80.)
+
+    def test_tm_lane_change_accepts_only_planned_lanes_on_the_same_road(self):
+        navigation, _, _, _ = self.active_navigation(0.,5.)
+        for point in navigation.route[3:]:
+            point.lane_id = -2
+        current = Waypoint(10.,lane=-2)
+        current.transform.location.y = 3.5
+        position = carla.Location(x=10.,y=3.5)
+        self.assertEqual(navigation.tm_lane_change_deviation(position,current,4.),0.)
+        current.lane_id = -3
+        self.assertEqual(navigation.tm_lane_change_deviation(position,current,4.),4.)
+        current.lane_id,current.road_id = -2,2
+        self.assertEqual(navigation.tm_lane_change_deviation(position,current,4.),4.)
+
+    def test_tm_exit_guides_avoid_overlapping_junction_edge(self):
+        points = [Waypoint(x) for x in (0,4,8,12,24)]
+        points[1].is_junction = True
+        points[1].road_id = 100
+        for point in points[2:]:point.road_id=3
+        self.assertEqual([p.x for p in path_with_lookahead(points)],[0,24])
 
 
 class ManualNavigationTests(unittest.TestCase):
@@ -296,7 +317,9 @@ class JunctionControlTests(unittest.TestCase):
             point.is_junction = 40 <= point.s <= 60
             point.road_id = 2 if point.is_junction else (3 if point.s>60 else 1)
         self.node = SimpleNamespace(car=self.vehicle,world=self.world)
-        self.controller = JunctionLocalController(self.node,self.route,None,[p.s for p in self.route])
+        with patch('modules.lincoln.driving.junction_local_controller.ExitBranchClassifier') as classifier:
+            classifier.return_value.requires_exit_selection.return_value = True
+            self.controller = JunctionLocalController(self.node,self.route,None,[p.s for p in self.route])
 
     def sample(self, x, speed=0., now=10., other=None):
         ego = SimpleNamespace(get_transform=lambda:carla.Transform(carla.Location(x=x)),
@@ -394,11 +417,46 @@ class JunctionControlTests(unittest.TestCase):
     def test_ui_distinguishes_local_waiting_and_tm(self):
         from modules.lincoln.ui.driving_panel import navigation_control_display
         text,color = navigation_control_display(dict(state='navigating',controller='local',control_detail='obstacle'),True)
-        self.assertIn('路口局部控制',text)
+        self.assertIn('出口局部控制',text)
         self.assertIn('障碍物',text)
         tm_text,tm_color = navigation_control_display(dict(state='navigating',controller='tm'),True)
         self.assertIn('TM',tm_text)
         self.assertNotEqual(color,tm_color)
+
+    def test_ordinary_turn_guidance_stays_inside_tm(self):
+        node = SimpleNamespace(driver=Mock(supports_junction_local_control=True))
+        navigation = LincolnNavigation(node)
+        navigation.prepare_route_tracking(self.route)
+        self.route[16].transform.rotation.yaw = -90.
+        navigation.prepare_tm_turns()
+        self.assertEqual(navigation.tm_turns[0]['action'],'Left')
+        navigation.route_progress = 25.
+        navigation.update_tm_turn_guidance(6,self.route[6])
+        node.driver.set_turn_guidance.assert_called_once_with(['Left'])
+        node.driver.disable.assert_not_called()
+        navigation.route_progress = 76.
+        navigation.update_tm_turn_guidance(19,self.route[19])
+        self.assertEqual(node.driver.set_turn_guidance.call_args.args[0],[])
+        node.driver.disable.assert_not_called()
+
+    def test_selected_exit_does_not_receive_ordinary_tm_turn_commands(self):
+        node = SimpleNamespace(driver=Mock(supports_junction_local_control=True))
+        navigation = LincolnNavigation(node)
+        navigation.prepare_route_tracking(self.route)
+        navigation.local_controller = self.controller
+        navigation.prepare_tm_turns()
+        self.assertEqual(navigation.tm_turns,[])
+        navigation.update_tm_turn_guidance(6,self.route[6])
+        node.driver.set_turn_guidance.assert_not_called()
+
+    def test_non_exit_route_has_no_local_window_or_vehicle_physics_setup(self):
+        from modules.lincoln.driving.junction_local_controller import JunctionLocalController
+        self.vehicle.get_physics_control = Mock(side_effect=AssertionError('unneeded physics setup'))
+        with patch('modules.lincoln.driving.junction_local_controller.ExitBranchClassifier') as classifier:
+            classifier.return_value.requires_exit_selection.return_value = False
+            local = JunctionLocalController(self.node,self.route,None,[p.s for p in self.route])
+        self.assertFalse(local.should_take_over(1000.,30.))
+        self.vehicle.get_physics_control.assert_not_called()
 
     def test_speed_integral_can_compensate_for_cruising_resistance_and_resets_at_stop(self):
         local = self.controller
@@ -408,6 +466,51 @@ class JunctionControlTests(unittest.TestCase):
         self.assertEqual(brake,0.)
         self.assertEqual(local.longitudinal_control(1.,0.,.05),(0.,1.))
         self.assertEqual(local.integral,0.)
+
+
+class ExitBranchClassificationTests(unittest.TestCase):
+    def setUp(self):
+        from modules.lincoln.driving.junction_local_controller import ExitBranchClassifier
+        self.classifier_type = ExitBranchClassifier
+        self.incoming = Waypoint(0)
+        self.entry = Waypoint(4)
+        self.entry.road_id, self.entry.junction_id, self.entry.is_junction = 100,99,True
+        self.main = Waypoint(4)
+        self.main.road_id,self.main.junction_id,self.main.is_junction = 200,99,True
+        self.branch_probe,self.main_probe = Waypoint(22),Waypoint(22)
+        self.entry.following = [self.branch_probe]
+        self.main.following = [self.main_probe]
+        self.entry.get_junction = lambda:SimpleNamespace(get_waypoints=lambda _: [(self.entry,self.branch_probe),(self.main,self.main_probe)])
+        self.main.get_junction = self.entry.get_junction
+
+    def classifier(self, selected_lanes=1, alternate=True):
+        def road(identity,count,links='',junction='-1'):
+            lanes=''.join(f'<lane id="-{i}" type="driving"/>' for i in range(1,count+1))
+            return f'<road id="{identity}" junction="{junction}"><link>{links}</link><lanes><laneSection><right>{lanes}</right></laneSection></lanes></road>'
+        def connector(identity,outgoing):
+            return road(identity,1,f'<predecessor elementType="road" elementId="1" contactPoint="end"/>'
+                        f'<successor elementType="road" elementId="{outgoing}" contactPoint="start"/>','99')
+        connections='<connection incomingRoad="1" connectingRoad="100"><laneLink from="-1" to="-1"/></connection>'
+        if alternate:
+            connections+='<connection incomingRoad="1" connectingRoad="200"><laneLink from="-1" to="-1"/></connection>'
+        xml='<OpenDRIVE>'+road(1,3)+road(3,selected_lanes)+road(4,3)+connector(100,3)+connector(200,4)+f'<junction id="99">{connections}</junction></OpenDRIVE>'
+        return self.classifier_type(SimpleNamespace(to_opendrive=lambda:xml))
+
+    def test_selected_narrow_exit_is_local_but_main_continuation_remains_tm(self):
+        classifier=self.classifier()
+        self.assertTrue(classifier.requires_exit_selection(self.entry,self.incoming))
+        self.assertFalse(classifier.requires_exit_selection(self.main,self.incoming))
+
+    def test_normal_ninety_degree_turn_remains_tm(self):
+        self.branch_probe.transform.rotation.yaw=90.
+        self.assertFalse(self.classifier().requires_exit_selection(self.entry,self.incoming))
+
+    def test_equal_width_fork_and_single_connection_do_not_trigger_exit_control(self):
+        self.assertFalse(self.classifier(selected_lanes=3).requires_exit_selection(self.entry,self.incoming))
+        self.assertFalse(self.classifier(alternate=False).requires_exit_selection(self.entry,self.incoming))
+
+    def test_starting_inside_selected_exit_can_infer_incoming_road(self):
+        self.assertTrue(self.classifier().requires_exit_selection(self.entry))
 
 
 if __name__ == '__main__':

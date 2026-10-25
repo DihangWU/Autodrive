@@ -83,6 +83,8 @@ class VehicleRegistrationTests(unittest.TestCase):
         with patch('modules.lincoln.driving.carla_autopilot.reserve_traffic_manager_port', return_value=nullcontext(8000)):
             controller = CarlaAutopilotController(client, world, vehicle, SimpleNamespace(tm_port=8000))
         client.get_trafficmanager.assert_called_once_with(8000)
+        manager = client.get_trafficmanager.return_value
+        manager.vehicle_percentage_speed_difference.assert_called_once_with(vehicle, -30.)
         vehicle.set_autopilot.assert_not_called()
         self.assertEqual(controller.traffic_manager_port, 8000)
         controller.enable()
@@ -91,6 +93,9 @@ class VehicleRegistrationTests(unittest.TestCase):
         # 第一次和之后的开关均不能再次创建服务、选择端口。
         client.get_trafficmanager.assert_called_once_with(8000)
         self.assertEqual(vehicle.set_autopilot.call_args.args, (True, 8000))
+        controller.set_navigation_speed(65.)
+        controller.clear_route()
+        manager.vehicle_percentage_speed_difference.assert_called_with(vehicle, -30.)
 
 
 if __name__ == '__main__':
