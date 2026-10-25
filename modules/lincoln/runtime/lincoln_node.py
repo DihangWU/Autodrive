@@ -17,6 +17,7 @@ from modules.lincoln.visualization.spectator import SpectatorMixin
 from modules.lincoln.driving.manual_driving import ManualDrivingMixin
 from modules.lincoln.driving.controller import load_driving_controller
 from modules.lincoln.driving.xbox_controller import XboxController
+from modules.lincoln.driving.navigation import LincolnNavigation
 
 
 CARLA_CLIENT_WORKERS = 2
@@ -50,6 +51,7 @@ class LincolnNode(SpawnVehicleMixin, SensorStreamsMixin, VehicleMarkersMixin,
         self.camera_owner = CameraOwnership(args.host, args.port, self.uid)
         self.active = None
         self.control_source = 'idle'
+        self.last_manual_control = 0.
         self.xbox = XboxController(self.uid, args.xbox_device)
         self.cruise_speed = None
         self.cruise_integral = 0.
@@ -60,6 +62,7 @@ class LincolnNode(SpawnVehicleMixin, SensorStreamsMixin, VehicleMarkersMixin,
         self.stop_requested = False
         self.rviz = None
         self.driver = None
+        self.navigation = None
         self.geometry = json.loads(GEOMETRY_CONFIG_FILE.read_text())
         self.tf = TransformBroadcaster(self)
         self.static_tf = StaticTransformBroadcaster(self)
@@ -76,6 +79,7 @@ class LincolnNode(SpawnVehicleMixin, SensorStreamsMixin, VehicleMarkersMixin,
         try:
             self.spawn_car()
             self.driver = load_driving_controller(args.driver, self.client, self.world, self.car, args)
+            self.navigation = LincolnNavigation(self)
             specs = json.loads(SENSOR_CONFIG_FILE.read_text())
             if args.sensors == 'none':
                 specs = []

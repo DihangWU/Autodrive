@@ -159,9 +159,9 @@ Town04 实测匹配 43/43 个 CARLA 红绿灯、12 个 SUMO 控制器，手动�
 
 已运行的 SUMO 管理进程不会热加载 Python 改动。应用到当前联仿时，先正常退出 NPC、CoBridge，再退出 SUMO；保留 CARLA 和 Lincoln。随后依次在独立终端重新运行原来的 `run_sumo`、`run_cobridge`、`add_npc -n 200`。SUMO 会话会重建，NPC 从新批次重新生成；Lincoln 保留在 CARLA 中，待桥恢复后重新登记并投影到 SUMO。无需重新启动 CARLA 或更改地图。
 
-## SUMO GUI：低延迟、双坐标复制、仿真倍率与 Lincoln 跟踪
+## SUMO GUI：低延迟、双坐标复制、仿真倍率、Lincoln 跟踪与导航
 
-四个功能同时集成到同一个项目 SUMO GUI，仍只执行 `run_sumo`，不需要单独启动面板或功能脚本。
+五个功能同时集成到同一个项目 SUMO GUI，仍只执行 `run_sumo`，不需要单独启动面板或功能脚本。
 
 ```text
 foundation/sumo/init/
@@ -172,7 +172,8 @@ foundation/sumo/init/
     ├── low_latency_sumo_gui.py   # 缩短 GUI 额外重绘等待
     ├── coordinate_sumo_gui.py    # 双坐标状态栏和两种坐标复制
     ├── simu_speed_sumo_gui.py    # 仿真时间相对真实时间的倍率
-    └── lincoln_track_sumo_gui.py # 按车辆增删动态生成 Lincoln 跟踪按钮
+    ├── lincoln_track_sumo_gui.py # 按车辆增删动态生成 Lincoln 跟踪按钮
+    └── lincoln_navigation_sumo_gui.py # 右键导航、地图选点与异步桥请求
 ```
 
 调用链：`run_sumo` → `sumo_init.sh` → `sumo_init.py` → `gui/build_sumo_gui.py` 的 `ensure_sumo_gui()` → `.runtime/sumo/gui/sumo-gui`。各功能文件仅通过 `source_patches()` 提供源码修改，不编译、不启动进程，也不推进时钟；构建器合并同一 C++ 文件的全部修改后只编译一次，避免覆盖。例如双坐标和倍率对 `GUIApplicationWindow.cpp` 的修改会一起生效。旧的 `init/build_low_latency_sumo_gui.py` 已移除，不保留旧入口或另一套构建流程。
@@ -189,6 +190,40 @@ foundation/sumo/init/
 
 Lincoln 退出／重启导致按钮增删时，会立即更新状态栏及按钮容器布局并请求重绘；即使新旧按钮数量相同，也不等待窗口缩放。最后一辆 Lincoln 退出后隐藏按钮容器，重新加入后恢复显示，避免残留空白占位。此修改只涉及 GUI 显示，不改变车辆生命周期、通信或联仿时钟。已编译并在独立界面验证连续等数量替换、全部删除、重新加入及点击跟踪。用户原始短暂空白未在独立窗口稳定复现；当前正在运行的旧 GUI 已自行恢复，仍需下次正常重启 SUMO 加载修复后观察。
 
+### 在 SUMO 选择 Lincoln 导航目的地
+
+左键 Lincoln 按钮的 tracking 行为保持原样：点击居中并持续跟踪，再点取消。**右键同一个按钮 → `Navigate here` → 在当前 SUMO 地图上左键点击目的地**；Esc 取消选点。选点的点击及释放单独处理，不会触发原地图的拖动、选择或改变 tracking 状态。导航菜单及其提示统一使用英文，使用 SUMO 原有字体，不额外加载中文字体。
+
+菜单只是进入选点模式，“此处”最终指地图点击的位置。选点和导航不自动打开或关闭 tracking；原先正在跟踪的车辆仍继续跟踪。状态栏和车辆按钮悬停提示显示 `planning`、`navigating`、`arrived`、`cancelled`、`unreachable` 或 `error`。多车分别保存任务与状态，按车辆身份转发，车辆退出后不能把旧任务应用到新车辆。GUI 在后台限时发送请求，状态轮询约每秒一次，多车轮询交替进行；不会在窗口主线程等待桥回复。
+
+新增功能的职责如下，其他入口仅负责接线：
+
+```text
+foundation/sumo/init/gui/lincoln_navigation_sumo_gui.py
+    右键菜单、地图选点、Esc 取消、异步请求与英文状态提示
+foundation/cobridge/lincoln/navigation.py
+    校验地图与车辆身份、匹配可行驶车道、SUMO→CARLA 坐标转换与任务转发
+modules/lincoln/driving/navigation.py
+    后台规划 CARLA 合法有向车道路线、驾驶线程执行、接近减速与到达停车
+```
+
+通信链路：**SUMO GUI → CoBridge 本地控制 socket → 既有 Lincoln 登记连接 → 本车驾驶控制器 → CARLA**。路线和传感器时钟保持现状，新增规划工作线程不调用 `world.tick()`。桥不拥有车辆，也不直接向它发送油门；CARLA 默认控制器通过 Traffic Manager 的 `set_path` 执行路线，交通灯和避障仍由 TM 负责。到达附近时导航通过现有控制出口减速，到达同一目标车道、距离约 4 米且车速低于 0.3 m/s 后关闭 TM 并保持刹车。目标后的路线点只为 TM 前瞻提供缓冲，不会让车辆继续驶过目标。
+
+点击位置必须距可行驶车道 12 米以内，桥从**当前实际 SUMO 路网**匹配车道中心并保留高度，转换使用实际 `netOffset`。上下层道路二维重叠且高度存在歧义时拒绝猜测，提示在未重叠路段重新选点。Lincoln 再用 CARLA 道路拓扑检查可达性，只允许道路前进及合法同向换道，不会打通隔离带或修改地图；无法找到路线时提示 `unreachable` 并停车等待。
+
+每辆车同一时间只有一个导航任务；新目的地替换旧任务。规划结果带任务 ID，手动接管后即使旧规划稍后完成，也不会重新接管。面板／键盘驾驶或明确关闭自动驾驶会取消导航；保持刹车状态下手柄输入可以接管，导航运行时手柄轴不会打断自动驾驶。新导航规划期间先停车等待，规划完成后自动驾驶。自定义 `--driver` 可实现 `set_route(locations)` 和 `clear_route()`，未实现时明确报错，不回退成随机驾驶。
+
+正常启动命令不变：先运行地图匹配的 SUMO 与 CoBridge，再 `add_lincoln`。这次升级涉及三个长驻进程，已有的 SUMO GUI、CoBridge、Lincoln 都需要正常退出后重新启动才能加载；不需要重启或切换 CARLA 地图。GUI 默认连接本工程 `.runtime/cobridge/control.sock`；使用自定义桥 socket 时，在启动 SUMO 的终端设置：
+
+```bash
+export AUTODRIVE_BRIDGE_SOCKET=/absolute/path/to/control.sock
+run_sumo
+```
+
+导航读取的路网路径必须与桥接入的 SUMO 相同；更新后若仍是旧版 Lincoln，导航会提示重启，不会把命令发给其他车辆。
+
+导航验证：29 项 Lincoln 检查通过，其中新增检查覆盖坐标与高度、远离道路／重叠层拒绝、地图及车辆身份隔离、过期状态拒绝、有向路线不可逆行、手动接管及迟到规划取消、到达停车和刹车保持。独立嵌套 X11 中验证了英文菜单、选点请求、Esc 取消和 tracking 目标不变；通过实际桥请求处理器与实际 Lincoln 登记线程完成 GUI→桥→后台规划→驾驶接口→到达状态回传。CARLA Town04 多组只读路线规划约 6～74 ms；另使用临时无传感器 Lincoln、复用当前 CoBridge 时钟完成约 45 米导航，车辆实际前进、减速并到达停车，随后清理该车和登记。全城任意交通条件下的长距离通行仍取决于地图连接、信号灯和 TM 行驶行为。
+
 ### 构建环境和缓存
 
 需要 Linux、本机 SUMO 完整源码、已完成的 GUI CMake 编译产物，以及原编译器和 `ar`。当前环境示例：
@@ -202,11 +237,11 @@ run_sumo
 
 只在项目内复制并编译 5 个源文件：`GUIRunThread.cpp`、`GUIApplicationWindow.cpp`、`GUISUMOAbstractView.cpp`、`GUIGlObject.cpp`、`GUIGLObjectPopupMenu.cpp`。分别使用对应 CMake 目标的 `flags.make`，在 GUI、窗口和图元三个静态库的副本中替换对象，再复用原 `CMakeFiles/sumo-gui.dir/link.txt` 链接项目程序。系统 SUMO 的源码、静态库和 `bin/sumo-gui` 不改写。
 
-构建器和全部四个功能文件的内容、实际修改文本、原源码、编译/链接参数、依赖库/对象信息都参加缓存校验，任一功能变化都会触发重新构建。每个修改锚点必须唯一，缺失或版本不匹配时明确报错，不静默忽略功能或退回系统 GUI。构建锁避免并发写入，编译与链接完成后原子替换项目程序，随后更新签名；编译或链接失败保留原程序和签名。只有发行版可执行文件、没有源码或 CMake 产物时不能进行这种构建。无变化时直接复用缓存。
+构建器和全部五个功能文件的内容、实际修改文本、原源码、编译/链接参数、依赖库/对象信息都参加缓存校验，任一功能变化都会触发重新构建。每个修改锚点必须唯一，缺失或版本不匹配时明确报错，不静默忽略功能或退回系统 GUI。构建锁避免并发写入，编译与链接完成后原子替换项目程序，随后更新签名；编译或链接失败保留原程序和签名。只有发行版可执行文件、没有源码或 CMake 产物时不能进行这种构建。无变化时直接复用缓存。
 
 ```text
 .runtime/sumo/gui/
-├── sumo-gui          # 同时包含四个功能的项目可执行文件
+├── sumo-gui          # 同时包含五个功能的项目可执行文件
 ├── build/            # 5 个修改后源码副本、对象、3 个库副本
 ├── build.log         # 编译、链接及错误输出
 ├── build.lock
@@ -543,7 +578,8 @@ modules/lincoln/
 │   ├── carla_autopilot.py          # CARLA Traffic Manager
 │   ├── traffic_manager_port.py      # 多车 TM 端口分配与互斥
 │   ├── manual_driving.py           # 面板、手柄与定速的统一控制输出
-│   └── xbox_controller.py          # 线性手柄输入、设备独占配对与热插拔
+│   ├── xbox_controller.py          # 线性手柄输入、设备独占配对与热插拔
+│   └── navigation.py               # 导航规划、任务取消与到达停车
 ├── integration/bridge_registration.py # 向桥登记、状态查询与重连
 ├── sensors/
 │   ├── sensor_streams.py           # 原生传感器与 ROS 发布

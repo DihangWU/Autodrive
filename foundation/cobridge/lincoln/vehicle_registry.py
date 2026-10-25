@@ -4,6 +4,7 @@ import re
 
 from foundation.cobridge.lincoln.vehicle_projection import LincolnSumoProjection
 from foundation.cobridge.lincoln.traffic_manager_clock import LincolnTrafficManagerClock
+from foundation.cobridge.lincoln.navigation import LincolnNavigation
 
 SUMO_ID_PATTERN = r'lincoln[0-9]+'
 BLUEPRINT_ID = 'vehicle.lincoln.mkz_2020'
@@ -16,6 +17,7 @@ class LincolnVehicleRegistry:
         self.projection = None
         self.sumo_adapter = None
         self.retired = set()
+        self.navigation = LincolnNavigation(self)
 
     def register_vehicle(self, command, owner):
         self.validate_tm_port(command.get('tm_port'))
@@ -44,6 +46,7 @@ class LincolnVehicleRegistry:
             raise ValueError('车辆登记身份不匹配。')
         record['owner'] = owner
         record['tm_port'] = command.get('tm_port')
+        record['navigation_supported'] = command.get('navigation_supported') is True
         return self.vehicle_status(record)
 
     def handle_request(self, command, owner):
@@ -57,6 +60,7 @@ class LincolnVehicleRegistry:
         if action == 'lincoln.status':
             self.validate_tm_port(command.get('tm_port'))
             record['tm_port'] = command.get('tm_port')
+            self.navigation.receive_status(record, command.get('navigation'))
             return self.vehicle_status(record)
         if action == 'lincoln.unregister':
             self.retire_vehicle(key)
@@ -70,6 +74,10 @@ class LincolnVehicleRegistry:
         status['tm_ready'] = port is None or (
             port in clock.managers and clock.carla_adapter is not None
             and clock.carla_adapter.world.id == record['world_id'])
+        if record.get('navigation_request'):
+            status['navigation_request'] = record['navigation_request']
+        if record.get('navigation'):
+            status['navigation'] = record['navigation']
         return status
 
     @staticmethod

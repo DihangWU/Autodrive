@@ -28,6 +28,13 @@ class DrivingController(ABC):
     def close(self):
         self.disable()
 
+    def set_route(self, locations):
+        """导航可选接口；自定义算法未实现时明确拒绝，不悄悄使用随机驾驶。"""
+        raise NotImplementedError('This driving controller does not implement set_route navigation.')
+
+    def clear_route(self):
+        """导航取消时清除控制器保存的路线；自定义导航算法可覆盖。"""
+
 
 def load_driving_controller(spec, client, world, vehicle, args):
     if spec == DEFAULT_DRIVER:

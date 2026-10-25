@@ -45,9 +45,13 @@ class LincolnBridgeRegistration:
                     if client is None:
                         client = ControlClient(self.path, REQUEST_TIMEOUT)
                         status = client.command('lincoln.register', **self.vehicle_identity(),
-                                                role_name=self.node.uid, sumo_id=self.sumo_id)
+                                                role_name=self.node.uid, sumo_id=self.sumo_id,
+                                                navigation_supported=True)
                     else:
-                        status = client.command('lincoln.status', **self.vehicle_identity())
+                        status = client.command('lincoln.status', **self.vehicle_identity(),
+                                                navigation=self.node.navigation.snapshot())
+                    if status.get('navigation_request'):
+                        self.node.navigation.submit(status['navigation_request'])
                     self.latest_status = status
                     self.publish_registration_state(status)
                 except Exception as error:

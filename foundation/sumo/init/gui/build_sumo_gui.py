@@ -1,4 +1,4 @@
-"""统一构建带低延迟、双坐标复制、仿真倍率和 Lincoln 跟踪的项目 SUMO GUI。
+"""统一构建带低延迟、双坐标复制、仿真倍率、Lincoln 跟踪和导航的项目 SUMO GUI。
 
 各功能模块仅提供源码修改。本文件合并同一源文件的修改、编译副本，
 复用本机已有 SUMO 静态库完成链接，并维护 .runtime/sumo/gui/ 缓存。
@@ -31,9 +31,9 @@ SOURCE_TARGETS = {
 }
 
 sys.path.insert(0, str(PROJECT_DIR))
-from foundation.sumo.init.gui import low_latency_sumo_gui, coordinate_sumo_gui, simu_speed_sumo_gui, lincoln_track_sumo_gui
+from foundation.sumo.init.gui import low_latency_sumo_gui, coordinate_sumo_gui, simu_speed_sumo_gui, lincoln_track_sumo_gui, lincoln_navigation_sumo_gui
 
-FEATURE_MODULES = (low_latency_sumo_gui, coordinate_sumo_gui, simu_speed_sumo_gui, lincoln_track_sumo_gui)
+FEATURE_MODULES = (low_latency_sumo_gui, coordinate_sumo_gui, simu_speed_sumo_gui, lincoln_track_sumo_gui, lincoln_navigation_sumo_gui)
 BUILD_MODULE_FILES = (MODULE_FILE, *(Path(module.__file__).resolve() for module in FEATURE_MODULES))
 
 
@@ -170,7 +170,7 @@ def ensure_sumo_gui():
             return GUI_BINARY
         patched_sources = [patch_source_text(item) for item in sources]
         WORK_DIR.mkdir(exist_ok=True)
-        print('[SUMO] 正在构建 GUI：低延迟、双坐标与复制、仿真倍率、Lincoln 跟踪…', flush=True)
+        print('[SUMO] 正在构建 GUI：低延迟、双坐标与复制、仿真倍率、Lincoln 跟踪与导航…', flush=True)
         with BUILD_LOG_FILE.open('a') as log:
             objects = [compile_source_copy(build_src, item, text, command[0], log)
                        for item, text in zip(sources, patched_sources)]

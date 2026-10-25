@@ -46,6 +46,14 @@ class CarlaAutopilotController(DrivingController):
             self.vehicle.set_autopilot(False, self.port)
             self.enabled = False
 
+    def set_route(self, locations):
+        """沿已验证的 CARLA 路线驾驶，交通规则和避障继续由 TM 负责。"""
+        self.enable()
+        self.manager.set_path(self.vehicle, locations, True)
+
+    def clear_route(self):
+        self.manager.set_path(self.vehicle, [], True)
+
     @property
     def traffic_manager_port(self):
         return self.port  # 手动模式也提前向桥登记，开关按钮不再触发首次连接。
