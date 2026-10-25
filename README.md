@@ -159,28 +159,33 @@ Town04 实测匹配 43/43 个 CARLA 红绿灯、12 个 SUMO 控制器，手动�
 
 已运行的 SUMO 管理进程不会热加载 Python 改动。应用到当前联仿时，先正常退出 NPC、CoBridge，再退出 SUMO；保留 CARLA 和 Lincoln。随后依次在独立终端重新运行原来的 `run_sumo`、`run_cobridge`、`add_npc -n 200`。SUMO 会话会重建，NPC 从新批次重新生成；Lincoln 保留在 CARLA 中，待桥恢复后重新登记并投影到 SUMO。无需重新启动 CARLA 或更改地图。
 
-## SUMO GUI 的低延迟构建
+## SUMO GUI：低延迟、双坐标复制与仿真倍率
 
-普通 `run_sumo` 现在自动使用本工程专用的 SUMO GUI。调用链为：
+三个功能同时集成到同一个项目 SUMO GUI，仍只执行 `run_sumo`，不需要单独启动面板或功能脚本。
 
 ```text
-run_sumo
-  → foundation/sumo/init/sumo_init.sh
-  → foundation/sumo/init/sumo_init.py
-  → foundation/sumo/init/build_low_latency_sumo_gui.py
-      ensure_low_latency_sumo_gui()
-  → 启动 .runtime/sumo/gui/sumo-gui
+foundation/sumo/init/
+├── sumo_init.py                  # SUMO 进程、TraCI 管理和启动
+├── sumo_init.sh
+└── gui/
+    ├── build_sumo_gui.py         # 统一构建、缓存、编译与链接
+    ├── low_latency_sumo_gui.py   # 缩短 GUI 额外重绘等待
+    ├── coordinate_sumo_gui.py    # 双坐标状态栏和两种坐标复制
+    └── simu_speed_sumo_gui.py    # 仿真时间相对真实时间的倍率
 ```
 
-构建脚本与启动入口同放在 `foundation/sumo/init/`，运行产物仍放在 `.runtime/sumo/gui/`。构建脚本顶部使用中文 `__doc__` 说明职责；脚本仅负责构建，进程管理仍由原来的 `sumo_init.py` 完成。用户不需要额外执行构建命令。
+调用链：`run_sumo` → `sumo_init.sh` → `sumo_init.py` → `gui/build_sumo_gui.py` 的 `ensure_sumo_gui()` → `.runtime/sumo/gui/sumo-gui`。三个功能文件仅通过 `source_patches()` 提供源码修改，不编译、不启动进程，也不推进时钟；构建器合并同一 C++ 文件的全部修改后只编译一次，避免覆盖。例如双坐标和倍率对 `GUIApplicationWindow.cpp` 的修改会一起生效。旧的 `init/build_low_latency_sumo_gui.py` 已移除，不保留旧入口或另一套构建流程。
 
-原因是 SUMO 1.22.0 的 Linux GUI 在 `GUIRunThread::tryStep()` 中，默认会每秒为重绘预留一次 100 ms 休眠。这段等待会使 TraCI 的 `simulationStep()` 偶发变慢；CoBridge 串行推进两端，因而也会拖慢 CARLA 新帧和点云。此问题曾在旧 Git `833f60e` 中修正。
+### 界面功能
 
-当前修复只在项目内复制 `GUIRunThread.cpp`，将该处 `sleep(100)` 改为 `sleep(10)`，编译这一个源文件，复制并更新 GUI 静态库，然后复用现有 CMake 链接参数生成独立可执行文件。系统 SUMO 的原始源码、静态库与 `bin/sumo-gui` 均不改写，其他 GUI 功能和地图数据保持原样。
+- **低延迟**：保留既有 SUMO 1.22.0 修复，将 `GUIRunThread::tryStep()` 中 Linux 每秒一次的 `sleep(100)` 改为 `sleep(10)`，减少 GUI 重绘等待阻塞 TraCI。它不改变 0.05 秒仿真步长。
+- **双坐标**：鼠标位于地图时，底部原 XY 位置显示 `SUMO x:… y:… | CARLA x:… y:…`。偏移实时取自当前加载路网的 `netOffset`，转换为 `CARLA x = SUMO x − offset_x`、`CARLA y = offset_y − SUMO y`；不修改路网坐标或翻转视图。
+- **右键复制**：地图右键菜单提供 `Copy SUMO coordinates` 和 `Copy CARLA coordinates`，复制六位小数的 `x, y`。使用右键打开菜单时保存的地图位置，鼠标之后移到菜单上不会改变复制坐标；原有地理坐标菜单保留。
+- **仿真倍率**：底部固定显示 `Sim/real: 0.85x` 等数值，表示仿真秒数÷真实秒数；使用单调时钟统计最近约 2 秒，每约 0.5 秒更新。样本不足时显示 `--`，约 1.2 秒无新步骤后显示 `0.00x`；重新加载、开始和停止时重置统计。倍率是 GUI 观测到的平均值，不是某一模块的独立 CPU 耗时。
 
-### 构建环境与缓存
+### 构建环境和缓存
 
-需要 Linux、本机 SUMO 完整源码、已经完成的 GUI CMake 编译产物，以及原编译器和 `ar`。当前本机配置示例：
+需要 Linux、本机 SUMO 完整源码、已完成的 GUI CMake 编译产物，以及原编译器和 `ar`。当前环境示例：
 
 ```bash
 export SUMO_HOME="$HOME/sumo-1.22.0"
@@ -189,34 +194,38 @@ export SUMO_BUILD_DIR="$SUMO_HOME/build/cmake-build"
 run_sumo
 ```
 
-构建依赖 SUMO 源码中的 `src/gui/GUIRunThread.cpp`、CMake 目录中的 `src/gui/CMakeFiles/gui.dir/flags.make`、`src/CMakeFiles/sumo-gui.dir/link.txt` 及相应库和对象。只有发行版可执行文件、没有源码或编译产物时，无法使用这种增量构建方式；脚本会明确报错，不会静默退回带 100 ms 等待的原版 GUI。
+只在项目内复制并编译 5 个源文件：`GUIRunThread.cpp`、`GUIApplicationWindow.cpp`、`GUISUMOAbstractView.cpp`、`GUIGlObject.cpp`、`GUIGLObjectPopupMenu.cpp`。分别使用对应 CMake 目标的 `flags.make`，在 GUI、窗口和图元三个静态库的副本中替换对象，再复用原 `CMakeFiles/sumo-gui.dir/link.txt` 链接项目程序。系统 SUMO 的源码、静态库和 `bin/sumo-gui` 不改写。
 
-首次运行会提示正在构建。后续根据构建脚本、源码、编译/链接参数和依赖库/对象的文件信息检查缓存，输入未变则直接返回项目 GUI 路径。缓存校验仍需保留源码及原 CMake 编译产物。文件锁避免重复并发构建；编译和链接成功后原子替换可执行文件与缓存签名，失败时保留原产物并报告日志位置。
+构建器和全部三个功能文件的内容、实际修改文本、原源码、编译/链接参数、依赖库/对象信息都参加缓存校验，任一功能变化都会触发重新构建。每个修改锚点必须唯一，缺失或版本不匹配时明确报错，不静默忽略功能或退回系统 GUI。构建锁避免并发写入，编译与链接完成后原子替换项目程序，随后更新签名；编译或链接失败保留原程序和签名。只有发行版可执行文件、没有源码或 CMake 产物时不能进行这种构建。无变化时直接复用缓存。
 
 ```text
 .runtime/sumo/gui/
-├── sumo-gui          # 项目专用 GUI
-├── build/            # 修改后的源码副本、对象和 GUI 静态库副本
-├── build.log         # 编译、链接命令及错误输出
-├── build.lock        # 构建锁
-└── signature         # 构建输入签名
+├── sumo-gui          # 同时包含三个功能的项目可执行文件
+├── build/            # 5 个修改后源码副本、对象、3 个库副本
+├── build.log         # 编译、链接及错误输出
+├── build.lock
+└── signature
 ```
 
-无窗口模式继续使用原生 `sumo`，不执行 GUI 构建，也不要求 GUI 的编译产物：
+无窗口模式仍使用原生 `sumo`，跳过全部 GUI 构建：
 
 ```bash
 run_sumo --headless
 ```
 
-如需提前构建，可在工程根目录执行（通常不需要）：
+需要提前构建时，在工程根目录执行：
 
 ```bash
-~/carla-venv/bin/python foundation/sumo/init/build_low_latency_sumo_gui.py
+~/carla-venv/bin/python foundation/sumo/init/gui/build_sumo_gui.py
 ```
 
-已打开的旧 SUMO 窗口不会自动更换程序。正常退出旧 `run_sumo` 后重新运行即可生效；首次构建耗时不计入随后 SUMO 进程的 20 秒启动等待。
+已运行的旧 SUMO GUI 不会热加载新的可执行文件。新功能在下次 `run_sumo` 时生效；如果当前有联仿车辆，应先正常退出 NPC、CoBridge 和 SUMO，再启动 SUMO、CoBridge 并重新添加 NPC。首次构建时间不计入随后 SUMO 进程的启动等待。
 
-临时副本的完整联仿验证中，CARLA 帧间隔峰值约从 150 ms 降至 57 ms，点云最长到达间隔约从 213 ms 降至 127 ms。这说明周期性长阻塞明显减少，但不是对所有显示抖动的零延迟保证。正式构建已验证首次编译、缓存复用、输入变化重建、失败不更新签名、GUI 实际启动路径及 `--headless` 跳过构建。 正式产物的独立对照测试中，80 次步进调用在预热后，原版最长等待约 100.3 ms、4 次超过 50 ms；项目 GUI 最长约 10.3 ms、没有超过 50 ms 的调用。
+### 验证记录
+
+三个功能已一起编译进同一个程序，并在独立隐藏的嵌套 X11 测试界面中检查，不移动用户鼠标或读取、改写用户剪贴板。状态栏双坐标和右键两个复制项同时可见；同一右键位置分别复制出 `452.460000, 487.814929` 与 `-50.560000, -64.054929`，与本次 Town04 的实际路网偏移量一致。按不同真实间隔驱动私有 TraCI，界面分别显示 `0.50x`、`1.00x`、`2.00x`，暂停后显示 `0.00x`。6 项临时构建检查覆盖功能合并、原源码锚点、真实缓存命中、功能文件参与签名、构建失败保留旧程序以及未知版本拒绝替换。
+
+低延迟功能的既有独立对照中，80 次预热后步进调用，原版最长等待约 100.3 ms、4 次超过 50 ms；项目修复版最长约 10.3 ms、没有超过 50 ms 的调用。GUI 倍率仍受整个联仿链和显示事件处理影响，不保证任意场景下无卡顿。
 
 ## Lincoln 的启动和出生位置
 

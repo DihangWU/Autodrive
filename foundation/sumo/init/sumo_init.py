@@ -41,7 +41,7 @@ from foundation.ipc import JsonServer
 from foundation.sumo.client import SOCKET_FILE
 from foundation.sumo.traci import connect
 from foundation.sumo.runtime import SumoRuntime
-from foundation.sumo.init.build_low_latency_sumo_gui import ensure_low_latency_sumo_gui
+from foundation.sumo.init.gui.build_sumo_gui import ensure_sumo_gui
 
 
 CONSOLE = Console(COMPONENT_NAME)
@@ -104,7 +104,7 @@ def run(args, stopped):
         except BlockingIOError:
             raise RuntimeError('该 SUMO 控制入口已在运行。')
         try:
-            binary = SUMO_BINARY if args.headless else str(ensure_low_latency_sumo_gui())
+            binary = SUMO_BINARY if args.headless else str(ensure_sumo_gui())
             command = [binary, '-c', str(config),
                        '--remote-port', str(args.port), '--step-length', str(args.step_length),
                        '--lateral-resolution', str(SUMO_LATERAL_RESOLUTION),
