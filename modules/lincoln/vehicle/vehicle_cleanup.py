@@ -53,6 +53,7 @@ class VehicleCleanupMixin:
         for entry in self.sensors:
             entry['actor'] = None
         self.sensors.clear()
+        self.sensor_display_frames.clear()
         self.latest_images.clear()
         self.driver = None
         self.car = self.spectator = self.world = None

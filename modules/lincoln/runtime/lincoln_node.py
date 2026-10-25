@@ -29,6 +29,8 @@ class LincolnNode(SpawnVehicleMixin, SensorStreamsMixin, VehicleMarkersMixin,
         self.args = args
         self.actors = []
         self.sensors = []
+        self.sensor_display_frames = {}
+        self.sensor_display_frame = -1
         self.latest_images = {}
         self.last_frame = -1
         self.last_mosaic = 0.
@@ -73,6 +75,8 @@ class LincolnNode(SpawnVehicleMixin, SensorStreamsMixin, VehicleMarkersMixin,
                 specs = []
             elif args.sensors == 'lidar':
                 specs = [s for s in specs if s['kind'] == 'lidar']
+            self.synchronize_radar_display = (self.world.get_settings().synchronous_mode
+                                              and any(s['kind'] == 'lidar' for s in specs))
             for spec in specs:
                 self.spawn_sensor(spec)
             self.make_markers()
@@ -84,4 +88,7 @@ class LincolnNode(SpawnVehicleMixin, SensorStreamsMixin, VehicleMarkersMixin,
             raise
         print(f'VEHICLE {self.uid} CARLA_ID={self.car.id} MAP={self.world.get_map().name}', flush=True)
         print(f'Sensors={len(self.sensors)}; ROS namespace=/{self.uid}; SUMO id is assigned by the bridge.', flush=True)
+        if self.synchronize_radar_display:
+            count = sum('display_pub' in entry for entry in self.sensors)
+            print(f'RViz 雷达同帧显示：{count} 路，等待完整物理帧；原始话题保留配置频率。', flush=True)
 
