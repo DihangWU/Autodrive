@@ -171,6 +171,8 @@ class LincolnNavigation:
         self.stopped = threading.Event()
         self.worker = None
         self.last_received = None
+        self.gta_request = None
+        self.gta_status = dict(enabled=False, request_id=None, error='')
         self.status = dict(state='idle', detail='No destination')
         self.result = None
         self.goal = None
@@ -191,6 +193,37 @@ class LincolnNavigation:
     def snapshot(self):
         with self.lock:
             return dict(self.status)
+
+    def gta_snapshot(self):
+        """登记线程只读取已执行状态，不把待执行指令当作成功。"""
+        with self.lock:
+            return dict(self.gta_status)
+
+    def submit_gta_mode(self, request):
+        """登记线程提交开关；TM 调用留在唯一驾驶线程。"""
+        if (not isinstance(request, dict) or not isinstance(request.get('id'), str)
+                or type(request.get('enabled')) is not bool):
+            return
+        with self.lock:
+            if request['id'] != self.gta_status['request_id']:
+                self.gta_request = dict(request)
+
+    def apply_gta_mode(self):
+        """无论是否正在导航都处理开关；失败回报旧状态，不中断驾驶。"""
+        with self.lock:
+            request, self.gta_request = self.gta_request, None
+        if request is None:
+            return
+        error = ''
+        enabled = self.gta_status['enabled']
+        try:
+            self.node.driver.set_gta_mode(request['enabled'])
+            enabled = request['enabled']
+        except Exception:
+            logging.exception('GTA Mode 切换失败')
+            error = 'GTA Mode could not be applied; check Lincoln logs.'
+        with self.lock:
+            self.gta_status = dict(enabled=enabled, request_id=request['id'], error=error)
 
     def submit(self, task):
         """登记线程仅入队；重复轮询同一任务不会重复启动导航。"""
@@ -477,6 +510,7 @@ class LincolnNavigation:
             if view is not None:
                 view.show_tm_path(transform.location, [])
         if local.active:
+            local.ignore_traffic_lights = self.gta_status['enabled']
             control = local.run_step(snapshot, speed_limit)
             self.set_controller_status('local', local.wait_reason)
             if local.can_return_to_tm(self.route_progress, transform, current, snapshot.timestamp.elapsed_seconds):
@@ -492,6 +526,7 @@ class LincolnNavigation:
 
     def update(self, snapshot):
         """只由现有驾驶线程调用：路线监测、提前减速、单向进入终点停车。"""
+        self.apply_gta_mode()
         with self.lock:
             reset, self.reset_requested = self.reset_requested, False
         if reset:

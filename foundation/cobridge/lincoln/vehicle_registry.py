@@ -47,6 +47,8 @@ class LincolnVehicleRegistry:
         record['owner'] = owner
         record['tm_port'] = command.get('tm_port')
         record['navigation_supported'] = command.get('navigation_supported') is True
+        record['gta_supported'] = command.get('gta_supported') is True
+        self.navigation.receive_gta_status(record, command.get('gta_status'))
         return self.vehicle_status(record)
 
     def handle_request(self, command, owner):
@@ -61,6 +63,7 @@ class LincolnVehicleRegistry:
             self.validate_tm_port(command.get('tm_port'))
             record['tm_port'] = command.get('tm_port')
             self.navigation.receive_status(record, command.get('navigation'))
+            self.navigation.receive_gta_status(record, command.get('gta_status'))
             return self.vehicle_status(record)
         if action == 'lincoln.unregister':
             self.retire_vehicle(key)
@@ -74,6 +77,8 @@ class LincolnVehicleRegistry:
         status['tm_ready'] = port is None or (
             port in clock.managers and clock.carla_adapter is not None
             and clock.carla_adapter.world.id == record['world_id'])
+        if record.get('gta_request'):
+            status['gta_request'] = record['gta_request']
         if record.get('navigation_request'):
             status['navigation_request'] = record['navigation_request']
         if record.get('navigation'):

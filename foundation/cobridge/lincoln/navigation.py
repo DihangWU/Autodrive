@@ -86,6 +86,31 @@ class LincolnNavigation:
             record['navigation'] = dict(id=task['id'], state='planning', detail='Waiting for Lincoln route planning')
         return record.get('navigation', dict(state='idle', detail='No destination'))
 
+    def handle_gta_mode(self, command, carla, sumo):
+        """复用车辆与地图身份校验；桥只转发请求，不直接操作车辆 TM。"""
+        record = self.find_vehicle(command, carla, sumo)
+        if not record.get('gta_supported'):
+            raise ValueError('Restart this Lincoln to enable GTA Mode support.')
+        if command['action'] == 'lincoln.gta.set':
+            if type(command.get('enabled')) is not bool:
+                raise ValueError('GTA Mode enabled must be a boolean.')
+            record['gta_request'] = dict(id=uuid.uuid4().hex, enabled=command['enabled'])
+        status = record.get('gta_status', dict(enabled=False, request_id=None, error=''))
+        request = record.get('gta_request')
+        pending = request is not None and request['id'] != status.get('request_id')
+        return dict(status, pending=pending)
+
+    @staticmethod
+    def receive_gta_status(record, status):
+        """只有所属 Lincoln 回报的状态有效，旧确认不能覆盖新的开关请求。"""
+        if not isinstance(status, dict) or type(status.get('enabled')) is not bool:
+            return
+        request = record.get('gta_request')
+        if request and status.get('request_id') != request['id']:
+            return
+        record['gta_status'] = dict(enabled=status['enabled'], request_id=status.get('request_id'),
+                                    error=str(status.get('error', ''))[:300])
+
     @staticmethod
     def receive_status(record, status):
         if not isinstance(status, dict) or not record.get('navigation_request'):

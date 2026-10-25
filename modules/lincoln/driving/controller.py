@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 import importlib
 
 DEFAULT_DRIVER = 'carla'
-ROAD_SPEED_LIMIT_FACTOR = 1.3  # Lincoln 允许以道路限速的 130% 作为目标速度。
+ROAD_SPEED_LIMIT_FACTOR = 1.2  # Lincoln 允许以道路限速的 120% 作为目标速度。
 
 
 class DrivingController(ABC):
@@ -38,6 +38,10 @@ class DrivingController(ABC):
 
     def set_navigation_speed(self, speed_kmh):
         """可选的导航限速接口；不接管自定义控制器的纵向算法。"""
+
+    def set_gta_mode(self, enabled):
+        """可选的单车信号灯规则开关；自定义控制器未实现时明确拒绝。"""
+        raise NotImplementedError("This driving controller does not support GTA Mode.")
 
     def navigation_preview(self):
         """返回控制器公开的前瞻路点；无此能力时不绘制虚构路径。"""

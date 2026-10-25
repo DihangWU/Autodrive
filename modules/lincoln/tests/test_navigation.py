@@ -16,6 +16,39 @@ from modules.lincoln.driving.navigation import (LincolnNavigation, plan_route,
 from modules.lincoln.driving.manual_driving import ManualDrivingMixin
 
 
+class GtaControlTests(unittest.TestCase):
+    def test_manual_mode_applies_on_driver_thread_and_cancel_keeps_mode(self):
+        node = SimpleNamespace(driver=Mock(), autopilot=False)
+        navigation = LincolnNavigation(node)
+        request = dict(id='on', enabled=True)
+        navigation.submit_gta_mode(request)
+        node.driver.set_gta_mode.assert_not_called()
+        self.assertFalse(navigation.gta_snapshot()['enabled'])
+        navigation.update(None)  # 没有导航任务也能处理开关。
+        node.driver.set_gta_mode.assert_called_once_with(True)
+        navigation.submit_gta_mode(request)
+        navigation.update(None)
+        node.driver.set_gta_mode.assert_called_once_with(True)
+        navigation.cancel()
+        self.assertTrue(navigation.gta_snapshot()['enabled'])
+        navigation.submit_gta_mode(dict(id='off', enabled=False))
+        navigation.update(None)
+        self.assertFalse(navigation.gta_snapshot()['enabled'])
+
+    def test_failure_does_not_report_false_success_or_retry_forever(self):
+        node = SimpleNamespace(driver=Mock(), autopilot=False)
+        node.driver.set_gta_mode.side_effect = RuntimeError('TM unavailable')
+        navigation = LincolnNavigation(node)
+        navigation.submit_gta_mode(dict(id='on', enabled=True))
+        with self.assertLogs(level='ERROR'):
+            navigation.update(None)
+        self.assertFalse(navigation.gta_snapshot()['enabled'])
+        self.assertTrue(navigation.gta_snapshot()['error'])
+        navigation.submit_gta_mode(dict(id='on', enabled=True))
+        navigation.update(None)
+        node.driver.set_gta_mode.assert_called_once()
+
+
 class DestinationTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -58,6 +91,36 @@ class DestinationTests(unittest.TestCase):
         record['navigation_supported'] = False
         with self.assertRaisesRegex(ValueError, 'Restart'):
             service.handle(command, world, sumo)
+
+    def test_gta_requests_wait_for_owner_ack_and_isolate_vehicles(self):
+        first = dict(sumo_id='lincoln0', world_id=1, actor_id=2, state='synced',
+                     navigation_supported=True, gta_supported=True)
+        second = dict(first, sumo_id='lincoln1', actor_id=3)
+        service = BridgeNavigation(SimpleNamespace(records={'1:2': first, '1:3': second}))
+        world = SimpleNamespace(world=SimpleNamespace(id=1))
+        sumo = SimpleNamespace(network=self.network)
+        command = dict(action='lincoln.gta.set', sumo_id='lincoln0', owner_key='lincoln:1:2',
+                       network_file=str(self.path), enabled=True)
+        response = service.handle_gta_mode(command, world, sumo)
+        self.assertTrue(response['pending'])
+        self.assertFalse(response['enabled'])
+        request = first['gta_request']
+        BridgeNavigation.receive_gta_status(first, dict(enabled=True, request_id='stale'))
+        self.assertNotIn('gta_status', first)
+        BridgeNavigation.receive_gta_status(first, dict(enabled=True, request_id=request['id']))
+        response = service.handle_gta_mode(dict(command, action='lincoln.gta.status'), world, sumo)
+        self.assertTrue(response['enabled'])
+        self.assertFalse(response['pending'])
+        self.assertNotIn('gta_request', second)
+        response = service.handle_gta_mode(dict(command, enabled=False), world, sumo)
+        self.assertTrue(response['enabled'])  # 关闭确认回来之前仍显示实际开启。
+        self.assertTrue(response['pending'])
+        for change in (dict(enabled='false'), dict(owner_key='lincoln:1:99')):
+            with self.assertRaises(ValueError):
+                service.handle_gta_mode(dict(command, **change), world, sumo)
+        first['gta_supported'] = False
+        with self.assertRaisesRegex(ValueError, 'Restart'):
+            service.handle_gta_mode(command, world, sumo)
 
     def test_stale_status_does_not_overwrite_current_task(self):
         record = dict(navigation_request=dict(id='new'), navigation=dict(id='new', state='planning'))
@@ -230,12 +293,12 @@ class RouteTests(unittest.TestCase):
         navigation.route[3].lane_id = -2
         self.assertEqual(navigation.planned_speed(0, 1000, 8), 80.)
 
-    def test_normal_navigation_allows_thirty_percent_above_road_limit(self):
+    def test_normal_navigation_allows_twenty_percent_above_road_limit(self):
         navigation, node, _, _ = self.active_navigation(0.,0.)
         node.car.get_speed_limit = lambda:150.
         self.assertEqual(navigation.planned_speed(0,1000.,0.),120.)
         node.car.get_speed_limit = lambda:50.
-        self.assertEqual(navigation.planned_speed(0,1000.,0.),65.)
+        self.assertEqual(navigation.planned_speed(0,1000.,0.),60.)
 
     def test_junction_uses_eighty_kmh_cap(self):
         navigation, node, _, _ = self.active_navigation(0.,8.)
@@ -340,6 +403,17 @@ class JunctionControlTests(unittest.TestCase):
         wrong_lane.road_id = 3
         self.assertFalse(local.can_return_to_tm(76.,transform,wrong_lane,11.))
 
+    def test_gta_mode_bypasses_lights_and_restores_stopping(self):
+        local = self.controller
+        local.signal_stops = [(32., SimpleNamespace(get_state=lambda:carla.TrafficLightState.Red))]
+        local.activate(29.)
+        local.ignore_traffic_lights = True
+        self.assertGreater(local.run_step(self.sample(29.),20.).throttle,0.)
+        self.assertEqual(local.wait_reason, '')
+        local.ignore_traffic_lights = False
+        self.assertEqual(local.run_step(self.sample(29.,now=10.05),20.).brake,1.)
+        self.assertEqual(local.wait_reason, 'traffic_light')
+
     def test_red_and_yellow_stop_then_green_releases(self):
         local = self.controller
         light = SimpleNamespace(get_state=lambda:carla.TrafficLightState.Red)
@@ -372,6 +446,7 @@ class JunctionControlTests(unittest.TestCase):
         obstacle = SimpleNamespace(id=2,type_id='vehicle.test',
                                     bounding_box=carla.BoundingBox(carla.Location(),carla.Vector3D(x=2.5,y=1,z=1)))
         self.actors.append(obstacle)
+        local.ignore_traffic_lights = True  # GTA Mode 仍须避障。
         position = carla.Location(x=35)
         state = SimpleNamespace(get_transform=lambda:carla.Transform(position))
         local.activate(31.)

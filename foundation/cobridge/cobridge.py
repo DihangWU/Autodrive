@@ -122,6 +122,8 @@ class BridgeRuntime:
                         modules=self.modules.snapshot(), lincolns=self.lincoln.snapshot(),
                         npc_batches=self.npc.snapshot(),
                         traffic_lights=dict(self.traffic_lights.details))
+        if command['action'] in ('lincoln.gta.set', 'lincoln.gta.status'):
+            return self.lincoln.navigation.handle_gta_mode(command, self.carla, self.sumo)
         if command['action'] in ('lincoln.navigate', 'lincoln.navigation.status'):
             return self.lincoln.navigation.handle(command, self.carla, self.sumo)
         if command['action'].startswith('lincoln.'):

@@ -77,6 +77,32 @@ class VehicleRegistrationTests(unittest.TestCase):
         self.registry.traffic_managers.managers[8000] = object()
         self.assertTrue(self.registry.handle_request(dict(command, action='lincoln.status'), self.owner)['tm_ready'])
 
+    def test_gta_command_round_trip_uses_registered_owner_and_driver_ack(self):
+        from modules.lincoln.driving.navigation import LincolnNavigation
+        node = SimpleNamespace(driver=Mock(), autopilot=False)
+        navigation = LincolnNavigation(node)
+        command = dict(self.command, navigation_supported=True, gta_supported=True,
+                       gta_status=navigation.gta_snapshot())
+        self.registry.handle_request(command, self.owner)
+        record = self.registry.records['20:10']
+        request = dict(id='mode-on', enabled=True)
+        record['gta_request'] = request
+        status = self.registry.handle_request(dict(command, action='lincoln.status'), self.owner)
+        navigation.submit_gta_mode(status['gta_request'])
+        self.assertFalse(record['gta_status']['enabled'])
+        navigation.update(None)
+        status_command = dict(command, action='lincoln.status', gta_status=navigation.gta_snapshot())
+        with self.assertRaises(ValueError):
+            self.registry.handle_request(status_command, object())
+        self.registry.handle_request(status_command, self.owner)
+        self.assertTrue(record['gta_status']['enabled'])
+        self.assertEqual(record['gta_status']['request_id'], 'mode-on')
+        # 桥重新登记时接收车辆实际状态；新车辆仍默认关闭。
+        self.registry.handle_request(dict(status_command, action='lincoln.register'), self.owner)
+        self.assertTrue(record['gta_status']['enabled'])
+        self.registry.handle_request(dict(self.command, actor_id=11), object())
+        self.assertNotIn('gta_request', self.registry.records['20:11'])
+
     def test_tm_is_prepared_while_vehicle_remains_manual(self):
         client, vehicle, world = Mock(), Mock(), Mock()
         world.get_settings.return_value.synchronous_mode = True
@@ -84,7 +110,7 @@ class VehicleRegistrationTests(unittest.TestCase):
             controller = CarlaAutopilotController(client, world, vehicle, SimpleNamespace(tm_port=8000))
         client.get_trafficmanager.assert_called_once_with(8000)
         manager = client.get_trafficmanager.return_value
-        manager.vehicle_percentage_speed_difference.assert_called_once_with(vehicle, -30.)
+        manager.vehicle_percentage_speed_difference.assert_called_once_with(vehicle, -20.)
         vehicle.set_autopilot.assert_not_called()
         self.assertEqual(controller.traffic_manager_port, 8000)
         controller.enable()
@@ -93,9 +119,16 @@ class VehicleRegistrationTests(unittest.TestCase):
         # 第一次和之后的开关均不能再次创建服务、选择端口。
         client.get_trafficmanager.assert_called_once_with(8000)
         self.assertEqual(vehicle.set_autopilot.call_args.args, (True, 8000))
-        controller.set_navigation_speed(65.)
+        controller.set_gta_mode(True)
+        manager.ignore_lights_percentage.assert_called_with(vehicle, 100.)
+        controller.disable()
+        controller.enable()
+        manager.ignore_lights_percentage.assert_called_with(vehicle, 100.)
+        controller.set_gta_mode(False)
+        manager.ignore_lights_percentage.assert_called_with(vehicle, 0.)
+        controller.set_navigation_speed(60.)
         controller.clear_route()
-        manager.vehicle_percentage_speed_difference.assert_called_with(vehicle, -30.)
+        manager.vehicle_percentage_speed_difference.assert_called_with(vehicle, -20.)
 
 
 if __name__ == '__main__':

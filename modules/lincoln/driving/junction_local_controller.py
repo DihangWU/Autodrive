@@ -24,7 +24,7 @@ STEER_RATE = 1.5
 OBSTACLE_REFRESH = 0.25
 OBSTACLE_MARGIN = 0.4
 BRAKING_DECELERATION = 2.5
-MAX_LATERAL_ACCELERATION = 15.0
+MAX_LATERAL_ACCELERATION = 10.0
 SPEED_KP, SPEED_KI, SPEED_KD = 0.9, 0.35, 0.05
 SPEED_INTEGRAL_LIMIT = 10.0
 MAX_THROTTLE = 1.0
@@ -149,6 +149,7 @@ class JunctionLocalController:
         self.windows = self.find_junction_windows()
         self.window_index = 0
         self.active = False
+        self.ignore_traffic_lights = False
         self.exit_stable_since = None
         self.progress = 0.
         self.last_time = None
@@ -296,6 +297,8 @@ class JunctionLocalController:
         return stops
 
     def signal_speed_limit(self, speed_limit):
+        if self.ignore_traffic_lights:
+            return speed_limit
         for station, light in self.signal_stops:
             gap = station - self.progress - self.front - .5
             # 前轴已经通过停止位置时，不在路口中间响应身后的相位变化。

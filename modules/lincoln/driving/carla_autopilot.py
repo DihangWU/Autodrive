@@ -19,6 +19,7 @@ class CarlaAutopilotController(DrivingController):
         self.mode = None
         self.next_check = 0
         self.navigation_speed = None
+        self.gta_mode = False
         # 车辆启动前台准备，不把创建服务、加载地图等冷启动留给驾驶按钮。
         started = time.monotonic()
         print('[Lincoln] 正在准备 Traffic Manager…', flush=True)
@@ -43,6 +44,7 @@ class CarlaAutopilotController(DrivingController):
         started = time.monotonic()
         self.refresh_clock_mode()
         self.vehicle.set_autopilot(True, self.port)
+        self.manager.ignore_lights_percentage(self.vehicle, 100. if self.gta_mode else 0.)
         self.enabled = True
         logging.info('自动驾驶启用：端口 %s，耗时 %.3f 秒', self.port, time.monotonic() - started)
 
@@ -78,6 +80,11 @@ class CarlaAutopilotController(DrivingController):
         if speed_kmh != self.navigation_speed:
             self.manager.set_desired_speed(self.vehicle, speed_kmh)
             self.navigation_speed = speed_kmh
+
+    def set_gta_mode(self, enabled):
+        """仅修改本车对红黄灯的响应，不改相位、避障或其他交通参与者。"""
+        self.manager.ignore_lights_percentage(self.vehicle, 100. if enabled else 0.)
+        self.gta_mode = enabled
 
     def navigation_preview(self):
         """读取本车 TM 的真实动作路点；它们不是完整的内部轨迹。"""

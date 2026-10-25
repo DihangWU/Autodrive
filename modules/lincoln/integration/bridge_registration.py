@@ -46,10 +46,14 @@ class LincolnBridgeRegistration:
                         client = ControlClient(self.path, REQUEST_TIMEOUT)
                         status = client.command('lincoln.register', **self.vehicle_identity(),
                                                 role_name=self.node.uid, sumo_id=self.sumo_id,
-                                                navigation_supported=True)
+                                                navigation_supported=True, gta_supported=True,
+                                                gta_status=self.node.navigation.gta_snapshot())
                     else:
                         status = client.command('lincoln.status', **self.vehicle_identity(),
-                                                navigation=self.node.navigation.snapshot())
+                                                navigation=self.node.navigation.snapshot(),
+                                                gta_status=self.node.navigation.gta_snapshot())
+                    if status.get('gta_request'):
+                        self.node.navigation.submit_gta_mode(status['gta_request'])
                     if status.get('navigation_request'):
                         self.node.navigation.submit(status['navigation_request'])
                     self.latest_status = status
