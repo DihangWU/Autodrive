@@ -29,6 +29,7 @@ def parse_lincoln_arguments():
     parser.add_argument('--duration', type=float, default=0, help='运行现实秒数后退出；0 为持续运行')
     parser.add_argument('--autopilot', action='store_true', help='生成后立即开启选定驾驶算法；默认手动驾驶')
     parser.add_argument('--driver', default='carla', help='carla 使用 Traffic Manager；或填写 Python模块:类名')
+    parser.add_argument('--xbox-device', type=Path, help='固定配对 Linux 手柄设备，如 /dev/input/js1 或 /dev/input/by-id/...；默认占用一个空闲 Xbox 手柄')
     parser.add_argument('--bridge-socket', type=Path, default=SOCKET_FILE)
     args = parser.parse_args()
     if args.no_sensors:

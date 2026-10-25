@@ -27,6 +27,7 @@ class FreeCameraControls(CameraPanel):
         self.drag_position = None
         self.last_time = time.monotonic()
         self.enabled = None
+        self.xbox_highlighted = set()
         self.build_controls()
         # 车辆驾驶区在左，自由视角区在右；仍然只有一个顶层窗口。
         self.controls = window.winfo_children()[-1]
@@ -47,7 +48,29 @@ class FreeCameraControls(CameraPanel):
                 widget.destroy()
             elif 'wraplength' in widget.keys():
                 widget.configure(wraplength=0)
+        self.camera_buttons = {}
+        def collect_camera_buttons(widget):
+            for child in widget.winfo_children():
+                if hasattr(child, 'state') and 'text' in child.keys():
+                    self.camera_buttons[child.cget('text')] = child
+                collect_camera_buttons(child)
+        collect_camera_buttons(self.controls)
         self.mode_changed()
+
+    def show_xbox_camera_input(self, enabled):
+        """相机手柄输入在对应按钮上显示按下提示，面板操作时不覆盖鼠标状态。"""
+        forward, strafe, rise, turn, tilt = self.node.xbox.camera_input
+        pressed = {label for label, active in (
+            ('前进', forward > 0), ('后退', forward < 0),
+            ('左移', strafe < 0), ('右移', strafe > 0),
+            ('上升', rise > 0), ('下降', rise < 0),
+            ('右转', turn > 0), ('左转', turn < 0),
+            ('抬头', tilt > 0), ('低头', tilt < 0)) if active} if enabled else set()
+        for label in self.xbox_highlighted - pressed:
+            self.camera_buttons[label].state(['!pressed'])
+        for label in pressed:
+            self.camera_buttons[label].state(['pressed'])
+        self.xbox_highlighted = pressed
 
     def clear_keyboard(self):
         self.keys.clear()
@@ -56,6 +79,7 @@ class FreeCameraControls(CameraPanel):
         self.releases.clear()
 
     def mode_changed(self):
+        self.node.camera_panel_active = False
         self.clear_keyboard()
         self.stop_motion()
         self.release_mouse()
@@ -138,6 +162,7 @@ class FreeCameraControls(CameraPanel):
         self.set_speed(self.speed_slider.get())
 
     def update(self):
+        self.node.xbox.camera_speed = self.speed
         with self.node.camera_owner.access() as owned:
             enabled = owned and self.node.camera_control_enabled and not self.node.follow
         if not enabled and self.enabled:
@@ -155,10 +180,14 @@ class FreeCameraControls(CameraPanel):
             if command[0] == 'view':
                 view = command[1]
         if not enabled:
+            self.node.camera_panel_active = False
+            self.show_xbox_camera_input(False)
             return
         actions = self.actions | {KEY_ACTIONS[k] for k in self.keys if k in KEY_ACTIONS}
         if self.auto_forward:
             actions.add('forward')
+        self.node.camera_panel_active = bool(actions or view is not None)
+        self.show_xbox_camera_input(self.node.free_follow and not self.node.camera_panel_active)
         if not actions and view is None:
             return
         with self.node.camera_lock:

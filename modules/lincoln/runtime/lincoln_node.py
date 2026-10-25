@@ -16,6 +16,7 @@ from modules.lincoln.visualization.vehicle_markers import VehicleMarkersMixin
 from modules.lincoln.visualization.spectator import SpectatorMixin
 from modules.lincoln.driving.manual_driving import ManualDrivingMixin
 from modules.lincoln.driving.controller import load_driving_controller
+from modules.lincoln.driving.xbox_controller import XboxController
 
 
 CARLA_CLIENT_WORKERS = 2
@@ -44,9 +45,12 @@ class LincolnNode(SpawnVehicleMixin, SensorStreamsMixin, VehicleMarkersMixin,
         self.control_lock = threading.RLock()
         self.free_pose = None
         self.camera_control_enabled = False
+        self.camera_panel_active = False
         from modules.lincoln.visualization.camera_ownership import CameraOwnership
         self.camera_owner = CameraOwnership(args.host, args.port, self.uid)
         self.active = None
+        self.control_source = 'idle'
+        self.xbox = XboxController(self.uid, args.xbox_device)
         self.cruise_speed = None
         self.cruise_integral = 0.
         self.cruise_time = None

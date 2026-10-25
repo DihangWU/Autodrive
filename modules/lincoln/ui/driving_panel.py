@@ -38,9 +38,11 @@ def run_mouse_driving_panel(node, done):
             node.cruise_time = None
         stop_driving()
         return 'break'
+    driving_buttons = {}
     for i, (label, action) in enumerate([('油门', 'go'), ('左转', 'left'),
                                        ('刹车', 'brake'), ('右转', 'right')]):
         button = tk.Button(grid, text=label, width=12, height=3)
+        driving_buttons[action] = button
         if i == 0:
             button.grid(row=0, column=1, padx=4, pady=4)
         else:
@@ -91,16 +93,12 @@ def run_mouse_driving_panel(node, done):
     window.bind('<FocusOut>', focus_out)
     window.bind('<Leave>', lambda event: release() if event.widget == window else None)
     def reverse():
-        node.set_autopilot(False)
-        node.cruise_speed = None
-        node.active = None
-        velocity = node.car.get_velocity()
-        if math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2) > .5:
-            return
-        node.reverse = not node.reverse
+        node.toggle_reverse()
         gear.config(text='当前：倒车' if node.reverse else '当前：前进')
     gear = tk.Button(driving, text='当前：前进', command=reverse)
     gear.pack(pady=5)
+    xbox_status = tk.Label(driving, text='Xbox：等待空闲手柄', wraplength=450)
+    xbox_status.pack()
     def keyboard_drive():
         if pressed_keys & {'w', 'a', 's', 'd'}:
             node.set_autopilot(False)
@@ -159,7 +157,10 @@ def run_mouse_driving_panel(node, done):
                               command=toggle_camera_mode)
     def toggle_free_follow():
         stop_driving()
-        node.set_camera_mode(False, free_follow=not node.free_follow)
+        enable = not node.free_follow
+        if enable:
+            node.set_autopilot(True)
+        node.set_camera_mode(False, free_follow=enable)
         free_camera.mode_changed()
         window.focus_set()
     free_follow_button = tk.Button(camera_row, text='自由跟随', command=toggle_free_follow)
@@ -202,21 +203,39 @@ def run_mouse_driving_panel(node, done):
         free_camera.close()
         node.stop_requested = True
     window.protocol('WM_DELETE_WINDOW', close)
+    camera_mode = (node.follow, node.free_follow)
     # 退出信号由应用入口统一处理。
     def poll():
+        nonlocal camera_mode
         if done():
             window.destroy()
             return
         node.drive()
+        current_camera_mode = (node.follow, node.free_follow)
+        if current_camera_mode != camera_mode:
+            stop_driving()
+            free_camera.mode_changed()
+            camera_mode = current_camera_mode
         free_camera.update()
+        gear.config(text='当前：倒车' if node.reverse else '当前：前进')
         camera_button.config(text="释放视角" if node.follow else "跟随本车")
         free_follow_button.config(relief='sunken' if node.free_follow else 'raised')
         autopilot_button.config(text='关闭自动驾驶' if node.autopilot else '开启自动驾驶')
         velocity = node.car.get_velocity()
         control = node.car.get_control()
+        xbox_active = node.control_source == 'xbox'
+        for action, button in driving_buttons.items():
+            gamepad_pressed = xbox_active and {
+                'go': control.throttle > 0., 'brake': control.brake > 0.,
+                'left': control.steer < 0., 'right': control.steer > 0.,
+            }[action]
+            pressed = gamepad_pressed or action in (node.active or '')
+            button.config(relief='sunken' if pressed else 'raised',
+                          bg='#b9dfef' if gamepad_pressed else window.cget('bg'))
+        xbox_status.config(text=node.xbox.status)
         speed.config(text=f'{math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)*3.6:.1f} km/h'
                      + (f'  定速目标：{node.cruise_speed*3.6:.1f} km/h' if node.cruise_speed is not None else '')
-                     + f'\n指令：{node.active or "收油／滑行"}  油门：{control.throttle:.2f}  刹车：{control.brake:.2f}')
+                     + f'\n指令：{"Xbox" if xbox_active else node.active or "收油／滑行"}  油门：{control.throttle:.2f}  刹车：{control.brake:.2f}')
         window.after(30, poll)
     window.after(30, poll)
     try:

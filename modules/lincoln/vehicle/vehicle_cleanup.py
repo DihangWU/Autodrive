@@ -11,6 +11,7 @@ RVIZ_EXIT_TIMEOUT = 3
 
 class VehicleCleanupMixin:
     def stop_vehicle_controller(self):
+        self.xbox.close()
         if self.driver is not None:
             self.driver.close()
         self.autopilot = False
