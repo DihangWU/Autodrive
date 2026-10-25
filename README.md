@@ -318,6 +318,9 @@ add_lincoln --driver modules.lincoln.driving.my_driver:MyDriver --autopilot
 # 保留全部传感器，只关闭 RViz 窗口
 add_lincoln --no-rviz
 
+# 关闭全部传感器和 RViz，保留驾驶面板、手动/自动驾驶及视角控制
+add_lincoln --no-sensors
+
 # 只生成 LiDAR，不打开面板和 RViz
 add_lincoln --sensors lidar --headless --no-rviz
 
@@ -330,6 +333,8 @@ add_lincoln --headless --no-rviz --duration 10
 # 使用自己的 RViz 布局
 add_lincoln --rviz-config /完整路径/my_layout.rviz
 ```
+
+`--no-sensors` 复用现有的 `--sensors none --no-rviz` 执行路径，不创建任何 CARLA 传感器，也不打开 RViz；默认仍保留驾驶面板、手动驾驶、定速、自动驾驶、跟随/释放视角和桥登记同步。该开关优先于同时指定的 `--sensors all/lidar`，不隐式开启 `--headless`，也不跳过车辆控制需要的 ROS 初始化。不带这个参数时仍默认创建 31 个传感器并打开 RViz；原有 `--sensors none` 单独使用的行为保持不变。 默认、无传感器、组合自动驾驶、与 `--sensors lidar` 同时指定及原有单独 `--sensors none` 五种参数组合已校验。Town04 实测新开关输出 `Sensors=0`，没有本车附属传感器或 RViz 进程，车辆仍成功登记并同步到 SUMO，定时退出清理通过。
 
 `--headless` 只关闭驾驶面板，不隐式关闭传感器或 RViz。`--no-rviz` 时不构建无订阅者的道路背景；其余传感器仍按所选配置运行。传感器采样频率按世界步长量化，实际回调频率受仿真帧率影响，不代表一定达到对应现实频率。原始话题的相机与雷达队列只保留最新帧；LiDAR 原始队列保留最新一轮完整扫描，慢发布会丢弃过时数据。严格同帧显示另有最多 4 帧的有界缓存，见下文。运行中更改世界步长后应重新启动车辆，重新量化传感器配置。
 
