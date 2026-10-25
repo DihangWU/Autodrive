@@ -1,4 +1,26 @@
 """将一批 SUMO NPC 映射为 CARLA 无动力学代理，复用官方坐标和灯光转换。"""
+import math
+
+GROUND_CLEARANCE = 0.02  # 包围盒底面与道路之间保留 2 cm。
+MAX_ROAD_HEIGHT_DIFFERENCE = 2.0  # 高度差过大时不吸附，防止误选立交桥层级。
+MAX_ROAD_HORIZONTAL_DISTANCE = 6.0
+
+
+def road_aligned_transform(carla, transform, waypoint, model_bottom):
+    """保持 SUMO 的 XY 和航向，将车型底面贴到 CARLA 局部道路平面。"""
+    road = waypoint.transform
+    up = road.get_up_vector()
+    yaw = math.radians(transform.rotation.yaw)
+    # 车辆可能正在换道，保留其航向，只让车身法线对齐道路法线。
+    along = up.x * math.cos(yaw) + up.y * math.sin(yaw)
+    across = -up.x * math.sin(yaw) + up.y * math.cos(yaw)
+    pitch = math.degrees(math.atan2(-along, up.z))
+    roll = math.degrees(math.asin(max(-1., min(1., across))))
+    dx = transform.location.x - road.location.x
+    dy = transform.location.y - road.location.y
+    height = road.location.z + (GROUND_CLEARANCE - model_bottom - up.x * dx - up.y * dy) / up.z
+    return carla.Transform(carla.Location(transform.location.x, transform.location.y, height),
+                           carla.Rotation(pitch, transform.rotation.yaw, roll))
 
 
 class NpcCarlaProjection:
@@ -6,6 +28,8 @@ class NpcCarlaProjection:
         self.carla, self.sumo, self.tools = carla_adapter, sumo_adapter, tools
         self.sync_lights = sync_lights
         self.blueprints = carla_adapter.world.get_blueprint_library()
+        self.road_map = carla_adapter.world.get_map()
+        self.model_bottoms = {}
         self.actors = {}
         self.subscribed = set()
         self.last_lights = {}
@@ -48,6 +72,30 @@ class NpcCarlaProjection:
             raise RuntimeError(f'{name} 创建失败：{response.error}')
         self.actors[name] = response.actor_id
 
+    def find_road_waypoint(self, transform):
+        """使用包含高度的原位置查找车道，并拒绝远处或高度不相符的道路。"""
+        waypoint = self.road_map.get_waypoint(transform.location, project_to_road=True,
+                                              lane_type=self.tools.carla.LaneType.Driving)
+        if waypoint is None:
+            raise ValueError('未找到对应的 CARLA 行车道')
+        road = waypoint.transform
+        horizontal = math.hypot(transform.location.x - road.location.x,
+                                transform.location.y - road.location.y)
+        if (abs(transform.location.z - road.location.z) > MAX_ROAD_HEIGHT_DIFFERENCE
+                or horizontal > MAX_ROAD_HORIZONTAL_DISTANCE or road.get_up_vector().z < .5):
+            raise ValueError('未找到高度和位置相符的 CARLA 路面，暂缓更新，避免吸附到错误层级')
+        return waypoint
+
+    def model_bottom(self, name, type_id):
+        """每种车型只读取一次实际模型包围盒，不把车身高度当作原点偏移。"""
+        if type_id not in self.model_bottoms:
+            vehicle = self.carla.world.get_actor(self.actors[name])
+            if vehicle is None:
+                raise RuntimeError(f'无法读取 NPC 模型几何：{name}')
+            box = vehicle.bounding_box
+            self.model_bottoms[type_id] = box.location.z - box.extent.z
+        return self.model_bottoms[type_id]
+
     def update_vehicles(self, traffic, states, present):
         """一批提交姿态和灯光；apply_batch_sync(False) 不额外 tick。"""
         t = self.tools
@@ -61,6 +109,11 @@ class NpcCarlaProjection:
                 continue
             actor = self.read_actor(traffic.created[name], state)
             transform = t.helper.get_carla_transform(actor.transform, actor.extent)
+            try:
+                waypoint = self.find_road_waypoint(transform)
+            except ValueError as error:
+                self.errors[name] = str(error)
+                continue  # 新车暂不生成；已有车辆保留上一处有效贴地位置。
             if name not in self.actors:
                 try:
                     self.spawn_actor(name, actor, transform)
@@ -68,6 +121,9 @@ class NpcCarlaProjection:
                 except RuntimeError as error:
                     self.errors[name] = str(error)
                     continue  # 插入点暂时被占用，下一帧再试，不额外生成 SUMO 车辆。
+            transform = road_aligned_transform(t.carla, transform, waypoint,
+                                               self.model_bottom(name, actor.type_id))
+            self.errors.pop(name, None)
             commands.append(t.carla.command.ApplyTransform(self.actors[name], transform))
             names.append(name)
             if self.sync_lights:
