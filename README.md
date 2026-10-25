@@ -269,6 +269,18 @@ RViz 启动器只把本车已生成的雷达点云显示项切换到 `display_po
 
 重启实测：22 个原生 radar 的 `sensor_tick` 均为 0，RViz 的 23 个点云显示项全部使用 `display_points`。一轮行驶约 16.3 米的采样中，匹配到 84 组完整的 23 路雷达、显示 TF 和车模消息，采集时间戳一致；显示车模与同时间戳真实车辆 TF 的位置差最大约 0.03 毫米。原始话题间隔中位数分别为 LiDAR 100 ms、角雷达 50 ms、短距雷达 100 ms；各显示话题的现实到达间隔中位数约 103 ms，RViz 日志未出现警告或错误。部分显示消息未被诊断订阅者收到，不能据此宣称无丢包或原子渲染。用户确认其他雷达相对车身的拖延和跳动明显改善。7 项离线专项检查及原有 15 项回归通过。
 
+## RViz 车道线背景
+
+默认显示项现为 `CARLA lane markings`，仍订阅本车的 `/roads` 话题。只按当前 CARLA 地图绘制车道标线，不生成覆盖整条车道的实心路面，避免近似路面遮挡地面点云、重叠面片闪烁以及挡住其他车道的标线。用户自己的 RViz 模板名称不会被改写。
+
+车道线改用沿道路横向展开的窄 `TRIANGLE_LIST` 标线带，保留原有中心位置、颜色、宽度、立交高度和约 3 厘米的显示抬高，虚线仍按示意的 3 米线段/3 米空隙绘制。窄带宽度来自标线定义（如 0.15 米），不是车道宽度。每个三角形显式指定颜色，使 RViz 不受场景灯光影响而将白线调暗；三角形正面统一朝上。道路背景只在车辆启动时生成一次，不随转弯重新裁剪。Town04 全图检查了 463 个车道分组、66,641 对相邻采样点，没有线段被距离连续性过滤跳过；移除实心面前后，58,009 段标线几何一致。后续将这 58,009 段转换为 116,018 个窄标线三角形，几何检查全部朝上；没有通过额外补线改变地图含义。地图未定义的标线、路缘/草地及虚线原本的空隙仍不补成实线。
+
+移除实心面解决了闪烁，但剩余缺线来自原先 `LINE_LIST` 的相机朝向线带渲染：本机实际使用的 Ogre 1.12.10 会缓存该线带的顶点，相机跟随车辆改变位置和方向后，静态标线可能投影变窄或近乎消失。改用贴地标线几何后不再依赖这种相机朝向计算。相关实现可参见 [RViz LineListMarker](https://github.com/ros2/rviz/blob/jazzy/rviz_default_plugins/src/rviz_default_plugins/displays/marker/markers/line_list_marker.cpp) 与 [Ogre BillboardChain](https://github.com/OGRECave/ogre/blob/v1.12.10/OgreMain/src/OgreBillboardChain.cpp)。本工程没有改动 ROS 或 Ogre 安装文件。
+
+实际 RViz 已更新为窄标线带，用户确认车辆附近、弯道内侧及转弯时的缺线恢复正常。4 项专项检查通过，覆盖正反向车道宽度和朝向、虚线间隔、不连接断开的车道以及不虚构未知标线。
+
+正常重启 Lincoln 后永久生效，无需重启 CARLA、SUMO 或 CoBridge。诊断期间通过临时道路 Marker 更新验证现有 RViz；旧车辆进程的道路发布缓存仍包含旧绘制方式，重新打开 RViz 前应重启 Lincoln，以加载新版背景。
+
 ## CARLA → CoBridge → SUMO
 
 ```text
@@ -330,7 +342,7 @@ modules/lincoln/
 │   └── ros_messages.py             # 图像、点云、时间和坐标转换
 ├── visualization/
 │   ├── vehicle_markers.py          # 模型与传感器安装点
-│   ├── road_map.py                 # CARLA 道路背景
+│   ├── road_map.py                 # CARLA 车道标线，不绘制实心路面
 │   ├── spectator.py                # CARLA 跟随视角
 │   ├── camera_ownership.py         # 多车 spectator 控制权
 │   └── rviz_launcher.py            # RViz 配置和窗口

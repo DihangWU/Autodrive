@@ -1,4 +1,4 @@
-"""ROS road geometry derived only from the active CARLA map.
+"""从当前 CARLA 地图生成贴地窄标线带，不绘制实心路面。
 
 OpenDRIVE supplies lane geometry and marking style, not Unreal road textures.
 Where explicit dash lengths are absent, broken-line rendering is illustrative.
@@ -18,14 +18,14 @@ def road_markers(carla_map):
               'Yellow': (1., .85, .05), 'Blue': (.1, .3, 1.),
               'Green': (.1, 1., .1), 'Red': (1., .1, .1)}
 
-    def marker(key, width, color, kind=Marker.LINE_LIST):
+    def marker(key, color):
         if key not in markers:
             m = Marker()
             m.header.frame_id = 'map'
             m.ns, m.id = 'carla_map', len(markers)
-            m.type, m.action = kind, Marker.ADD
+            m.type, m.action = Marker.TRIANGLE_LIST, Marker.ADD
             m.pose.orientation.w = 1.
-            m.scale.x, m.scale.y, m.scale.z = (1., 1., 1.) if kind == Marker.TRIANGLE_LIST else (width, 1., 1.)
+            m.scale.x = m.scale.y = m.scale.z = 1.
             m.color.r, m.color.g, m.color.b = color
             m.color.a = 1.
             markers[key] = m
@@ -39,18 +39,25 @@ def road_markers(carla_map):
                      y=-(loc.y + offset * right.y),
                      z=loc.z + offset * right.z + height)
 
+    def marking_strip(a, b, offset_a, offset_b, width):
+        """用道路横向确定标线宽度，不让相机朝向改变标线形状。"""
+        al, ar = boundary(a, offset_a - width / 2), boundary(a, offset_a + width / 2)
+        bl, br = boundary(b, offset_b - width / 2), boundary(b, offset_b + width / 2)
+        points = (al, ar, bl, ar, br, bl)
+        # 正负车道的朝向不同，统一三角形正面朝上，避免背面剔除和发黑。
+        normal_z = (ar.x - al.x) * (bl.y - al.y) - (ar.y - al.y) * (bl.x - al.x)
+        if normal_z < 0:
+            points = (al, bl, ar, ar, bl, br)
+        return points
+
     styles = {'Solid': ('Solid',), 'Broken': ('Broken',),
               'SolidSolid': ('Solid', 'Solid'), 'SolidBroken': ('Solid', 'Broken'),
               'BrokenSolid': ('Broken', 'Solid'), 'BrokenBroken': ('Broken', 'Broken')}
-    surface = marker(('surface',), 1., (.16, .17, .18), Marker.TRIANGLE_LIST)
     for group in groups.values():
         group.sort(key=lambda w: w.s)
         for a, b in zip(group, group[1:]):
             if b.s - a.s > .8 or a.transform.location.distance(b.transform.location) > 1.:
                 continue  # Never connect unrelated lane sections or branches.
-            al, ar = boundary(a, -a.lane_width / 2, 0.), boundary(a, a.lane_width / 2, 0.)
-            bl, br = boundary(b, -b.lane_width / 2, 0.), boundary(b, b.lane_width / 2, 0.)
-            surface.points.extend((al, ar, bl, ar, br, bl))
             for side, marking in ((-1, a.left_lane_marking), (1, a.right_lane_marking)):
                 kind = str(marking.type)
                 if kind not in styles:
@@ -76,7 +83,12 @@ def road_markers(carla_map):
                     if identity in seen:
                         continue
                     seen.add(identity)
-                    marker((color_name, width), width, color).points.extend((p, q))
+                    strip = marker((color_name, width), color)
+                    strip.points.extend(marking_strip(
+                        a, b, side * a.lane_width / 2 + extra,
+                        side * b.lane_width / 2 + extra, width))
+                    # 每三角形指定颜色，使 RViz 不用场景灯光调暗标线。
+                    strip.colors.extend((strip.color, strip.color))
     print(f'RVIZ_MAP source={carla_map.name} lane_sections={len(groups)} '
           f'marking_segments={len(seen)}; broken dash spacing is illustrative', flush=True)
     return MarkerArray(markers=list(markers.values()))

@@ -45,7 +45,7 @@ Visualization Manager:
       Value: true
     - Class: rviz_default_plugins/MarkerArray
       Enabled: true
-      Name: CARLA road surface and lane markings
+      Name: CARLA lane markings
       Namespaces:
         carla_map: true
       Topic:
