@@ -11,6 +11,9 @@ RVIZ_EXIT_TIMEOUT = 3
 
 class VehicleCleanupMixin:
     def stop_vehicle_controller(self):
+        service = getattr(self, 'emergency_service', None)
+        if service is not None:
+            service.close()
         if self.navigation is not None:
             self.navigation.close()
         self.xbox.close()

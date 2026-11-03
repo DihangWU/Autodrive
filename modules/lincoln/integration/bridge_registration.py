@@ -46,6 +46,7 @@ class LincolnBridgeRegistration:
                         client = ControlClient(self.path, REQUEST_TIMEOUT)
                         status = client.command('lincoln.register', **self.vehicle_identity(),
                                                 role_name=self.node.uid, sumo_id=self.sumo_id,
+                                                vanet_supported=getattr(self.node.args, 'vanet', False),
                                                 navigation_supported=True, gta_supported=True,
                                                 gta_status=self.node.navigation.gta_snapshot())
                     else:

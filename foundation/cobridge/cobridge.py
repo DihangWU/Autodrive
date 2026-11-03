@@ -51,6 +51,10 @@ class BridgeRuntime:
         self.lincoln = LincolnVehicleRegistry()
         self.npc = NpcVehicleRegistry()
         self.traffic_lights = SumoTrafficLights(CONSOLE.info)
+        self.vanet = None
+        if getattr(args, "vanet", False):
+            from vanet.experiments.experiment_session_management.coordinator import ExperimentCoordinator
+            self.vanet = ExperimentCoordinator(self)
 
     def report(self, name, error):
         message = str(error)
@@ -84,7 +88,7 @@ class BridgeRuntime:
                 self.report('SUMO', error)
 
     def drop(self, name, error):
-        CONSOLE.warning(f'{name} 已断开：{error}；时钟继续运行。')
+        CONSOLE.warning(f'{name} 已断开：{error}；' + ('实验暂停。' if self.vanet is not None else '时钟继续运行。'))
         field = name.lower()
         adapter = getattr(self, field)
         setattr(self, field, None)
@@ -113,9 +117,22 @@ class BridgeRuntime:
                     adapter.step()
                 except Exception as error:
                     self.drop(name, error)
+                    if self.vanet is not None:
+                        self.vanet.pause(f'{name}: {error}')
+                        break
         self.frames += 1
 
     def handle(self, command, owner):
+        if command["action"].startswith("vanet."):
+            if self.vanet is None:
+                if command["action"] == "vanet.status":
+                    return dict(enabled=False, phase="disabled", detail="Restart CoBridge with --vanet")
+                raise RuntimeError("请使用 run_cobridge --vanet 启用实验。")
+            return self.vanet.handle(command)
+        if self.vanet is not None and command["action"] == "lincoln.navigate":
+            return self.vanet.set_destination(command)
+        if self.vanet is not None and command["action"] == "lincoln.gta.set":
+            raise RuntimeError("VANET 实验中的信号灯规则由实验组管理。")
         if command['action'] == 'status':
             return dict(carla_connected=self.carla is not None, sumo_connected=self.sumo is not None,
                         frame=self.frames, time=self.frames * self.args.step_length,
@@ -141,6 +158,11 @@ class BridgeRuntime:
 
     def close(self):
         errors = []
+        if self.vanet is not None:
+            try:
+                self.vanet.close()
+            except Exception as error:
+                errors.append(f"关闭 VANET：{error}")
         try:
             self.npc.close(self.carla, self.sumo)
         except Exception as error:
@@ -169,13 +191,23 @@ def run_clock(args, stopped):
     runtime = BridgeRuntime(args)
     control, failure = None, None
     try:
-        control = ControlServer(args.control_socket)
+        if getattr(args, "vanet", False):
+            from vanet.protocol.control_and_time_messages.control_server import VanetControlServer
+            control = VanetControlServer(args.control_socket)
+        else:
+            control = ControlServer(args.control_socket)
         CONSOLE.info(f'时钟已启动，步长 {args.step_length}s；等待仿真器接入。Ctrl+C 退出本进程。')
         while not stopped.is_set() and (not args.steps or runtime.frames < args.steps):
             started = time.monotonic()
             control.poll(runtime.handle, runtime.disconnected)
             runtime.discover()
-            runtime.step()
+            if runtime.vanet is None or runtime.vanet.before_step():
+                runtime.step()
+                if runtime.vanet is not None and runtime.vanet.phase != 'paused':
+                    runtime.vanet.after_step()
+            elif runtime.vanet is not None:
+                stopped.wait(.005)
+                continue
             if not args.fast:
                 stopped.wait(max(0, args.step_length - (time.monotonic() - started)))
     except BaseException as error:
@@ -212,6 +244,7 @@ def main():
     parser.add_argument('--rpc-timeout', type=float, default=DEFAULT_RPC_TIMEOUT)
     parser.add_argument('--steps', type=int, default=DEFAULT_STEPS)
     parser.add_argument('--fast', action='store_true', default=DEFAULT_FAST)
+    parser.add_argument('--vanet', action='store_true', help='启用紧急通行网络实验及逐帧屏障')
     parser.add_argument('--control-socket', type=Path, default=SOCKET_FILE)
     args = parser.parse_args()
     if (not 1 <= args.port <= 65535 or args.steps < 0

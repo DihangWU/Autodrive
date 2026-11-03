@@ -33,7 +33,9 @@ SOURCE_TARGETS = {
 sys.path.insert(0, str(PROJECT_DIR))
 from foundation.sumo.init.gui import low_latency_sumo_gui, coordinate_sumo_gui, simu_speed_sumo_gui, lincoln_track_sumo_gui, lincoln_navigation_sumo_gui, lincoln_gta_mode_sumo_gui
 
-FEATURE_MODULES = (low_latency_sumo_gui, coordinate_sumo_gui, simu_speed_sumo_gui, lincoln_track_sumo_gui, lincoln_navigation_sumo_gui, lincoln_gta_mode_sumo_gui)
+from vanet.sumo.gui_build_and_integration import experiment_gui
+
+FEATURE_MODULES = (low_latency_sumo_gui, coordinate_sumo_gui, simu_speed_sumo_gui, lincoln_track_sumo_gui, lincoln_navigation_sumo_gui, lincoln_gta_mode_sumo_gui, experiment_gui)
 BUILD_MODULE_FILES = (MODULE_FILE, *(Path(module.__file__).resolve() for module in FEATURE_MODULES))
 
 

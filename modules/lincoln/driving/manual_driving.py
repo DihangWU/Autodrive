@@ -18,6 +18,9 @@ class ManualDrivingMixin:
             # 按住面板/键盘优先；松开后直接恢复手柄当前输入，无需切换控制源。
             if not active and xbox is not None and any(value != 0. for value in xbox):
                 self.last_manual_control = time.monotonic()
+                service = getattr(self, 'emergency_service', None)
+                if service is not None:
+                    service.takeover()
                 self.navigation.cancel()
                 self.cruise_speed = None
                 self.control_source = 'xbox'
@@ -64,6 +67,12 @@ class ManualDrivingMixin:
     def set_autopilot(self, enabled):
         """面板入口保持不变，具体算法由 --driver 指定的实现提供。"""
         with self.control_lock:
+            service = getattr(self, 'emergency_service', None)
+            if service is not None:
+                if enabled and service.resume_manual():
+                    return
+                if not enabled:
+                    service.takeover()
             if not enabled:
                 self.last_manual_control = time.monotonic()
             if self.navigation is not None and (not enabled or self.navigation.hold_brake):
@@ -82,6 +91,13 @@ class ManualDrivingMixin:
     def update_automatic_driving(self, snapshot=None):
         """由独立工作线程调用，不与 ROS 传感器发布争用事件循环。"""
         with self.control_lock:
+            service = getattr(self, 'emergency_service', None)
+            if service is not None:
+                handled, control = service.control(snapshot or self.world.get_snapshot())
+                if handled:
+                    if control is not None:
+                        self.car.apply_control(control)
+                    return
             control = self.navigation.update(snapshot or self.world.get_snapshot())
             if control is not None:
                 self.car.apply_control(control)

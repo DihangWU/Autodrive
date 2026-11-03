@@ -34,6 +34,7 @@ from foundation.module_status import ModuleReporter, DEFAULT_SOCKET as STATUS_SO
 from foundation.cobridge.rsu.rsu import RsuBridge, read_configuration
 from foundation.cobridge.network import read_network
 from foundation.sumo.client import SumoClient, SOCKET_FILE
+from vanet.rsu.terminal_status_display.status_reader import RsuTerminalStatus
 
 
 CONSOLE = Console(COMPONENT_NAME)
@@ -142,9 +143,11 @@ def main():
         if LEGACY_STATE_FILE.exists() and not STATE_FILE.exists():
             LEGACY_STATE_FILE.replace(STATE_FILE)
         reporter = ModuleReporter(COMPONENT_NAME, args.status_socket)
+        vanet_status = RsuTerminalStatus(CONSOLE, args.status_socket).start()
         try:
             run(args, stopped, reporter)
         finally:
+            vanet_status.close()
             reporter.close()
 
 

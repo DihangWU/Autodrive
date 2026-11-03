@@ -47,6 +47,7 @@ class LincolnVehicleRegistry:
         record['owner'] = owner
         record['tm_port'] = command.get('tm_port')
         record['navigation_supported'] = command.get('navigation_supported') is True
+        record['vanet_supported'] = command.get('vanet_supported') is True
         record['gta_supported'] = command.get('gta_supported') is True
         self.navigation.receive_gta_status(record, command.get('gta_status'))
         return self.vehicle_status(record)

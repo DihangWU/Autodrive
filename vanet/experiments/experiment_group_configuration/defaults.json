@@ -1,0 +1,25 @@
+{
+  "step_length": 0.05,
+  "beacon_interval": 1.0,
+  "beacon_phase_spread_seconds": 0.8,
+  "emergency_interval": 1.0,
+  "feedback_lifetime": 3.0,
+  "max_backfill_attempts": 3,
+  "lease_seconds": 10.0,
+  "maximum_speed_kmh": 120.0,
+  "lincoln_clearance_advice": {
+    "message_lifetime_seconds": 3.0,
+    "lookahead_metres": 120.0,
+    "stopping_margin_metres": 8.0,
+    "braking_deceleration_mps2": 2.5,
+    "route_tolerance_metres": 2.0,
+    "height_tolerance_metres": 2.0
+  },
+  "network_timeout_seconds": 10.0,
+  "controller_timeout_seconds": 15.0,
+  "hard_brake_mps2": 4.0,
+  "seed": 20261104,
+  "group": "normal",
+  "rsu": {"id": "rsu0", "x": 193.0, "y": -179.0, "z": 6.0},
+  "groups": ["normal", "emergency", "cooperative"]
+}

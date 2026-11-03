@@ -22,6 +22,7 @@ def parse_lincoln_arguments():
     position.add_argument('--spawn-index', type=int, help='使用 CARLA 地图出生点编号')
     parser.add_argument('--sensors', choices=['all', 'lidar', 'none'], default='all')
     parser.add_argument('--no-sensors', action='store_true', help='不创建任何传感器且不打开 RViz；保留驾驶面板、自动驾驶和视角控制')
+    parser.add_argument('--vanet', action='store_true', help='启用紧急通行实验接入；不创建车载传感器，保留导航 RViz')
     parser.add_argument('--camera-rows', type=int, choices=[4, 6], default=4)
     parser.add_argument('--no-rviz', action='store_true')
     parser.add_argument('--rviz-config', type=Path, default=RVIZ_TEMPLATE_FILE)
@@ -32,7 +33,7 @@ def parse_lincoln_arguments():
     parser.add_argument('--xbox-device', type=Path, help='固定配对 Linux 手柄设备，如 /dev/input/js1 或 /dev/input/by-id/...；默认占用一个空闲 Xbox 手柄')
     parser.add_argument('--bridge-socket', type=Path, default=SOCKET_FILE)
     args = parser.parse_args()
-    if args.no_sensors:
+    if args.no_sensors or args.vanet:
         args.sensors = 'none'
         args.no_rviz = True
     if (not 1 <= args.port <= 65535 or not 1024 <= args.tm_port <= 65535

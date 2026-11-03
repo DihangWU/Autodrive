@@ -8,3 +8,8 @@
 .runtime/
 __pycache__/
 *.pyc
+
+# VANET 构建产物、运行状态和实验结果
+vanet/omnet/compiled_output/
+vanet/runtime_state/
+vanet/results/

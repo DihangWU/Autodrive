@@ -24,10 +24,17 @@ def run_vehicle_control_loop(node, stopped):
     last_frame = None
     try:
         while not stopped.is_set():
+            service = getattr(node, 'emergency_service', None)
+            if service is not None:
+                service.process_commands()
             try:
-                snapshot = node.world.wait_for_tick(.5)
+                snapshot = node.world.wait_for_tick(.05 if service is not None else .5)
             except RuntimeError:
-                continue
+                if service is not None:
+                    service.process_commands()
+                    snapshot = node.world.get_snapshot()
+                else:
+                    continue
             if snapshot.frame != last_frame:
                 node.publish_vehicle_transform(snapshot)
                 node.update_automatic_driving(snapshot)
@@ -37,6 +44,8 @@ def run_vehicle_control_loop(node, stopped):
                 node.stop_requested = True
                 return
             node.drive()
+            if service is not None:
+                service.after_frame(snapshot)
     except Exception:
         logging.exception('驾驶/视角线程异常')
         node.stop_requested = True
@@ -66,6 +75,9 @@ def run_lincoln_application(args):
         reporter = ModuleReporter(node.uid, args.bridge_socket)
         registration = LincolnBridgeRegistration(node, args.bridge_socket, reporter)
         registration.wait_for_driver_preparation(stopped)
+        if node.emergency_service is not None:
+            from vanet.lincoln.v2x_data_exchange.bridge_exchange import LincolnBridgeExchange
+            node.emergency_service.network = LincolnBridgeExchange(node, node.emergency_service)
         if stopped.is_set():
             return
         if args.autopilot:

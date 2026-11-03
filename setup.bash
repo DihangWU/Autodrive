@@ -48,3 +48,35 @@ add_lincoln() {
 add_npc() {
     bash "$NPC_ENTRY" "$@"
 }
+
+# VANET：每个独立程序保留单项入口；内部业务由所属主文件调用。
+_vanet_python() {
+    local vanet_python="${AUTODRIVE_PYTHON:-$HOME/carla-venv/bin/python}"
+    PYTHONPATH="$AUTODRIVE_ROOT${PYTHONPATH:+:$PYTHONPATH}" "$vanet_python" -u "$@"
+}
+
+run_omnet() {
+    _vanet_python -m vanet.omnet.build_and_launch.run_network "$@"
+}
+
+build_vanet_network() {
+    _vanet_python -m vanet.omnet.build_and_launch.build_network "$@"
+}
+
+add_vanet_npc() {
+    _vanet_python -m vanet.experiments.experiment_session_management.control_cli initialize "$@"
+}
+
+vanet_status() {
+    _vanet_python -m vanet.experiments.experiment_session_management.control_cli status "$@"
+}
+
+vanet_control() {
+    _vanet_python -m vanet.experiments.experiment_session_management.control_cli "$@"
+}
+
+run_vanet() {
+    local vanet_start_script
+    vanet_start_script="$(_vanet_python -c 'from vanet.project_paths import VANET_START_SCRIPT_FILE; print(VANET_START_SCRIPT_FILE)')" || return
+    bash "$vanet_start_script" "$@"
+}

@@ -1,0 +1,12 @@
+{
+  "seed": 20261104,
+  "tx_power_mw": 20,
+  "bitrate_mbps": 6,
+  "noise_floor_dbm": -98,
+  "minimum_power_dbm": -110,
+  "maximum_interference_distance_m": 2600,
+  "vehicle_antenna_offset_z_m": 1.5,
+  "model": "SimplePathlossModel",
+  "pathloss_exponent": 2.4,
+  "note": "Initial reproducible free-space/log-distance experiment; CARLA building meshes are not imported as radio obstacles."
+}

@@ -64,6 +64,7 @@ class LincolnNode(SpawnVehicleMixin, SensorStreamsMixin, VehicleMarkersMixin,
         self.driver = None
         self.navigation = None
         self.navigation_view = None
+        self.emergency_service = None
         self.geometry = json.loads(GEOMETRY_CONFIG_FILE.read_text())
         self.tf = TransformBroadcaster(self)
         self.static_tf = StaticTransformBroadcaster(self)
@@ -95,6 +96,9 @@ class LincolnNode(SpawnVehicleMixin, SensorStreamsMixin, VehicleMarkersMixin,
             self.map_pub.publish(self.roads)
             from modules.lincoln.visualization.navigation_rviz import NavigationRviz
             self.navigation_view = NavigationRviz(self)
+            if getattr(args, 'vanet', False):
+                from vanet.lincoln.emergency_state_management.emergency_service import LincolnEmergencyService
+                self.emergency_service = LincolnEmergencyService(self)
             self.timer = self.create_timer(.02, self.update)
         except BaseException:
             self.cleanup()
