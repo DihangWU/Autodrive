@@ -63,6 +63,10 @@ build_vanet_network() {
     _vanet_python -m vanet.omnet.build_and_launch.build_network "$@"
 }
 
+check_vanet_communication_paths() {
+    _vanet_python -m vanet.tests.live_cosimulation_checks.communication_path_check "$@"
+}
+
 add_vanet_npc() {
     _vanet_python -m vanet.experiments.experiment_session_management.control_cli initialize "$@"
 }

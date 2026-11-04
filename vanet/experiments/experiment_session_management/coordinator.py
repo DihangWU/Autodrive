@@ -17,6 +17,7 @@ from vanet.experiments.scenario_and_parameter_configuration.scenario_controller 
 from foundation.cobridge.lincoln.navigation import resolve_destination
 from vanet.sumo.vehicle_state_display.vehicle_state_display import VehicleStateDisplay
 from vanet.sumo.communication_range_display.lincoln_coverage_circle import LincolnCoverageCircle
+from vanet.protocol.communication_path_selection.paths import select_communication_paths
 
 
 class ExperimentCoordinator:
@@ -54,6 +55,8 @@ class ExperimentCoordinator:
         self.controller_wait_since=None
         self.npc={}
         self.communication_links={}
+        self.communication_paths={}
+        self.rsu_connected=False
         self.rsu=RsuCooperation(self.config)
         self.rsu_counters=dict(received=0,notice_sent=0,feedback_received=0,clearance_sent=0,backfill_sent=0)
         self.deliveries=[]
@@ -78,6 +81,7 @@ class ExperimentCoordinator:
                     network=self.network.status if self.network else {},
                     simulation_time=self.network_time-self.run_start_network_time,
                     communication_ranges=dict(self.config.get('communication_ranges',{})),
+                    communication_paths=dict(self.communication_paths),rsu_connected=self.rsu_connected,
                     destination=self.destination,results=str(self.folder),
                     lincoln={k:v for k,v in self.lincoln_status.items() if k not in ('route','position')},
                     scenario=self.scenario.snapshot() if self.scenario else None,
@@ -108,7 +112,8 @@ class ExperimentCoordinator:
         if any(old.get(k)!=state.get(k,old.get(k)) for k in significant):
             self.log.emit('lincoln_state',self.network_time,state={k:self.lincoln_status.get(k) for k in significant})
         received=self.deliveries;self.deliveries=[]
-        return dict(command=self.command,simulation_time=self.network_time,deliveries=received)
+        return dict(command=self.command,simulation_time=self.network_time,deliveries=received,
+                    communication_paths=dict(self.communication_paths),rsu_connected=self.rsu_connected)
 
     def handle(self, request):
         action=request['action']
@@ -195,6 +200,7 @@ class ExperimentCoordinator:
         self.log.save_config(dict(group=self.group,parameters=self.config,scenario=self.scenario_config,destination=self.destination))
         self.metrics=Metrics(self.log,self.config);self.npc={};self.rsu=RsuCooperation(self.config)
         self.communication_links={}
+        self.communication_paths={};self.rsu_connected=False
         self.rsu_counters=dict(received=0,notice_sent=0,feedback_received=0,clearance_sent=0,backfill_sent=0)
         self.pending_network=False;self.network_result=None;self.deliveries=[]
         self.network_reset_required=True
@@ -311,10 +317,17 @@ class ExperimentCoordinator:
 
     def application_step(self, states):
         now=self.network_time;messages=self.outgoing;self.outgoing=[]
+        if self.group=='cooperative':
+            paths,connected=select_communication_paths(states,self.config['rsu'],self.config['communication_ranges'])
+            if paths!=self.communication_paths or connected!=self.rsu_connected:
+                self.log.emit('communication_paths_changed',now,paths=paths,rsu_connected=connected)
+            self.communication_paths,self.rsu_connected=paths,connected
+            self.rsu.set_relay_targets([name for name,path in paths.items() if path=='rsu'],now)
         for state in states:
             if state['role']=='npc':
                 component=self.npc.setdefault(state['id'],NpcCooperation(state['id'],self.config))
                 component.set_communication_links(self.communication_links.get(state['id'],[]),now)
+                if self.group=='cooperative':component.set_communication_path(self.communication_paths.get(state['id']),now)
                 messages.extend(component.step(now,state,self.bridge.sumo.connection))
                 if not self.ended:
                     self.metrics.note_yield_state(state['id'],component.status,now-self.run_start_network_time,
@@ -338,6 +351,11 @@ class ExperimentCoordinator:
                 self.next_emergency=now+self.config['emergency_interval'];self.last_route_version=version
         # 非协同组仅允许常规信标，不下发紧急协同消息。
         if self.group!='cooperative':messages=[m for m in messages if m['payload']['type']=='beacon']
+        else:
+            rsu_id=self.config['rsu']['id']
+            messages=[message for message in messages if message['sender']!=rsu_id or
+                (message['recipient']=='lincoln0' and self.rsu_connected) or
+                self.communication_paths.get(message['recipient'])=='rsu']
         for message in messages:
             if message['sender']==self.config['rsu']['id']:
                 kind=message['payload']['type']

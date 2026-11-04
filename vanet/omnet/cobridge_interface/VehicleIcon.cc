@@ -12,7 +12,7 @@ cGroupFigure* createVehicleIcon(const char* name, bool lincoln) {
     for(double x:{-1.55,.9})for(double y:{-1.14,.88})rectangle(x,y,.65,.26,cFigure::Color(10,12,16));
     auto* body=new cPolygonFigure();
     body->setPoints({{-2.4,-.7},{-2.15,-1.},{1.55,-1.},{2.4,-.72},{2.4,.72},{1.55,1.},{-2.15,1.},{-2.4,.7}});
-    body->setFilled(true);body->setFillColor(lincoln?cFigure::Color(255,83,73):cFigure::Color(74,168,255));
+    body->setFilled(true);body->setFillColor(lincoln?cFigure::Color(30,90,230):cFigure::Color(165,170,175));
     body->setLineColor(cFigure::Color(15,20,25));body->setLineWidth(.13);body->setZoomLineWidth(true);car->addFigure(body);
     auto* windshield=new cPolygonFigure();windshield->setPoints({{.55,-.8},{1.18,-.65},{1.18,.65},{.55,.8}});
     windshield->setFilled(true);windshield->setOutlined(false);windshield->setFillColor(cFigure::Color(175,225,245));car->addFigure(windshield);

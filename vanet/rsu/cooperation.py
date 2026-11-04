@@ -24,6 +24,17 @@ class RsuCooperation:
         self.last_time = None
         self.range_limited='communication_ranges' in self.config
         self.range_peers=set()
+        self.relay_targets=None
+
+    def set_relay_targets(self,targets,sim_time):
+        self.relay_targets=set(targets)
+        for name in list(self.beacons.entries):
+            if name not in self.relay_targets:del self.beacons.entries[name]
+        for name in list(self.selected):
+            if name not in self.relay_targets:
+                LOG.info('RSU releases relay target sim_time=%.3f target=%s reason=communication_path_changed',sim_time,name)
+                del self.selected[name];self.feedback.pop(name,None)
+        self.pending=[message for message in self.pending if message['recipient'] in self.relay_targets]
 
     def set_communication_links(self,peers,sim_time):
         self.range_peers=set(peers)
@@ -48,6 +59,7 @@ class RsuCooperation:
     def receive(self, message, sim_time):
         if self.range_limited and message.get('source') not in self.range_peers:return False
         kind = message.get('type')
+        if kind in ('beacon','feedback') and self.relay_targets is not None and message.get('source') not in self.relay_targets:return False
         if kind not in ('beacon','emergency','feedback','cancel','identity') or not self.guard.accept(message,sim_time):
             return False
         if kind == 'beacon':
@@ -92,6 +104,7 @@ class RsuCooperation:
         messages, self.pending = self.pending, []
         states = self.beacons.fresh(sim_time)
         if self.range_limited:states={name:state for name,state in states.items() if name in self.range_peers}
+        if self.relay_targets is not None:states={name:state for name,state in states.items() if name in self.relay_targets}
         if self.task is None:
             return messages
         if sim_time >= self.lease_until:
@@ -151,6 +164,7 @@ class RsuCooperation:
                          'backfill=%s backfill_attempts=%s max_backfill_attempts=%s reason=%s',
                          sim_time,name,self.task['task_id'],self.task['route_version'],item['attempts'],
                          backfill,item['backfill_attempts'],limit,reason)
+        if self.relay_targets is not None and not self.selected:return messages
         if sim_time+1e-8 >= self.next_summary:
             lifetime = self.config.get('feedback_lifetime',3.)
             statuses = {name:(self.feedback[name]['status'] if name in self.feedback and

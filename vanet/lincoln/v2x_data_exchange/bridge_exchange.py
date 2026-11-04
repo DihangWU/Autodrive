@@ -35,6 +35,8 @@ class LincolnBridgeExchange:
                                           command_ack_id=command_ack_id)
                     last_version=version
                     self.service.simulation_time=float(result.get('simulation_time',self.service.simulation_time))
+                    if 'communication_paths' in result:
+                        self.service.set_communication_paths(result['communication_paths'],result.get('rsu_connected',False))
                     if result.get('command'):self.service.receive_command(result['command'])
                     if result.get('deliveries'):self.service.receive_deliveries(result['deliveries'])
                     last_error=None

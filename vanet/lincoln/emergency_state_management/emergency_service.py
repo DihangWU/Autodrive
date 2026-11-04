@@ -11,7 +11,7 @@ from vanet.lincoln.emergency_route_planning.borrowing_planner import BorrowingPl
 from modules.lincoln.driving.navigation import plan_route, path_with_lookahead
 from modules.lincoln.driving.junction_local_controller import JunctionLocalController
 from vanet.lincoln.emergency_driving_control.control_configuration import load_control_configuration, load_clearance_configuration
-from vanet.lincoln.v2x_data_exchange.clearance_advice import ClearanceAdvice
+from vanet.lincoln.v2x_data_exchange.wireless_clearance_advice import WirelessClearanceAdvice
 from vanet.lincoln.v2x_data_exchange.detailed_logging import initialize_logging
 
 LOG = logging.getLogger('vanet.lincoln')
@@ -43,7 +43,7 @@ class LincolnEmergencyService:
         self.deviation_since = None
         self.clearance = None
         clearance_configuration,clearance_source=load_clearance_configuration()
-        self.clearance_advice=ClearanceAdvice(clearance_configuration,clearance_source)
+        self.clearance_advice=WirelessClearanceAdvice(clearance_configuration,clearance_source)
         self.last_advice_state=None
         self.network = None
         self.arrival_sent = False
@@ -66,7 +66,10 @@ class LincolnEmergencyService:
                 payload=delivery.get('payload',delivery)
                 if self.clearance_advice.receive(payload,self.simulation_time,self.task.task_id,self.task.route_version):
                     self.clearance=payload
-                    LOG.info('CLEARANCE %s',payload)
+                    LOG.info('WIRELESS_FEEDBACK %s',payload)
+
+    def set_communication_paths(self,paths,rsu_connected):
+        with self.lock:self.clearance_advice.set_paths(paths,rsu_connected)
 
     def process_commands(self):
         """即使桥暂停世界步进，仍在唯一控制线程处理命令和规划完成。"""

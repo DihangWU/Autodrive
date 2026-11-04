@@ -6,6 +6,7 @@ from vanet.npc.v2x_data_exchange.message_guard import MessageGuard
 from vanet.npc.v2x_data_exchange.beacon_schedule import beacon_phase_seconds
 from vanet.npc.yielding_action_control.sumo_actions import YieldingActions
 from vanet.npc.v2x_data_exchange.range_leases import RangeLeases
+from vanet.npc.v2x_data_exchange.communication_path import NpcCommunicationPath
 
 LOG = logging.getLogger(__name__)
 
@@ -27,9 +28,23 @@ class NpcCooperation:
         self.last_time = None
         self.conflict_anchor = None
         self.range_leases=RangeLeases('communication_ranges' in self.config,self.config.get('lease_seconds',10.))
+        self.communication_path=NpcCommunicationPath(self.config.get('rsu',{}).get('id',self.config.get('rsu_id','rsu0')))
+        self.physical_peers=[]
+        self.path_beacon_pending=False
 
     def set_communication_links(self,peers,sim_time):
-        self.range_leases.update_links(peers)
+        self.physical_peers=list(peers)
+        self.range_leases.update_links(self.communication_path.filter_peers(peers))
+
+    def set_communication_path(self,path,sim_time):
+        if path not in ('direct','rsu',None):raise ValueError('Unknown NPC communication path.')
+        selection=self.communication_path
+        if not selection.configured or selection.path!=path:
+            LOG.info('NPC communication path node=%s sim_time=%.3f previous=%s current=%s',self.node_id,sim_time,selection.path,path)
+            self.path_beacon_pending=True
+            self.next_feedback=sim_time
+        selection.configured=True;selection.path=path
+        self.range_leases.update_links(selection.filter_peers(self.physical_peers))
 
     def send(self, kind, now, recipient='broadcast', **fields):
         self.sequence += 1
@@ -40,6 +55,7 @@ class NpcCooperation:
         return dict(sender=self.node_id, recipient=recipient, payload=payload)
 
     def receive(self, message, sim_time):
+        if self.communication_path.configured and message.get('source')!=self.communication_path.target():return False
         if not self.range_leases.can_receive(message.get('source')):return False
         if message.get('type') not in ('emergency', 'notice', 'cancel') or not self.guard.accept(message, sim_time):
             return False
@@ -80,11 +96,14 @@ class NpcCooperation:
                      'phase_spread_seconds=%.9f phase_seconds=%.9f first_due_time=%.9f interval_seconds=%.9f',
                      self.node_id, seed, sim_time, spread, phase, self.next_beacon,
                      self.config.get('beacon_interval', 1.))
-        if sim_time+1e-8 >= self.next_beacon:
+        beacon_due=sim_time+1e-8 >= self.next_beacon
+        if beacon_due or self.path_beacon_pending:
             state = {k: copy.deepcopy(v) for k, v in own_state.items() if k in
                      ('id','x','y','z','speed','heading','route','lane_id','width','length','in_junction')}
-            messages.append(self.send('beacon', sim_time, recipient=self.config.get('rsu_id','rsu0'), state=state))
-            self.next_beacon = sim_time+self.config.get('beacon_interval', 1.)
+            target=self.communication_path.target()
+            if target:messages.append(self.send('beacon', sim_time, recipient=target, state=state))
+            if beacon_due:self.next_beacon = sim_time+self.config.get('beacon_interval', 1.)
+            self.path_beacon_pending=False
         if self.task is None:
             return messages
         previous = self.status, self.reason
@@ -93,7 +112,7 @@ class NpcCooperation:
             if current is None:self.recovering,self.reason=True,self.range_leases.reason(sim_time)
             else:self.task,self.lease_until=current['message'],current['until']
         if self.status == 'received':
-            messages.append(self.send('feedback', sim_time, recipient=self.config.get('rsu_id','rsu0'), status='received', reason=self.reason))
+            self.append_feedback(messages,sim_time,own_state,'received',self.reason)
         if sim_time >= self.lease_until:
             self.recovering, self.reason = True, 'lease_expired'
         assessment = conflict(own_state, self.task, self.config)
@@ -125,7 +144,7 @@ class NpcCooperation:
         if previous != (self.status,self.reason):
             LOG.info('NPC node=%s sim_time=%.3f status=%s reason=%s',self.node_id,sim_time,self.status,self.reason)
         if previous != (self.status,self.reason) or sim_time+1e-8 >= self.next_feedback:
-            messages.append(self.send('feedback',sim_time,recipient=self.config.get('rsu_id','rsu0'),status=self.status,reason=self.reason))
+            self.append_feedback(messages,sim_time,own_state,self.status,self.reason)
             self.next_feedback = sim_time+self.config.get('feedback_interval',1.)
         if self.status == 'normal':
             self.task = None
@@ -134,6 +153,15 @@ class NpcCooperation:
             self.range_leases.clear()
         return messages
 
+    def append_feedback(self,messages,now,own_state,status,reason):
+        if self.communication_path.configured and self.range_leases.current(now) is None:return
+        target=self.communication_path.target()
+        if target:
+            messages.append(self.send('feedback',now,recipient=target,status=status,reason=reason,
+                conflict_point=copy.deepcopy(self.conflict_anchor),
+                position={key:own_state.get(key,0.) for key in ('x','y','z')}))
+
     def snapshot(self):
         return dict(id=self.node_id,status=self.status,reason=self.reason,lease_until=self.lease_until,
+                    communication_path=self.communication_path.path,
                     task_id=self.task.get('task_id') if self.task else None)

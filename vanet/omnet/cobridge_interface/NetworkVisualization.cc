@@ -61,7 +61,7 @@ void NetworkVisualization::synchronize(const json& values,const std::map<std::st
         auto& display=modules.at(id)->getDisplayString();
         display.setTagArg("b",0,role=="rsu"?"12":"0");display.setTagArg("b",1,role=="rsu"?"12":"0");
         display.setTagArg("b",2,role=="rsu"?"oval":"rect");
-        display.setTagArg("b",3,role=="rsu"?"#23df66":(role=="lincoln"?"#ff5349":"#4aa8ff"));
+        display.setTagArg("b",3,role=="rsu"?"#23df66":(role=="lincoln"?"#1e5ae6":"#a5aaaf"));
         display.setTagArg("tt",0,id.c_str());display.setTagArg("t",0,id.c_str());
         display.setTagArg("t",2,"#eeeeee");
         if(role!="rsu") {
