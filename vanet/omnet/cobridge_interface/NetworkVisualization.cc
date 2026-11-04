@@ -83,13 +83,20 @@ void NetworkVisualization::synchronize(const json& values,const std::map<std::st
     }
 }
 void NetworkVisualization::transmitted(const std::string& sender,const std::string&,double now) {pulses[sender]=now+.35;}
-void NetworkVisualization::received(const std::string& sender,const std::string& receiver,const std::string& kind,double now) {
+void NetworkVisualization::received(const std::string& sender,const std::string& receiver,const std::string&,double now) {
     if(!positions.count(sender)||!positions.count(receiver))return;
-    auto key=sender+">"+receiver+":"+kind;
+    auto a=positions.at(sender).value("role","npc"),b=positions.at(receiver).value("role","npc");
+    auto pair=[&](const char* first,const char* second) {return (a==first&&b==second)||(a==second&&b==first);};
+    cFigure::Color color;
+    if(pair("lincoln","rsu"))color=cFigure::Color(90,255,85);
+    else if(pair("lincoln","npc"))color=cFigure::Color(70,150,255);
+    else if(pair("rsu","npc"))color=cFigure::Color(30,145,65);
+    else return;
+    auto key=sender+">"+receiver;
     if(!links.count(key)) {
         if(links.size()>=128) {auto it=links.begin();delete messages->removeFigure(it->second.figure);links.erase(it);}
         auto* line=new cLineFigure();line->setLineWidth(2.);line->setZoomLineWidth(false);line->setEndArrowhead(cFigure::ARROW_SIMPLE);
-        line->setLineColor(kind=="emergency"?cFigure::Color(255,95,75):(kind=="notice"?cFigure::Color(255,200,65):cFigure::Color(70,195,255)));
+        line->setLineColor(color);
         messages->addFigure(line);links.emplace(key,Link{line,sender,receiver,now+.5});
     }
     links.at(key).until=now+.5;

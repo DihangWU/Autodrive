@@ -52,6 +52,8 @@ NPC 之间不建立业务通信，普通交通判断复用现有 CARLA 全局状
 
 范围可视化只显示 RSU 和 Lincoln 的圈，Qtenv 中 NPC 保留小车图标与实际通信箭头，不画 NPC 通信圈。SUMO 额外显示以 Lincoln 车身中心为圆心、半径 50 米的蓝色轮廓圆，随车辆逐步移动，复位和退出时清理；车辆实际通信规则不因此改变。
 
+Qtenv 通信箭头只用颜色区分通信双方：Lincoln ↔ RSU 为亮绿色，Lincoln ↔ NPC 为蓝色，RSU ↔ NPC 为暗绿色；双向颜色相同，箭头表示方向，不显示消息文字。暂不按 emergency、notice、feedback 等消息类型进一步配色。
+
 ### 3.2 周期与有效性
 
 - Lincoln 向 RSU 定时发送路线和更新后的 ETA，默认周期为 1 个仿真秒。
