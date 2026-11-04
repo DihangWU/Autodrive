@@ -189,6 +189,10 @@ class BridgeRuntime:
 
 def run_clock(args, stopped):
     runtime = BridgeRuntime(args)
+    frame_budget = None
+    if runtime.vanet is not None:
+        from vanet.cobridge.simulation_time_coordination.frame_budget import FrameBudget
+        frame_budget = FrameBudget(args.step_length)
     control, failure = None, None
     try:
         if getattr(args, "vanet", False):
@@ -199,17 +203,35 @@ def run_clock(args, stopped):
         CONSOLE.info(f'时钟已启动，步长 {args.step_length}s；等待仿真器接入。Ctrl+C 退出本进程。')
         while not stopped.is_set() and (not args.steps or runtime.frames < args.steps):
             started = time.monotonic()
+            if frame_budget:frame_budget.begin()
             control.poll(runtime.handle, runtime.disconnected)
             runtime.discover()
+            before_step_started = time.monotonic()
             if runtime.vanet is None or runtime.vanet.before_step():
+                if frame_budget:frame_budget.add('coordinator', time.monotonic() - before_step_started)
+                traffic_started = time.monotonic()
                 runtime.step()
+                if frame_budget:frame_budget.add('traffic_step', time.monotonic() - traffic_started)
+                after_step_started = time.monotonic()
                 if runtime.vanet is not None and runtime.vanet.phase != 'paused':
                     runtime.vanet.after_step()
+                if frame_budget:frame_budget.add('after_step', time.monotonic() - after_step_started)
             elif runtime.vanet is not None:
+                frame_budget.add('coordinator', time.monotonic() - before_step_started)
+                wait_started = time.monotonic()
                 stopped.wait(.005)
+                frame_budget.add('barrier_poll_wait', time.monotonic() - wait_started)
+                if runtime.vanet.phase in ('ready','prepared','preparing','paused','continuation_ready'):
+                    frame_budget.suspend()
                 continue
             if not args.fast:
-                stopped.wait(max(0, args.step_length - (time.monotonic() - started)))
+                remaining = frame_budget.remaining() if frame_budget else max(0, args.step_length - (time.monotonic() - started))
+                wait_started = time.monotonic()
+                stopped.wait(remaining)
+                if frame_budget:frame_budget.add('pacing_wait', time.monotonic() - wait_started)
+            if frame_budget:
+                timing = frame_budget.finish()
+                if timing:runtime.vanet.log.emit('frame_timing', runtime.vanet.network_time, **timing)
     except BaseException as error:
         failure = error
         raise

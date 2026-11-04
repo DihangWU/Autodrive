@@ -11,6 +11,21 @@ from modules.lincoln.driving.navigation import LincolnNavigation
 
 
 class ServiceCommandTests(unittest.TestCase):
+    def test_completed_control_frame_immediately_notifies_exchange_once(self):
+        node,service=self.make_service()
+        service.network=Mock()
+        snapshot=SimpleNamespace(frame=100,find=lambda actor_id:None)
+        try:
+            service.after_frame(snapshot)
+            self.assertEqual(service.ack_frame,100)
+            service.network.notify_frame.assert_called_once_with()
+            service.after_frame(snapshot)
+            service.network.notify_frame.assert_called_once_with()
+            snapshot.frame=101
+            service.after_frame(snapshot)
+            self.assertEqual(service.network.notify_frame.call_count,2)
+        finally:service.close();node.navigation.close()
+
     def make_service(self):
         node=SimpleNamespace(control_lock=threading.RLock(),car=Mock(id=7),world=Mock(),driver=Mock(),
                              active=None,autopilot=False,cruise_speed=None,reverse=False,last_manual_control=0.,navigation_view=Mock())

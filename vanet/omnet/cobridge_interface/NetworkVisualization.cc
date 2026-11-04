@@ -51,7 +51,7 @@ void NetworkVisualization::synchronize(const json& values,const std::map<std::st
     positions.clear();
     for(const auto& node:values) {
         std::string id=node["id"],role=node.value("role","npc");positions[id]=node;
-        if(!circles.count(id)) {
+        if((role=="rsu"||role=="lincoln")&&!circles.count(id)) {
             auto* circle=new cOvalFigure(id.c_str());circle->setFilled(role=="rsu");
             circle->setFillColor(cFigure::Color(45,210,105));circle->setFillOpacity(.035);
             circle->setLineWidth(1.1);circle->setZoomLineWidth(false);

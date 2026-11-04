@@ -10,6 +10,7 @@ class LincolnBridgeExchange:
     def __init__(self,node,service):
         self.node,self.service=node,service
         self.stopped=threading.Event()
+        self.wakeup=threading.Event()
         self.thread=threading.Thread(target=self.run,name='vanet-lincoln-exchange',daemon=True)
         self.thread.start()
 
@@ -19,15 +20,19 @@ class LincolnBridgeExchange:
         last_error=None
         try:
             while not self.stopped.is_set():
+                self.wakeup.clear()
                 try:
                     if client is None:
                         client=ControlClient(self.node.args.bridge_socket,1.)
                         last_version=None
-                    version=(self.service.task.task_id,self.service.task.route_version,self.service.task.state)
-                    report=self.service.snapshot(include_route=version!=last_version)
+                    with self.service.lock:
+                        version=(self.service.task.task_id,self.service.task.route_version,self.service.task.state)
+                        report=self.service.snapshot(include_route=version!=last_version)
+                        ack_frame=self.service.ack_frame
+                        command_ack_id=self.service.task.command_ack_id
                     result=client.command('vanet.lincoln.exchange',actor_id=self.node.car.id,world_id=self.node.world.id,
-                                          ack_frame=self.service.ack_frame,status=report,
-                                          command_ack_id=self.service.task.command_ack_id)
+                                          ack_frame=ack_frame,status=report,
+                                          command_ack_id=command_ack_id)
                     last_version=version
                     self.service.simulation_time=float(result.get('simulation_time',self.service.simulation_time))
                     if result.get('command'):self.service.receive_command(result['command'])
@@ -39,10 +44,14 @@ class LincolnBridgeExchange:
                         last_error=str(error)
                     if client:client.close()
                     client=None
-                self.stopped.wait(.02 if client else .2)
+                self.wakeup.wait(.05 if client else .2)
         finally:
             if client:client.close()
 
+    def notify_frame(self):
+        self.wakeup.set()
+
     def close(self):
         self.stopped.set()
+        self.wakeup.set()
         self.thread.join(2.)

@@ -15,6 +15,9 @@ class LincolnCoverageCircle:
             raise ValueError('Invalid Lincoln communication radius.')
         self.vehicle_id = None
         self.center = None
+        self.half_length = None
+        self.offsets = [(self.radius * math.cos(i * 2 * math.pi / 128),
+                         self.radius * math.sin(i * 2 * math.pi / 128)) for i in range(129)]
 
     def update(self, vehicle_id):
         if vehicle_id is None:
@@ -30,15 +33,15 @@ class LincolnCoverageCircle:
         vehicle = self.connection.vehicle
         x, y = vehicle.getPosition(vehicle_id)
         angle = math.radians(vehicle.getAngle(vehicle_id))
-        half_length = vehicle.getLength(vehicle_id) / 2.
+        if self.vehicle_id != vehicle_id or self.half_length is None or self.IDENTIFIER not in present:
+            self.half_length = vehicle.getLength(vehicle_id) / 2.
         # SUMO reports the front bumper; circle is centred on the vehicle body.
-        x -= half_length * math.sin(angle)
-        y -= half_length * math.cos(angle)
+        x -= self.half_length * math.sin(angle)
+        y -= self.half_length * math.cos(angle)
         existing = self.vehicle_id == vehicle_id and self.IDENTIFIER in present
         if existing and self.center == (x, y):
             return
-        shape = [(x + self.radius * math.cos(i * 2 * math.pi / 128),
-                  y + self.radius * math.sin(i * 2 * math.pi / 128)) for i in range(129)]
+        shape = [(x + dx, y + dy) for dx, dy in self.offsets]
         if existing:
             polygon.setShape(self.IDENTIFIER, shape)
             self.center = (x, y)
@@ -65,3 +68,4 @@ class LincolnCoverageCircle:
                 polygon.remove(self.IDENTIFIER, layer=self.LAYER)
         self.vehicle_id = None
         self.center = None
+        self.half_length = None

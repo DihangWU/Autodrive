@@ -307,6 +307,8 @@ class LincolnEmergencyService:
                           'emergency' if self.controller else 'existing',self.task.route_version,
                           self.controller.wait_reason if self.controller else '',self.clearance_advice.state)
 
+        if is_new_frame and self.network:self.network.notify_frame()
+
     def snapshot(self, include_route=True):
         with self.lock:
             route=[]

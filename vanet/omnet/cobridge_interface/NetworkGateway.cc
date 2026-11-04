@@ -43,6 +43,7 @@ void NetworkGateway::initialize() {
     boundary->setSchedulingPriority(std::numeric_limits<short>::max());
     scheduleAt(simTime(), boundary);
     event("network.ready", {{"socket",socketPath},{"radio","Veins IEEE 802.11p"}});
+    events.flush();
     EV_INFO << "VANET network ready: " << socketPath << endl;
     if(hasGUI())startQtEnvironment();
 }
@@ -173,6 +174,7 @@ void NetworkGateway::selectResultsDirectory(const std::string& directory) {
     std::ofstream newEvents(eventPath,std::ios::app),newStatistics(statisticsPath,std::ios::app);
     if(!newEvents||!newStatistics) throw std::runtime_error("cannot open per-run network logs");
     event("network.archive_end",{{"next_directory",target.string()}});
+    events.flush();
     writeArchiveManifest(true);
     events=std::move(newEvents);stepStatistics=std::move(newStatistics);resultsDirectory=target.string();
     archiveStartTime=simTime().dbl();
@@ -190,6 +192,7 @@ void NetworkGateway::resetNetwork(int seed, const std::string& directory) {
     for(int i=0;i<environment->getNumRNGs();++i)
         environment->getRNG(i)->initialize(seed,i,environment->getNumRNGs(),0,1,environment->getConfig());
     event("network.reset",{{"seed",seed},{"time_continues",true}});
+    events.flush();
 }
 void NetworkGateway::advance(const json& command) {
     double until = command.at("until"); long next = command.at("step_id");
@@ -218,6 +221,8 @@ void NetworkGateway::advance(const json& command) {
 void NetworkGateway::handleMessage(cMessage*) {
     initialBoundary=false;
     if (pending) {
+        events.flush();
+        if(!events)throw cRuntimeError("Cannot flush wireless events at network boundary");
         json stats={{"messages_tx",txCount},{"messages_rx",rxCount},{"fragments_tx",fragmentTx},{"fragments_rx",fragmentRx},{"nodes",nodes.size()},
                     {"range_fragments_discarded",rangeFragmentsDiscarded},{"range_reassemblies_discarded",rangeAssembliesDiscarded}};
         json record={{"step_id",stepId},{"sim_time",simTime().dbl()},{"stats",stats},{"delivered_count",deliveries.size()},
@@ -270,13 +275,15 @@ void NetworkGateway::event(const std::string& type,const json& fields) {
     json value=fields; value["type"]=type;value["sim_time"]=simTime().dbl();
     value["wall_time_unix"]=std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
     value["module"]="OMNeT++";
-    if(events) events << value.dump() << '\n' << std::flush;
+    if(events) events << value.dump() << '\n';
+    if(type=="protocol.error")events.flush();
 }
 void NetworkGateway::fragment(bool received) { if(received)++fragmentRx;else ++fragmentTx; }
 void NetworkGateway::finish() {
     recordScalar("messagesTransmitted",txCount);recordScalar("messagesDelivered",rxCount);
     recordScalar("fragmentsTransmitted",fragmentTx);recordScalar("fragmentsReceived",fragmentRx);
     event("network.finished",{{"steps",stepId},{"messages_tx",txCount},{"messages_rx",rxCount}});
+    events.flush();
     writeArchiveManifest(true);
 }
 NetworkGateway::~NetworkGateway() {

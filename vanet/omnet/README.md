@@ -15,6 +15,10 @@ python3 -m vanet.omnet.build_and_launch.run_network
 
 默认 `--ui Qtenv`，一键入口也明确启用 Qtenv；无图形诊断可指定 `--ui Cmdenv`。编译使用当前安装的 Qt5Widgets。Qtenv 自动进入网络运行，外部时钟调度器在等待 CoBridge 时持续处理 GUI 事件，不使用现实时间推进网络。实验开始与取消仍由 SUMO 控制；联仿期间停止 Qtenv 会阻止网络返回边界，触发桥端等待或超时。
 
+性能调度优先处理已收到的 `advance`，避免先调用会重绘整个检查器的 Qtenv `idle()`；等待指令期间约每 50 毫秒刷新一次界面。原始无线事件完整记录，JSONL 在每个网络步长边界、复位、切换归档和正常结束时刷新缓冲，减少逐片写入时的频繁 flush。NPC 不再创建隐藏的通信圈图形。
+
+四节点、100 步、空发送批次的独立离屏 Qt 检查中，Qtenv 网络请求平均耗时由约 15.1 毫秒降至 2.12 毫秒，纯终端模式约 2.09 毫秒。优化后结果保存在 `vanet/results/network_timing_optimized_20261104_130648_537221_f800b9/timing_summary.json`。这是独立网络计时，完整 CARLA/SUMO 联仿速度须使用重启后的 `frame_timing` 和 SUMO 倍率实测。
+
 ## 距离约束与通信可视化
 
 统一读取 `vanet/experiments/experiment_group_configuration/defaults.json` 的 `communication_ranges`：V2V 为 50 米，包含 RSU 的链路为 170 米，按水平距离计算且包含边界。实际帧经过 Veins 无线模型后，应用在分片重组前检查距离；移动出圈时丢弃该来源的未完成重组，旧传输不能靠重新进圈恢复。距离内仍受 PHY/MAC 干扰和丢包影响。
