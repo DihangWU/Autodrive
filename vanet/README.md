@@ -24,6 +24,10 @@
 
 RSU 的 6 米是网络节点高度，现有 CARLA 显示塔的高度和图形范围不代表无线天线高度或可靠覆盖范围。
 
+当前 V2V 有效距离为 **50 米**，RSU 有效半径为 **170 米**，均按水平距离、双向生效，边界包含在内。RSU 圆距最近高速道路外缘约 3.08 米；超出范围不交付消息，离开范围撤销该来源的协同授权，重新进入需收到新消息。范围内仍可能因真实无线干扰、丢包而接收失败。参数统一在 `experiments/experiment_group_configuration/defaults.json` 的 `communication_ranges`。
+
+`run_vanet` 默认启动 **Qtenv 图形界面**，地图方向与 SUMO 一致；绿色圆为 RSU 范围，蓝色圆为 Lincoln 的 50 米范围，NPC 不画通信圈，彩色箭头表示实际完整接收的无线消息。SUMO 同时显示绿色 RSU 覆盖圆与跟随 Lincoln 的蓝色 50 米圈。车辆圈在每个交通步结束后根据实际位置和朝向更新，圆心在车身中心；复位、车辆移除与退出时清理。网络自动等待 CoBridge 时间指令，不需要手动点 Qtenv Run，也不会因此开始紧急实验。Qtenv Stop 会阻止网络推进，联仿期间请保持网络运行。
+
 固定 NPC 的路线、初始车道、位置、速度与出车时间在 `experiments/scenario_and_parameter_configuration/town04_emergency.json`；通用参数在 `experiments/experiment_group_configuration/defaults.json`；无线参数在 `omnet/simulation_configuration/radio_parameters.json`。每轮重置恢复固定 NPC 和保存的信号灯状态，不使用原有随机续路机制。
 
 当前配置已根据首次现场记录修正前级红灯阻塞：交叉口车改为从 `-17_2`、位置 35 米、正式开始后 52 秒出车，路线为 `-17 → -18 → -19`；两辆对向车改从 `10_3` 出车，保留位置 8/24 米和 35/38 秒出车时间，路线为 `10 → 9 → 8 → 7`。旧配置从 `-16` 和 `11` 出车，会在前一级路口长期等红灯，未能到达 RSU 附近的冲突位置。

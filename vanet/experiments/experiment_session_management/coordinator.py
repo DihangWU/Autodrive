@@ -16,6 +16,7 @@ from vanet.rsu.cooperation import RsuCooperation
 from vanet.experiments.scenario_and_parameter_configuration.scenario_controller import ScenarioController, load_scenario
 from foundation.cobridge.lincoln.navigation import resolve_destination
 from vanet.sumo.vehicle_state_display.vehicle_state_display import VehicleStateDisplay
+from vanet.sumo.communication_range_display.lincoln_coverage_circle import LincolnCoverageCircle
 
 
 class ExperimentCoordinator:
@@ -36,6 +37,7 @@ class ExperimentCoordinator:
         self.metrics=Metrics(self.log,self.config)
         self.scenario=None
         self.display=None
+        self.lincoln_coverage=None
         self.network=None
         self.next_network_retry=0.
         self.network_reset_required=False
@@ -51,6 +53,7 @@ class ExperimentCoordinator:
         self.last_exchange=0.
         self.controller_wait_since=None
         self.npc={}
+        self.communication_links={}
         self.rsu=RsuCooperation(self.config)
         self.rsu_counters=dict(received=0,notice_sent=0,feedback_received=0,clearance_sent=0,backfill_sent=0)
         self.deliveries=[]
@@ -74,6 +77,7 @@ class ExperimentCoordinator:
                     prepared=self.phase=='prepared',emergency=self.emergency,
                     network=self.network.status if self.network else {},
                     simulation_time=self.network_time-self.run_start_network_time,
+                    communication_ranges=dict(self.config.get('communication_ranges',{})),
                     destination=self.destination,results=str(self.folder),
                     lincoln={k:v for k,v in self.lincoln_status.items() if k not in ('route','position')},
                     scenario=self.scenario.snapshot() if self.scenario else None,
@@ -176,6 +180,7 @@ class ExperimentCoordinator:
         if len(bridge.lincoln.records)!=1:raise RuntimeError('场景需要一辆已登记的 Lincoln。')
         if any(name!='vanet_scenario' for name in bridge.npc.batches):raise RuntimeError('请先关闭独立随机 NPC 批次，以保证固定场景。')
         if self.display:self.display.close()
+        if self.lincoln_coverage:self.lincoln_coverage.close()
         self.display=VehicleStateDisplay(bridge.sumo.connection)
         previous=bridge.npc.batches.pop('vanet_scenario',None)
         if previous:previous['synchronization'].close()
@@ -189,6 +194,7 @@ class ExperimentCoordinator:
         self.attach_log()
         self.log.save_config(dict(group=self.group,parameters=self.config,scenario=self.scenario_config,destination=self.destination))
         self.metrics=Metrics(self.log,self.config);self.npc={};self.rsu=RsuCooperation(self.config)
+        self.communication_links={}
         self.rsu_counters=dict(received=0,notice_sent=0,feedback_received=0,clearance_sent=0,backfill_sent=0)
         self.pending_network=False;self.network_result=None;self.deliveries=[]
         self.network_reset_required=True
@@ -308,6 +314,7 @@ class ExperimentCoordinator:
         for state in states:
             if state['role']=='npc':
                 component=self.npc.setdefault(state['id'],NpcCooperation(state['id'],self.config))
+                component.set_communication_links(self.communication_links.get(state['id'],[]),now)
                 messages.extend(component.step(now,state,self.bridge.sumo.connection))
                 if not self.ended:
                     self.metrics.note_yield_state(state['id'],component.status,now-self.run_start_network_time,
@@ -339,9 +346,18 @@ class ExperimentCoordinator:
         return messages
 
     def after_step(self):
+        if self.bridge.sumo is not None:
+            if self.lincoln_coverage is None:
+                self.lincoln_coverage=LincolnCoverageCircle(self.bridge.sumo.connection,
+                    self.config['communication_ranges']['v2v_metres'])
+            record=next(iter(self.bridge.lincoln.records.values()),{})
+            self.lincoln_coverage.update(record.get('sumo_id'))
         if self.network_result is None:return
         result=self.network_result;self.network_result=None
         self.network_time=float(result['time'])
+        self.communication_links=result.get('communication_links',{})
+        for name,component in self.npc.items():component.set_communication_links(self.communication_links.get(name,[]),self.network_time)
+        self.rsu.set_communication_links(self.communication_links.get(self.config['rsu']['id'],[]),self.network_time)
         self.log.network_boundary(result)
         self.log.emit('network_boundary',self.network_time,level='debug',step_id=self.step_id,stats=result.get('stats',{}))
         for delivery in result.get('deliveries',[]):
@@ -387,6 +403,7 @@ class ExperimentCoordinator:
         self.metrics.values['status']='closed' if not self.ended else self.metrics.values['status']
         self.log.save_metrics(self.metrics.values)
         if self.display:self.display.close()
+        if self.lincoln_coverage:self.lincoln_coverage.close()
         if self.network:
             try:
                 deadline=time.monotonic()+2.

@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock
-from vanet.project_paths import PROJECT_DIRECTORY, EXPERIMENT_RESULTS_DIRECTORY, OMNET_RUNTIME_DIRECTORY
+from vanet.project_paths import PROJECT_DIRECTORY, EXPERIMENT_RESULTS_DIRECTORY, OMNET_RUNTIME_DIRECTORY, EXPERIMENT_DEFAULT_CONFIGURATION_FILE
 from vanet.cobridge.omnet_connection_management.connection import OmnetConnection
 from vanet.omnet.build_and_launch.wireless_smoke import wait_for
 from vanet.npc.cooperation import NpcCooperation
@@ -31,11 +31,12 @@ def main():
     traffic.vehicle.couldChangeLane.return_value=True
     state=dict(id='npc0',x=30.,y=0.,z=.6,heading=0.,speed=5.,width=1.8,lane_id='edge_0')
     nodes=[dict(id='lincoln0',role='lincoln',x=0,y=0,z=.6),dict(state,role='npc'),dict(id='rsu0',role='rsu',x=50,y=0,z=6)]
-    config={'beacon_interval':1.,'lease_seconds':10.}
+    config={'beacon_interval':1.,'lease_seconds':10.,
+            'communication_ranges':json.loads(EXPERIMENT_DEFAULT_CONFIGURATION_FILE.read_text())['communication_ranges']}
     npc=NpcCooperation('npc0',config);rsu=RsuCooperation(config)
     history=[]
     with (directory/'process.log').open('w') as log:
-        process=subprocess.Popen([sys.executable,'-m','vanet.omnet.build_and_launch.run_network','--socket',str(socket_path),'--results',str(directory/'omnet')],cwd=PROJECT_DIRECTORY,stdout=log,stderr=subprocess.STDOUT)
+        process=subprocess.Popen([sys.executable,'-m','vanet.omnet.build_and_launch.run_network','--ui','Cmdenv','--socket',str(socket_path),'--results',str(directory/'omnet')],cwd=PROJECT_DIRECTORY,stdout=log,stderr=subprocess.STDOUT)
         network=OmnetConnection(socket_path)
         try:
             deadline=time.monotonic()+30
@@ -54,6 +55,8 @@ def main():
                 network.submit(step,round(now+.05,8),nodes,transmissions)
                 wait_for(network,lambda:network.pending is None,process)
                 result=network.take_result()
+                npc.set_communication_links(result['communication_links'].get('npc0',[]),result['time'])
+                rsu.set_communication_links(result['communication_links'].get('rsu0',[]),result['time'])
                 for delivery in result['deliveries']:
                     history.append(delivery)
                     if delivery['recipient']=='rsu0':rsu.receive(delivery['payload'],delivery['received_at'])

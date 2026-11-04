@@ -13,6 +13,20 @@ python3 -m vanet.omnet.build_and_launch.run_network
 
 独立启动支持 `--socket PATH`、`--results DIR`、`--seed INTEGER`；`--build-only` 只编译。项目统一入口通过 `setup.bash` 的 `run_omnet` 调用。默认依赖和源码路径都从 `vanet/project_paths.py` 获取。
 
+默认 `--ui Qtenv`，一键入口也明确启用 Qtenv；无图形诊断可指定 `--ui Cmdenv`。编译使用当前安装的 Qt5Widgets。Qtenv 自动进入网络运行，外部时钟调度器在等待 CoBridge 时持续处理 GUI 事件，不使用现实时间推进网络。实验开始与取消仍由 SUMO 控制；联仿期间停止 Qtenv 会阻止网络返回边界，触发桥端等待或超时。
+
+## 距离约束与通信可视化
+
+统一读取 `vanet/experiments/experiment_group_configuration/defaults.json` 的 `communication_ranges`：V2V 为 50 米，包含 RSU 的链路为 170 米，按水平距离计算且包含边界。实际帧经过 Veins 无线模型后，应用在分片重组前检查距离；移动出圈时丢弃该来源的未完成重组，旧传输不能靠重新进圈恢复。距离内仍受 PHY/MAC 干扰和丢包影响。
+
+边界结果增加 `communication_ranges` 和 `communication_links`，后者只是可通信的几何邻居，用于撤销出圈来源；不能当作已收到消息。实际 `deliveries` 增加 `communication_link` 距离、类型与上限。NPC 按实际接收来源分别保存有效授权，出圈立即撤销该来源，重新进入必须实际收到新消息；RSU 同样仅使用范围内实际收到的任务及信标。
+
+生成的 `qtenv_scene.json` 保存 Town04 路网、坐标转换、半径及高速边缘间隔，`communication_ranges.json` 保存参数快照。最近高速道路外缘约 173.08 米，当前半径 170 米；生成场景时拒绝覆盖高速的半径。SUMO 的 Y 轴反转一次得到 Qtenv 画布，车辆、道路、范围与箭头共用米制坐标，不会出现上下镜像。
+
+绿色圆表示 RSU 范围，蓝色圆表示 Lincoln 的 50 米范围；NPC 不显示通信圈。红色紧急消息、金色定向通知、蓝色其他消息箭头仅在实际完整接收后出现，保留 0.5 个仿真秒；Lincoln 发射时通信圈短暂加亮。界面统计是累计发送及完整接收数量；原始事件继续详细写入 JSONL。SUMO 中也显示相同中心、170 米半径的绿色轮廓圆，以及随 Lincoln 车身中心移动的蓝色 50 米圈；在每个交通步结束后更新 SUMO 图形，支持转向和场景复位，无额外仿真时钟。
+
+车辆使用带车窗、轮胎与车灯的俯视小车示意图，并随 CARLA 航向旋转；Lincoln 为红色、NPC 为蓝色。NPC 间不进行业务通信，普通交通判断复用现有 CARLA 全局状态；NPC 信标定向发送给 RSU，紧急消息与反馈仍经过真实无线网络。
+
 运行进程在 Unix socket 接受一个 CoBridge 连接；初始化后停留在网络时间 0，只有收到 `advance` 才推进。每个步长终点安排低优先级边界事件，确保该时刻的无线事件处理完成后再返回结果。桥端非阻塞调用可继续响应 SUMO GUI，不依赖墙上时间推动网络。
 
 ## Python 接口
@@ -58,7 +72,11 @@ if network.ready:
 ```bash
 python3 -m vanet.omnet.build_and_launch.wireless_smoke
 python3 -m vanet.omnet.build_and_launch.application_smoke
+python3 -m vanet.tests.live_cosimulation_checks.wireless_range_check
+python3 -m vanet.tests.live_cosimulation_checks.wireless_range_check --ui Qtenv
 ```
+
+`wireless_range_check` 使用真实 Veins 验证双向 50/50.1 米、170/170.1 米边界、广播按接收者筛选、分片出圈后重新进入及新传输恢复、水平距离与外部时钟空闲冻结。Qtenv 模式使用离屏 Qt 实际启动、实际收发并保存 `omnet/qtenv_view.png`；添加 `--visible` 可以显示该独立检查窗口。检查不连接现有 CARLA/SUMO，不等同于完整联仿验收。
 
 `wireless_smoke` 使用真实 OMNeT++/Veins 检查近距离广播、远距离无接收、约 9.8 KB 消息分片重组、MAC 定向投递、复位后同种子同延迟、节点删除、每轮事件隔离和归档区间，以及 Python/C++ 两端对目录越界及符号链接越界的拒绝。
 

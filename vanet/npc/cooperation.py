@@ -5,6 +5,7 @@ from vanet.npc.route_conflict_assessment.route_geometry import conflict, project
 from vanet.npc.v2x_data_exchange.message_guard import MessageGuard
 from vanet.npc.v2x_data_exchange.beacon_schedule import beacon_phase_seconds
 from vanet.npc.yielding_action_control.sumo_actions import YieldingActions
+from vanet.npc.v2x_data_exchange.range_leases import RangeLeases
 
 LOG = logging.getLogger(__name__)
 
@@ -25,6 +26,10 @@ class NpcCooperation:
         self.recovering = False
         self.last_time = None
         self.conflict_anchor = None
+        self.range_leases=RangeLeases('communication_ranges' in self.config,self.config.get('lease_seconds',10.))
+
+    def set_communication_links(self,peers,sim_time):
+        self.range_leases.update_links(peers)
 
     def send(self, kind, now, recipient='broadcast', **fields):
         self.sequence += 1
@@ -35,23 +40,28 @@ class NpcCooperation:
         return dict(sender=self.node_id, recipient=recipient, payload=payload)
 
     def receive(self, message, sim_time):
+        if not self.range_leases.can_receive(message.get('source')):return False
         if message.get('type') not in ('emergency', 'notice', 'cancel') or not self.guard.accept(message, sim_time):
             return False
         kind = message['type']
         if kind == 'cancel':
             if self.task and message['task_id'] == self.task['task_id'] and message['route_version'] >= self.task['route_version']:
-                self.recovering = True
-                self.reason = message.get('reason', 'task_cancelled')
+                self.range_leases.cancel(message)
+                if not self.range_leases.enabled or self.range_leases.current(sim_time) is None:
+                    self.recovering = True
+                    self.reason = message.get('reason', 'task_cancelled')
             return True
         if not message.get('route') or len(message['route']) < 2:
             return False
         new_task = not self.task or (message['task_id'], message['route_version']) != (self.task['task_id'], self.task['route_version'])
+        self.range_leases.remember(message,sim_time,new_task)
         self.task = copy.deepcopy(message)
         self.lease_until = sim_time+self.config.get('lease_seconds', 10.)
-        if new_task:
+        if new_task or (self.recovering and self.reason in ('out_of_communication_range','lease_expired')):
             self.recovering = False
             self.conflict_anchor = None
             self.actions.action = None
+            self.actions.restore_started=None
             self.status, self.reason = 'received', 'valid_wireless_message'
             self.next_feedback = sim_time
         return True
@@ -73,11 +83,15 @@ class NpcCooperation:
         if sim_time+1e-8 >= self.next_beacon:
             state = {k: copy.deepcopy(v) for k, v in own_state.items() if k in
                      ('id','x','y','z','speed','heading','route','lane_id','width','length','in_junction')}
-            messages.append(self.send('beacon', sim_time, state=state))
+            messages.append(self.send('beacon', sim_time, recipient=self.config.get('rsu_id','rsu0'), state=state))
             self.next_beacon = sim_time+self.config.get('beacon_interval', 1.)
         if self.task is None:
             return messages
         previous = self.status, self.reason
+        if self.range_leases.enabled:
+            current=self.range_leases.current(sim_time)
+            if current is None:self.recovering,self.reason=True,self.range_leases.reason(sim_time)
+            else:self.task,self.lease_until=current['message'],current['until']
         if self.status == 'received':
             messages.append(self.send('feedback', sim_time, recipient=self.config.get('rsu_id','rsu0'), status='received', reason=self.reason))
         if sim_time >= self.lease_until:
@@ -117,6 +131,7 @@ class NpcCooperation:
             self.task = None
             self.recovering = False
             self.conflict_anchor = None
+            self.range_leases.clear()
         return messages
 
     def snapshot(self):

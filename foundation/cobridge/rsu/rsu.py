@@ -1,6 +1,7 @@
 """RSU lifecycle and presentation; never advances simulation time."""
 import json
 import math
+import os
 from pathlib import Path
 import re
 import uuid
@@ -61,6 +62,7 @@ class RsuBridge:
         self.bodies = []
         self.session = uuid.uuid4().hex
         self.state = None
+        self.coverage = None
 
     def save(self):
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
@@ -105,6 +107,10 @@ class RsuBridge:
             body = RsuBody(self.session)
             self.bodies.append(body)
             body.spawn(self.world, rsu, rsu['base_z'])
+        if os.environ.get('AUTODRIVE_VANET') == '1':
+            from vanet.rsu.coverage_display.coverage_circle import CoverageCircle
+            self.coverage = CoverageCircle(self.sumo, self.network)
+            self.coverage.setup(self.config['rsus'])
 
     def after_step(self, elapsed, step_length):
         for rsu in self.config['rsus']:
@@ -115,6 +121,11 @@ class RsuBridge:
 
     def close(self):
         errors = []
+        if self.coverage is not None:
+            try:
+                self.coverage.close()
+            except Exception as error:
+                errors.append(str(error))
         for body in reversed(self.bodies):
             try:
                 body.destroy()

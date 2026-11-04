@@ -36,6 +36,16 @@ void WirelessApplication::handleLowerMsg(cMessage* message) {
     gateway->fragment(true);
     gateway->event("fragment.rx", {{"sender",frame->sender},{"recipient",nodeId},{"transmission",frame->transmission},{"fragment",frame->index}});
     if (frame->recipient != "broadcast" && frame->recipient != nodeId) { delete frame; return; }
+    for(auto it=invalidTransmissions.begin();it!=invalidTransmissions.end();) {
+        if(it->second<simTime().dbl())it=invalidTransmissions.erase(it);else ++it;
+    }
+    if(simTime().dbl()-frame->sentAt>10.) {delete frame;return;}
+    if(!gateway->communicationLink(frame->sender,nodeId).at("allowed").get<bool>()||invalidTransmissions.count(frame->transmission)) {
+        invalidTransmissions[frame->transmission]=frame->sentAt+10.;
+        if(assemblies.erase(frame->transmission))gateway->rangeDiscard(nodeId,frame->sender,frame->transmission,true);
+        gateway->rangeDiscard(nodeId,frame->sender,frame->transmission);
+        delete frame;return;
+    }
     for (auto it = assemblies.begin(); it != assemblies.end();) {
         if (simTime().dbl() - it->second.created > 10) {
             gateway->event("reassembly.expired", {{"recipient",nodeId},{"transmission",it->first}});
@@ -58,6 +68,16 @@ void WirelessApplication::handleLowerMsg(cMessage* message) {
         assemblies.erase(found);
     }
     delete frame;
+}
+void WirelessApplication::invalidateOutOfRangeAssemblies() {
+    Enter_Method_Silent();
+    for(auto it=assemblies.begin();it!=assemblies.end();) {
+        if(!gateway->communicationLink(it->second.sender,nodeId).at("allowed").get<bool>()) {
+            invalidTransmissions[it->first]=it->second.sentAt+10.;
+            gateway->rangeDiscard(nodeId,it->second.sender,it->first,true);
+            it=assemblies.erase(it);
+        } else ++it;
+    }
 }
 void WirelessApplication::handleLowerControl(cMessage* message) {
     gateway->event("mac.control", {{"node",nodeId},{"kind",message->getKind()},{"name",message->getName()}});

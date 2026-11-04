@@ -33,6 +33,9 @@ simple NetworkGateway {
         string stepStatisticsFile;
         string allowedResultsRoot;
         double vehicleAntennaOffsetZ @unit(m) = default(1.5m);
+        double v2vRange @unit(m);
+        double rsuRange @unit(m);
+        string sceneFile;
         double coordinateOffsetX = default(2000);
         double coordinateOffsetY = default(2000);
 }

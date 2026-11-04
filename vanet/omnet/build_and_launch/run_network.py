@@ -1,4 +1,4 @@
-"""Launch OMNeT++ Cmdenv with one externally gated Veins network."""
+"""Launch the external-clock Veins network in Qtenv (or explicit Cmdenv checks)."""
 import argparse
 import fcntl
 import json
@@ -15,11 +15,13 @@ from vanet.project_paths import (
     VEINS_SOURCE_DIRECTORY, VEINS_NED_DIRECTORY, VEINS_WIRELESS_LIBRARY_FILE, OMNET_RADIO_PARAMETERS_FILE,
 )
 from vanet.omnet.build_and_launch.build_network import build_network
+from vanet.omnet.map_and_communication_display.scene_configuration import generate_scene
 
 
 def generate_configuration(directory, socket_path, seed=None):
     directory.mkdir(parents=True, exist_ok=True)
     parameters = json.loads(OMNET_RADIO_PARAMETERS_FILE.read_text())
+    scene,scene_path=generate_scene(directory)
     if seed is not None:
         parameters['seed'] = seed
     model = directory / 'radio_models.xml'
@@ -32,6 +34,9 @@ def generate_configuration(directory, socket_path, seed=None):
     quote = lambda value: json.dumps(str(value))
     text = f'''[General]
 network = vanet.radio.ExternalNetwork
+scheduler-class = "ExternalClockScheduler"
+qtenv-default-config = "General"
+qtenv-default-run = "0"
 cmdenv-express-mode = true
 cmdenv-autoflush = true
 cmdenv-status-frequency = 10s
@@ -46,6 +51,11 @@ output-vector-file = {quote(directory / 'network.vec')}
 *.gateway.stepStatisticsFile = {quote(directory / 'network_steps.jsonl')}
 *.gateway.allowedResultsRoot = {quote(EXPERIMENT_RESULTS_DIRECTORY.resolve())}
 *.gateway.vehicleAntennaOffsetZ = {parameters['vehicle_antenna_offset_z_m']}m
+*.gateway.coordinateOffsetX = {scene['coordinate_offset_x']}
+*.gateway.coordinateOffsetY = {scene['coordinate_offset_y']}
+*.gateway.v2vRange = {scene['communication_ranges']['v2v_metres']}m
+*.gateway.rsuRange = {scene['communication_ranges']['rsu_metres']}m
+*.gateway.sceneFile = {quote(scene_path)}
 *.connectionManager.sendDirect = true
 *.connectionManager.maxInterfDist = {parameters['maximum_interference_distance_m']}m
 *.connectionManager.drawMaxIntfDist = false
@@ -77,6 +87,7 @@ def main():
     parser.add_argument('--results', type=Path)
     parser.add_argument('--seed', type=int)
     parser.add_argument('--build-only', action='store_true')
+    parser.add_argument('--ui',choices=('Qtenv','Cmdenv'),default='Qtenv')
     args = parser.parse_args()
     library = build_network()
     if args.build_only:
@@ -94,7 +105,7 @@ def main():
             raise RuntimeError(f'OMNeT++ already owns {args.socket}')
         args.socket.unlink(missing_ok=True)
         configuration = generate_configuration(directory, args.socket, args.seed)
-        command = [str(OMNET_EXECUTABLE_FILE), '-u', 'Cmdenv',
+        command = [str(OMNET_EXECUTABLE_FILE), '-u', args.ui,
                    '-n', os.pathsep.join(map(str, (OMNET_NETWORK_DEFINITIONS_DIRECTORY, VEINS_NED_DIRECTORY))),
                    '-l', str(VEINS_WIRELESS_LIBRARY_FILE), '-l', str(library), '-f', str(configuration)]
         env = dict(os.environ)

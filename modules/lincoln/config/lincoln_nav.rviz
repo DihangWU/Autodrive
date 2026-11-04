@@ -31,6 +31,7 @@ Visualization Manager:
     Name: CARLA lane markings
     Namespaces:
       carla_map: true
+      carla_road_geometry: true
     Topic:
       Depth: 5
       Durability Policy: Transient Local

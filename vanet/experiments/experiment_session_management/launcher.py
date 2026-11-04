@@ -106,7 +106,7 @@ def run(args):
         launch('CoBridge',['run_cobridge','--vanet','--timeout','10'])
         wait_until(lambda:bridge_status().get('sumo_connected'),log,'CoBridge')
         log.emit('startup_step',step=6,purpose='OMNeT++ IEEE 802.11p')
-        launch('OMNeT++',['run_omnet','--results',str(folder/'omnet'),'--seed',str(scenario['seed'])])
+        launch('OMNeT++',['run_omnet','--ui','Qtenv','--results',str(folder/'omnet'),'--seed',str(scenario['seed'])])
         wait_until(lambda:bridge_status(True).get('network',{}).get('ready'),log,'OMNeT++')
         log.emit('startup_step',step=7,purpose='RSU')
         launch('RSU',['run_rsu'])

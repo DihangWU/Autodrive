@@ -22,6 +22,14 @@ class RsuCooperation:
         self.pending = []
         self.next_summary = 0.
         self.last_time = None
+        self.range_limited='communication_ranges' in self.config
+        self.range_peers=set()
+
+    def set_communication_links(self,peers,sim_time):
+        self.range_peers=set(peers)
+        if self.range_limited and self.task and self.task['source'] not in self.range_peers:
+            self.cancel_selected(sim_time,'emergency_out_of_rsu_range',scope='selection')
+            self.task=None
 
     def send(self, kind, now, recipient, **fields):
         self.sequence += 1
@@ -38,6 +46,7 @@ class RsuCooperation:
         self.feedback.clear()
 
     def receive(self, message, sim_time):
+        if self.range_limited and message.get('source') not in self.range_peers:return False
         kind = message.get('type')
         if kind not in ('beacon','emergency','feedback','cancel','identity') or not self.guard.accept(message,sim_time):
             return False
@@ -82,6 +91,7 @@ class RsuCooperation:
         self.last_time = sim_time
         messages, self.pending = self.pending, []
         states = self.beacons.fresh(sim_time)
+        if self.range_limited:states={name:state for name,state in states.items() if name in self.range_peers}
         if self.task is None:
             return messages
         if sim_time >= self.lease_until:

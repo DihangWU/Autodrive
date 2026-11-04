@@ -64,7 +64,7 @@ def run_smoke(output=None):
     OMNET_RUNTIME_DIRECTORY.mkdir(parents=True, exist_ok=True)
     socket_path = OMNET_RUNTIME_DIRECTORY / ('smoke_' + str(__import__('os').getpid()) + '.sock')
     with (output / 'process.log').open('w') as log:
-        process = subprocess.Popen([sys.executable, '-m', 'vanet.omnet.build_and_launch.run_network', '--socket', str(socket_path), '--results', str(output / 'omnet')], cwd=PROJECT_DIRECTORY, stdout=log, stderr=subprocess.STDOUT)
+        process = subprocess.Popen([sys.executable, '-m', 'vanet.omnet.build_and_launch.run_network', '--ui','Cmdenv','--socket', str(socket_path), '--results', str(output / 'omnet')], cwd=PROJECT_DIRECTORY, stdout=log, stderr=subprocess.STDOUT)
         connection = OmnetConnection(socket_path, timeout=10)
         try:
             deadline = time.monotonic() + 30

@@ -8,6 +8,7 @@ class NetworkGateway;
 class WirelessApplication : public veins::BaseApplLayer {
     struct Assembly { std::vector<std::string> parts; std::vector<bool> present; double sentAt, created; std::string sender; };
     std::map<std::string, Assembly> assemblies;
+    std::map<std::string,double> invalidTransmissions;
     NetworkGateway* gateway = nullptr;
     std::string nodeId;
 protected:
@@ -15,6 +16,7 @@ protected:
     void handleLowerMsg(cMessage* message) override;
     void handleLowerControl(cMessage* message) override;
 public:
+    void invalidateOutOfRangeAssemblies();
     void transmit(const std::string& sender, const std::string& recipient,
                   const std::string& content, const std::string& identity, veins::LAddress::L2Type address);
 };

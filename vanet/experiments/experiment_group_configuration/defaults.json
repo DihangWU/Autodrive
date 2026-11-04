@@ -1,5 +1,6 @@
 {
   "step_length": 0.05,
+  "communication_ranges": {"v2v_metres": 50.0, "rsu_metres": 170.0},
   "beacon_interval": 1.0,
   "beacon_phase_spread_seconds": 0.8,
   "emergency_interval": 1.0,

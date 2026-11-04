@@ -1,4 +1,4 @@
-"""从当前 CARLA 地图生成贴地窄标线带，不绘制实心路面。
+"""从当前 CARLA 地图生成贴地窄标线带与无标线道路外缘，不绘制实心路面。
 
 OpenDRIVE supplies lane geometry and marking style, not Unreal road textures.
 Where explicit dash lengths are absent, broken-line rendering is illustrative.
@@ -6,6 +6,7 @@ Where explicit dash lengths are absent, broken-line rendering is illustrative.
 from collections import defaultdict
 from geometry_msgs.msg import Point
 from visualization_msgs.msg import Marker, MarkerArray
+from .unmarked_road_geometry import unmarked_road_edges
 
 
 def road_markers(carla_map):
@@ -18,11 +19,11 @@ def road_markers(carla_map):
               'Yellow': (1., .85, .05), 'Blue': (.1, .3, 1.),
               'Green': (.1, 1., .1), 'Red': (1., .1, .1)}
 
-    def marker(key, color):
+    def marker(key, color, namespace='carla_map'):
         if key not in markers:
             m = Marker()
             m.header.frame_id = 'map'
-            m.ns, m.id = 'carla_map', len(markers)
+            m.ns, m.id = namespace, len(markers)
             m.type, m.action = Marker.TRIANGLE_LIST, Marker.ADD
             m.pose.orientation.w = 1.
             m.scale.x = m.scale.y = m.scale.z = 1.
@@ -53,6 +54,7 @@ def road_markers(carla_map):
     styles = {'Solid': ('Solid',), 'Broken': ('Broken',),
               'SolidSolid': ('Solid', 'Solid'), 'SolidBroken': ('Solid', 'Broken'),
               'BrokenSolid': ('Broken', 'Solid'), 'BrokenBroken': ('Broken', 'Broken')}
+    painted_roads = set()
     for group in groups.values():
         group.sort(key=lambda w: w.s)
         for a, b in zip(group, group[1:]):
@@ -69,6 +71,7 @@ def road_markers(carla_map):
                 color = colors.get(color_name)
                 if color is None:
                     continue
+                painted_roads.add(a.road_id)
                 lines = styles[kind]
                 for i, style in enumerate(lines):
                     # API omits dash pattern on Town04: indicative 3m/3m only.
@@ -89,6 +92,21 @@ def road_markers(carla_map):
                         side * b.lane_width / 2 + extra, width))
                     # 每三角形指定颜色，使 RViz 不用场景灯光调暗标线。
                     strip.colors.extend((strip.color, strip.color))
+    outlines = set()
+    outline_width = .12
+    for a, b, side in unmarked_road_edges(groups, painted_roads):
+        p = boundary(a, side * a.lane_width / 2)
+        q = boundary(b, side * b.lane_width / 2)
+        identity = tuple(sorted((tuple(round(v, 3) for v in (p.x, p.y, p.z)),
+                                 tuple(round(v, 3) for v in (q.x, q.y, q.z)))))
+        if identity in outlines:
+            continue
+        outlines.add(identity)
+        strip = marker(('unmarked_road_edges', outline_width), (.65, .65, .65), 'carla_road_geometry')
+        strip.points.extend(marking_strip(a, b, side * a.lane_width / 2,
+                                           side * b.lane_width / 2, outline_width))
+        strip.colors.extend((strip.color, strip.color))
     print(f'RVIZ_MAP source={carla_map.name} lane_sections={len(groups)} '
-          f'marking_segments={len(seen)}; broken dash spacing is illustrative', flush=True)
+          f'marking_segments={len(seen)} unmarked_geometry_segments={len(outlines)}; '
+          'gray outlines are road geometry, broken dash spacing is illustrative', flush=True)
     return MarkerArray(markers=list(markers.values()))

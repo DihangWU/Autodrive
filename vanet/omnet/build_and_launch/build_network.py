@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import shlex
 from pathlib import Path
 from vanet.project_paths import (
     OMNET_PROJECT_DIRECTORY, OMNET_INSTALL_DIRECTORY, VEINS_INSTALL_DIRECTORY,
@@ -30,10 +31,11 @@ def build_network(force=False):
         if not required.exists():
             raise FileNotFoundError(f'Missing simulation dependency: {required}')
     temporary_library = OMNET_WIRELESS_LIBRARY_FILE.with_name(OMNET_WIRELESS_LIBRARY_FILE.name + '.building')
+    qt_flags=shlex.split(subprocess.check_output(['pkg-config','--cflags','--libs','Qt5Widgets'],text=True))
     command = [compiler, '-std=c++17', '-O2', '-fPIC', '-shared', '-pthread',
                '-I' + str(include), '-I' + str(veins_src), *map(str, sources),
                '-L' + str(omnet_lib), '-L' + str(veins_src), '-lveins', '-loppsim', '-loppcommon',
-               '-Wl,-rpath,' + str(omnet_lib), '-Wl,-rpath,' + str(veins_src),
+               '-Wl,-rpath,' + str(omnet_lib), '-Wl,-rpath,' + str(veins_src), *qt_flags,
                '-o', str(temporary_library)]
     signature = hashlib.sha256(json.dumps(command).encode() + b''.join(p.read_bytes() for p in sources + headers)).hexdigest()
     signature_file = output / 'build_signature.txt'

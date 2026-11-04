@@ -1,5 +1,7 @@
 #include "NetworkGateway.h"
 #include "ExternalMobility.h"
+#include "NetworkVisualization.h"
+#include "QtEnvironmentControl.h"
 #include "../wireless_applications/WirelessApplication.h"
 #include "veins/modules/mac/ieee80211p/Mac1609_4.h"
 #include "veins/base/connectionManager/ChannelAccess.h"
@@ -14,6 +16,8 @@
 #include <limits>
 #include <chrono>
 #include <filesystem>
+#include <fcntl.h>
+#include <poll.h>
 Define_Module(NetworkGateway);
 
 void NetworkGateway::initialize() {
@@ -26,6 +30,11 @@ void NetworkGateway::initialize() {
     // Launcher owns a process lock and removes a stale socket before invocation.
     if (bind(server, reinterpret_cast<sockaddr*>(&address), sizeof(address)) || listen(server, 1))
         throw cRuntimeError("bind/listen failed: %s", strerror(errno));
+    fcntl(server,F_SETFL,fcntl(server,F_GETFL)|O_NONBLOCK);
+    ranges.v2v=par("v2vRange").doubleValue();ranges.rsu=par("rsuRange").doubleValue();
+    if(!std::isfinite(ranges.v2v)||!std::isfinite(ranges.rsu)||ranges.v2v<=0||ranges.rsu<=0)
+        throw cRuntimeError("Communication ranges must be positive and finite");
+    if(hasGUI())visualization=std::make_unique<NetworkVisualization>(getParentModule(),par("sceneFile").stdstringValue());
     events.open(par("eventFile").stringValue(), std::ios::app);
     if (!events) throw cRuntimeError("Cannot open network events log");
     stepStatistics.open(par("stepStatisticsFile").stringValue(), std::ios::app);
@@ -35,27 +44,52 @@ void NetworkGateway::initialize() {
     scheduleAt(simTime(), boundary);
     event("network.ready", {{"socket",socketPath},{"radio","Veins IEEE 802.11p"}});
     EV_INFO << "VANET network ready: " << socketPath << endl;
+    if(hasGUI())startQtEnvironment();
 }
 void NetworkGateway::sendResponse(const json& value) {
-    std::string data = value.dump() + "\n"; size_t offset = 0;
-    while (offset < data.size()) {
-        auto count = ::send(client, data.data()+offset, data.size()-offset, MSG_NOSIGNAL);
-        if (count <= 0) throw cRuntimeError("CoBridge connection lost while sending result");
-        offset += count;
+    output+=value.dump()+"\n";flushOutput();
+}
+void NetworkGateway::flushOutput() {
+    while(!output.empty()) {
+        auto count=::send(client,output.data(),output.size(),MSG_NOSIGNAL);
+        if(count<0&&(errno==EAGAIN||errno==EWOULDBLOCK))return;
+        if(count<0&&errno==EINTR)continue;
+        if(count<=0)throw cRuntimeError("CoBridge connection lost while sending result");
+        output.erase(0,count);
     }
 }
-json NetworkGateway::readCommand() {
-    constexpr size_t maxLine = 8 * 1024 * 1024;
-    while (true) {
-        auto end = buffer.find('\n');
-        if (end != std::string::npos) {
-            auto line = buffer.substr(0, end); buffer.erase(0, end+1);
-            return json::parse(line);
+void NetworkGateway::pollExternalInput(int timeoutMilliseconds) {
+    Enter_Method_Silent();
+    pollfd descriptor{client<0?server:client,static_cast<short>(POLLIN|(!output.empty()?POLLOUT:0)),0};
+    if(buffer.find('\n')!=std::string::npos)timeoutMilliseconds=0;
+    int ready=::poll(&descriptor,1,timeoutMilliseconds);
+    if(ready<0&&errno==EINTR)return;
+    if(ready<0)throw cRuntimeError("External clock poll failed: %s",strerror(errno));
+    if(client<0) {
+        if(descriptor.revents&POLLIN) {
+            client=accept(server,nullptr,nullptr);
+            if(client>=0)fcntl(client,F_SETFL,fcntl(client,F_GETFL)|O_NONBLOCK);
         }
-        char chunk[65536]; auto count = recv(client, chunk, sizeof(chunk), 0);
-        if (count <= 0) throw cRuntimeError("CoBridge connection lost; network state cannot silently restart");
-        buffer.append(chunk, count);
-        if (buffer.size() > maxLine) throw cRuntimeError("CoBridge message exceeds 8 MiB limit");
+        return;
+    }
+    if(descriptor.revents&POLLOUT)flushOutput();
+    if(descriptor.revents&(POLLERR|POLLNVAL))throw cRuntimeError("CoBridge transport failed");
+    if(descriptor.revents&(POLLIN|POLLHUP)) {
+        char chunk[65536];auto count=recv(client,chunk,sizeof(chunk),0);
+        if(count==0)throw cRuntimeError("CoBridge disconnected; external-clock simulation cannot continue");
+        if(count<0&&errno!=EAGAIN&&errno!=EWOULDBLOCK&&errno!=EINTR)throw cRuntimeError("CoBridge receive failed");
+        if(count>0)buffer.append(chunk,count);
+        if(buffer.size()>8*1024*1024)throw cRuntimeError("CoBridge message exceeds 8 MiB limit");
+    }
+    auto end=buffer.find('\n');
+    if(end==std::string::npos)return;
+    auto line=buffer.substr(0,end);buffer.erase(0,end+1);
+    try {processCommand(json::parse(line));}
+    catch(const cTerminationException&){throw;}
+    catch(const cRuntimeError&){throw;}
+    catch(const std::exception& error) {
+        event("protocol.error",{{"error",error.what()}});
+        sendResponse({{"ok",false},{"error",error.what()},{"time",simTime().dbl()}});
     }
 }
 void NetworkGateway::synchronizeNodes(const json& values) {
@@ -85,6 +119,9 @@ void NetworkGateway::synchronizeNodes(const json& values) {
             removeNode(it->second); it=nodes.erase(it);
         } else ++it;
     }
+    ranges.synchronize(values);
+    for(auto& entry:nodes)check_and_cast<WirelessApplication*>(entry.second->getSubmodule("appl"))->invalidateOutOfRangeAssemblies();
+    if(visualization)visualization->synchronize(values,nodes);
 }
 void NetworkGateway::removeNode(cModule* node) {
     auto* nic = node->getSubmodule("nic");
@@ -145,7 +182,9 @@ void NetworkGateway::resetNetwork(int seed, const std::string& directory) {
     if (seed < 0) throw std::runtime_error("seed must be a nonnegative integer");
     selectResultsDirectory(directory);
     for (auto& entry : nodes) removeNode(entry.second);
-    nodes.clear(); deliveries=json::array();
+    nodes.clear(); deliveries=json::array();ranges.clear();
+    rangeFragmentsDiscarded=rangeAssembliesDiscarded=0;
+    if(visualization)visualization->reset();
     nextNode=nextTransmission=0;txCount=rxCount=fragmentTx=fragmentRx=0;stepId=-1;
     auto* environment=getEnvir();
     for(int i=0;i<environment->getNumRNGs();++i)
@@ -172,49 +211,61 @@ void NetworkGateway::advance(const json& command) {
         check_and_cast<WirelessApplication*>(nodes.at(sender)->getSubmodule("appl"))->transmit(sender,recipient,content,std::to_string(nextTransmission++),address);
         ++txCount;
         event("message.tx", {{"sender",sender},{"recipient",recipient},{"bytes",content.size()},{"payload",tx.at("payload")}});
+        if(visualization)visualization->transmitted(sender,tx.at("payload").value("type","message"),simTime().dbl());
     }
     stepId=next; pending=true; scheduleAt(SimTime(until),boundary);
 }
 void NetworkGateway::handleMessage(cMessage*) {
+    initialBoundary=false;
     if (pending) {
-        json stats={{"messages_tx",txCount},{"messages_rx",rxCount},{"fragments_tx",fragmentTx},{"fragments_rx",fragmentRx},{"nodes",nodes.size()}};
+        json stats={{"messages_tx",txCount},{"messages_rx",rxCount},{"fragments_tx",fragmentTx},{"fragments_rx",fragmentRx},{"nodes",nodes.size()},
+                    {"range_fragments_discarded",rangeFragmentsDiscarded},{"range_reassemblies_discarded",rangeAssembliesDiscarded}};
         json record={{"step_id",stepId},{"sim_time",simTime().dbl()},{"stats",stats},{"delivered_count",deliveries.size()},
                      {"wall_time_unix",std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count()}};
         stepStatistics << record.dump() << '\n' << std::flush;
         if(!stepStatistics)throw cRuntimeError("Cannot flush network boundary statistics");
         writeArchiveManifest();
-        sendResponse({{"ok",true},{"step_id",stepId},{"time",simTime().dbl()},{"deliveries",deliveries},{"stats",stats}});
+        sendResponse({{"ok",true},{"step_id",stepId},{"time",simTime().dbl()},{"deliveries",deliveries},{"stats",stats},
+                      {"communication_ranges",ranges.configuration()},{"communication_links",ranges.links()}});
         deliveries=json::array(); pending=false;
     }
-    if (client<0) {
-        client=accept(server,nullptr,nullptr);
-        if (client<0) throw cRuntimeError("accept failed: %s",strerror(errno));
-    }
-    while (true) {
-        try {
-            auto command=readCommand(); auto action=command.value("action","");
+}
+void NetworkGateway::processCommand(const json& command) {
+            auto action=command.value("action","");
             if (action=="hello" || action=="status") {
-                sendResponse({{"ok",true},{"protocol",1},{"capabilities",{{"per_run_archives",true}}},{"radio","Veins IEEE 802.11p"},{"time",simTime().dbl()},{"nodes",nodes.size()}});
+                sendResponse({{"ok",true},{"protocol",1},{"capabilities",{{"per_run_archives",true},{"hard_communication_ranges",true},{"communication_links",true},{"qtenv_visualization",true}}},
+                              {"radio","Veins IEEE 802.11p"},{"time",simTime().dbl()},{"nodes",nodes.size()},{"communication_ranges",ranges.configuration()}});
             } else if (action=="reset") {
                 resetNetwork(command.at("seed").get<int>(),command.value("results_directory",std::string()));
                 sendResponse({{"ok",true},{"reset",true},{"time",simTime().dbl()},{"seed",command.at("seed")},{"artifacts",artifactManifest()}});
             } else if (action=="shutdown") {
-                sendResponse({{"ok",true},{"stopped",true}}); endSimulation(); return;
+                sendResponse({{"ok",true},{"stopped",true}});
+                if(hasGUI())stopQtEnvironment();
+                endSimulation(); return;
+            } else if(action=="visualization.snapshot") {
+                if(!hasGUI())throw std::runtime_error("Qtenv is required for a visualization snapshot");
+                auto path=std::filesystem::path(par("eventFile").stringValue()).parent_path()/"qtenv_view.png";
+                bool saved=saveQtEnvironment(path.string());
+                sendResponse({{"ok",saved},{"snapshot",path.string()},{"time",simTime().dbl()}});
             } else if (action=="advance") {advance(command);return;}
             else sendResponse({{"ok",false},{"error","unknown action"}});
-        } catch (const cTerminationException&) { throw; }
-          catch (const cRuntimeError&) { throw; }
-          catch (const std::exception& error) {
-            event("protocol.error",{{"error",error.what()}});
-            sendResponse({{"ok",false},{"error",error.what()},{"time",simTime().dbl()}});
-        }
-    }
 }
 void NetworkGateway::delivered(const std::string& receiver,const std::string& sender,const std::string& content,double sentAt) {
     Enter_Method_Silent();
-    json packet={{"sender",sender},{"recipient",receiver},{"payload",json::parse(content)},{"sent_at",sentAt},{"received_at",simTime().dbl()}};
+    auto link=ranges.describe(sender,receiver);
+    if(!link.at("allowed").get<bool>())return;
+    json packet={{"sender",sender},{"recipient",receiver},{"payload",json::parse(content)},{"sent_at",sentAt},{"received_at",simTime().dbl()},{"communication_link",link}};
     deliveries.push_back(packet); ++rxCount; event("message.rx",packet);
+    if(visualization)visualization->received(sender,receiver,packet["payload"].value("type","message"),simTime().dbl());
 }
+void NetworkGateway::rangeDiscard(const std::string& receiver,const std::string& sender,const std::string& transmission,bool assembly) {
+    if(assembly)++rangeAssembliesDiscarded;else ++rangeFragmentsDiscarded;
+    auto detail=ranges.describe(sender,receiver);
+    detail["sender"]=sender;detail["recipient"]=receiver;detail["transmission"]=transmission;detail["reassembly"]=assembly;
+    detail["reason"]=detail.value("allowed",false)?"old_transmission_invalidated_outside_range":"outside_communication_range";
+    event("communication.range_discard",detail);
+}
+void NetworkGateway::refreshDisplay() const {if(visualization)visualization->refresh(simTime().dbl(),txCount,rxCount);}
 void NetworkGateway::event(const std::string& type,const json& fields) {
     json value=fields; value["type"]=type;value["sim_time"]=simTime().dbl();
     value["wall_time_unix"]=std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
