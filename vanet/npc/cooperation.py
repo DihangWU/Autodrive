@@ -7,6 +7,7 @@ from vanet.npc.v2x_data_exchange.beacon_schedule import beacon_phase_seconds
 from vanet.npc.yielding_action_control.sumo_actions import YieldingActions
 from vanet.npc.v2x_data_exchange.range_leases import RangeLeases
 from vanet.npc.v2x_data_exchange.communication_path import NpcCommunicationPath
+from vanet.npc.v2x_data_exchange.feedback_schedule import next_feedback_time
 
 LOG = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ class NpcCooperation:
         selection=self.communication_path
         if not selection.configured or selection.path!=path:
             LOG.info('NPC communication path node=%s sim_time=%.3f previous=%s current=%s',self.node_id,sim_time,selection.path,path)
-            self.path_beacon_pending=True
+            self.path_beacon_pending=selection.configured
             self.next_feedback=sim_time
         selection.configured=True;selection.path=path
         self.range_leases.update_links(selection.filter_peers(self.physical_peers))
@@ -145,7 +146,7 @@ class NpcCooperation:
             LOG.info('NPC node=%s sim_time=%.3f status=%s reason=%s',self.node_id,sim_time,self.status,self.reason)
         if previous != (self.status,self.reason) or sim_time+1e-8 >= self.next_feedback:
             self.append_feedback(messages,sim_time,own_state,self.status,self.reason)
-            self.next_feedback = sim_time+self.config.get('feedback_interval',1.)
+            self.next_feedback = next_feedback_time(sim_time,self.node_id,self.config)
         if self.status == 'normal':
             self.task = None
             self.recovering = False

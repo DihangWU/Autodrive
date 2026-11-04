@@ -6,6 +6,7 @@ from vanet.protocol.communication_path_selection.paths import select_communicati
 from vanet.npc.cooperation import NpcCooperation
 from vanet.rsu.cooperation import RsuCooperation
 from vanet.lincoln.v2x_data_exchange.wireless_clearance_advice import WirelessClearanceAdvice
+from vanet.npc.v2x_data_exchange.feedback_schedule import next_feedback_time
 from vanet.tests.offline_function_checks.test_cooperation import message,state,connection
 
 CONFIG=dict(communication_ranges=dict(v2v_metres=50.,rsu_metres=170.),rsu=dict(id='rsu0',x=100.,y=0.))
@@ -63,6 +64,28 @@ class CommunicationPathTests(unittest.TestCase):
         self.assertFalse(rsu.beacons.entries)
         rsu.set_relay_targets(['remote'],2.)
         self.assertFalse(any(m['payload']['type']=='notice' for m in rsu.step(2.)))
+
+    def test_switching_channel_does_not_realign_periodic_beacons(self):
+        config=dict(CONFIG,seed=20261104,beacon_phase_spread_seconds=.8)
+        npc=NpcCooperation('npc0',config);npc.set_communication_path('direct',0.)
+        self.assertFalse(npc.path_beacon_pending)
+        npc.step(0.,state(),connection());first_due=npc.next_beacon
+        npc.set_communication_path('rsu',.1);npc.step(.1,state(),connection())
+        self.assertEqual(npc.next_beacon,first_due)
+
+    def test_handover_does_not_send_old_task_feedback_on_new_channel(self):
+        npc=NpcCooperation('npc0',CONFIG);npc.set_communication_links(['lincoln0','rsu0'],0.)
+        npc.set_communication_path('direct',0.);npc.receive(message(),0.)
+        npc.set_communication_path('rsu',1.)
+        output=npc.step(1.,state(),connection())
+        self.assertFalse(any(m['payload']['type']=='feedback' for m in output))
+
+    def test_periodic_feedback_phase_stays_stable_after_immediate_state_changes(self):
+        config=dict(seed=20261104,beacon_phase_spread_seconds=.8)
+        first=next_feedback_time(9.,'npc0',config)
+        self.assertGreater(first,9.);self.assertLess(first,10.)
+        second=next_feedback_time(10.,'npc0',config)
+        self.assertAlmostEqual(second-first,1.)
 
 
 class DirectAdviceTests(unittest.TestCase):
