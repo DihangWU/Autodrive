@@ -16,6 +16,7 @@ class FixedSumoScenarioTests(unittest.TestCase):
     def test_prepare_depart_yield_restore_and_reset(self):
         sys.path.insert(0,str(SUMO_INSTALLATION_DIRECTORY/'tools'))
         import traci
+        import sumolib
         connection=None
         with tempfile.TemporaryDirectory(prefix='vanet_scenario_live_') as folder:
             log_file=Path(folder)/'sumo.log'
@@ -34,9 +35,17 @@ class FixedSumoScenarioTests(unittest.TestCase):
                 scenario.traffic.spawn_next_vehicles(20)
                 for _ in range(3):connection.simulationStep()
                 initial=set(connection.vehicle.getIDList())
-                self.assertEqual(len(initial),2)
+                self.assertEqual(len(initial),scenario.traffic.initial_count)
                 self.assertTrue(all(connection.vehicle.getSpeed(name)==0. for name in initial))
-                name='vanet_npc_front_01'
+                name=next(entry['id'] for entry in scenario.config['npcs'] if entry.get('depart_offset',0.)<=0)
+                entry=next(entry for entry in scenario.config['npcs'] if entry['id']==name)
+                placement=entry.get('initial_placement')
+                if placement:
+                    self.assertEqual(connection.vehicle.getLaneID(name),placement['lane_id'])
+                    shape=connection.lane.getShape(placement['lane_id'])
+                    front_station,_=sumolib.geomhelper.polygonOffsetAndDistanceToPoint(connection.vehicle.getPosition(name),shape)
+                    center_station=front_station-connection.vehicle.getLength(name)/2
+                    self.assertAlmostEqual(center_station-placement['lincoln_center_station'],placement['distance_metres'],places=3)
                 actions=YieldingActions(name,{})
                 own=dict(speed=connection.vehicle.getSpeed(name),width=connection.vehicle.getWidth(name),
                          lane_id=connection.vehicle.getLaneID(name))
@@ -58,7 +67,7 @@ class FixedSumoScenarioTests(unittest.TestCase):
                         maximum_travel[vehicle_id] = max(maximum_travel.get(vehicle_id,0.),math.dist(origin,position))
                 expected = {item['id'] for item in scenario.config['npcs']}
                 self.assertEqual(scenario.traffic.next_index,len(expected))
-                # 完成固定路线的车辆可以正常驶离，不能要求第80秒仍有五辆车。
+                # 完成固定路线的车辆可以正常驶离，不能要求第80秒仍全员在场。
                 self.assertEqual(seen,expected)
                 for entry in scenario.config['npcs']:
                     if entry.get('depart_offset',0.) > 0:

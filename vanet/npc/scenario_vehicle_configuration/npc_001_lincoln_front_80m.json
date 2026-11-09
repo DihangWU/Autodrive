@@ -1,0 +1,28 @@
+{
+  "id": "vanet_npc_001",
+  "route": [
+    "-41",
+    "-46",
+    "-47",
+    "-48",
+    "-7",
+    "-8",
+    "-9",
+    "-18",
+    "-19"
+  ],
+  "lane_index": 1,
+  "position": 373.47237146932656,
+  "speed": 0.0,
+  "role": "same_direction",
+  "depart_offset": 0.0,
+  "initial_placement": {
+    "reference": "lincoln_body_center",
+    "distance_metres": 80.0,
+    "measurement": "along_initial_lane",
+    "lane_id": "-41_1",
+    "lincoln_center_station": 297.43979019781625,
+    "npc_center_station": 377.43979019781625,
+    "position_reference": "SUMO front bumper lane position; converted from geometric shape length and includes half NPC length"
+  }
+}

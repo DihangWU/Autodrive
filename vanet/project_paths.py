@@ -20,7 +20,25 @@ VANET_PROCESS_LOCK_DIRECTORY = VANET_RUNTIME_DIRECTORY / 'process_locks'
 VANET_SESSION_STATE_DIRECTORY = VANET_RUNTIME_DIRECTORY / 'session_state'
 EXPERIMENT_ACTIVE_SESSION_FILE = VANET_SESSION_STATE_DIRECTORY / 'active_session.json'
 VANET_LAUNCH_LOCK_FILE = VANET_PROCESS_LOCK_DIRECTORY / 'launch.lock'
+VANET_SHUTDOWN_LOCK_FILE = VANET_PROCESS_LOCK_DIRECTORY / 'shutdown.lock'
+SHUTDOWN_PROCESS_DIRECTORY = Path('/proc')
+SHUTDOWN_PROCESS_STAT_RELATIVE_FILE = Path('stat')
+SHUTDOWN_PROCESS_COMMAND_RELATIVE_FILE = Path('cmdline')
+SHUTDOWN_PROCESS_WORKING_DIRECTORY = Path('cwd')
+SHUTDOWN_CARLA_ENTRY_FILE = PROJECT_DIRECTORY / 'foundation/carla/init/carla_init.sh'
+SHUTDOWN_LINCOLN_RUNTIME_DIRECTORY = PROJECT_DIRECTORY / '.runtime/lincoln'
+SHUTDOWN_SUMO_GUI_FILE = PROJECT_DIRECTORY / '.runtime/sumo/gui/sumo-gui'
+SHUTDOWN_SUMO_MAP_DIRECTORY = PROJECT_DIRECTORY / '.runtime/maps'
+SHUTDOWN_PROJECT_ENTRY_FILES = {
+    'Lincoln': (PROJECT_DIRECTORY / 'modules/lincoln/add_lincoln.py',),
+    'NPC': (PROJECT_DIRECTORY / 'modules/npcvehicules/npcvehicules.py',),
+    'RSU': (PROJECT_DIRECTORY / 'modules/rsu/rsu.py',),
+    'Camera': (PROJECT_DIRECTORY / 'foundation/carla/mouse_move/mouse_move.py',),
+    'CoBridge': (PROJECT_DIRECTORY / 'foundation/cobridge/cobridge.py',),
+    'SUMO': (PROJECT_DIRECTORY / 'foundation/sumo/init/sumo_init.py',),
+}
 SCENARIO_TOWN04_CONFIGURATION_FILE = VANET_DIRECTORY / 'experiments/scenario_and_parameter_configuration/town04_emergency.json'
+SCENARIO_NPC_DEFINITIONS_DIRECTORY = VANET_DIRECTORY / 'npc/scenario_vehicle_configuration'
 EXPERIMENT_DEFAULT_CONFIGURATION_FILE = VANET_DIRECTORY / 'experiments/experiment_group_configuration/defaults.json'
 OMNET_DIRECTORY = VANET_DIRECTORY / 'omnet'
 OMNET_COMPILED_OUTPUT_DIRECTORY = OMNET_DIRECTORY / 'compiled_output'

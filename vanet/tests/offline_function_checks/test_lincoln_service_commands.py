@@ -76,6 +76,44 @@ class ServiceCommandTests(unittest.TestCase):
             self.assertTrue(service.task.emergency)
         finally:service.close();node.navigation.close()
 
+    def test_normal_start_installs_map_and_updates_subsequent_control_frames(self):
+        node,service=self.make_service()
+        points=[SimpleNamespace(transform=carla.Transform(carla.Location(x=x)),is_junction=False,
+                                road_id=1,lane_id=-1,section_id=0,s=x,lane_width=3.5,next=lambda distance:[])
+                for x in (0.,10.,100.)]
+        service.road_map.get_waypoint.return_value=points[0]
+        node.car.get_speed_limit.return_value=50.
+        node.driver.navigation_preview.return_value=[]
+        try:
+            self.assertIsNone(node.navigation.road_map)
+            with patch('vanet.lincoln.emergency_state_management.emergency_service.plan_route',return_value=(points,points[-1])) as planner:
+                service.receive_command(dict(id='normal-prepare',action='prepare',group='normal',
+                    task_id='normal-trip',destination=dict(x=100.,y=0.,z=0.)))
+                service.process_commands()
+                deadline=time.monotonic()+1.
+                while service.task.state=='preparing' and time.monotonic()<deadline:
+                    service.process_commands();time.sleep(.005)
+                self.assertEqual(service.task.state,'prepared')
+                service.receive_command(dict(id='normal-start',action='start'))
+                service.process_commands()
+                self.assertEqual(service.task.state,'running')
+                self.assertFalse(service.task.emergency)
+                self.assertIs(node.navigation.road_map,service.road_map)
+                for frame in range(1,4):
+                    ego=Mock()
+                    ego.get_transform.return_value=carla.Transform(carla.Location(x=frame*.1))
+                    ego.get_velocity.return_value=carla.Vector3D(x=1.)
+                    snapshot=Mock(frame=frame,timestamp=SimpleNamespace(elapsed_seconds=frame*.05))
+                    snapshot.find.return_value=ego
+                    node.navigation.update(snapshot)
+                    service.after_frame(snapshot)
+                self.assertEqual(service.ack_frame,3)
+                self.assertEqual(service.road_map.get_waypoint.call_count,3)
+                self.assertEqual(node.navigation.snapshot()['state'],'navigating')
+                self.assertGreater(node.driver.set_navigation_speed.call_args.args[0],0.)
+                self.assertEqual(planner.call_count,1)
+        finally:service.close();node.navigation.close()
+
     def test_reset_rejected_while_emergency_identity_is_active(self):
         node,service=self.make_service()
         try:

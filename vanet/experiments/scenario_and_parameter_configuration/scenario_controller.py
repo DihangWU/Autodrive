@@ -4,6 +4,7 @@ import json
 import logging
 from vanet.project_paths import SCENARIO_TOWN04_CONFIGURATION_FILE
 from modules.npcvehicules.traffic.vehicle_types import install_vehicle_type
+from vanet.npc.scenario_vehicle_configuration.load_vehicle_definitions import load_vehicle_definitions
 
 LOG = logging.getLogger(__name__)
 OWNER_PARAMETER = 'autodrive.npc.batch'
@@ -12,7 +13,12 @@ OWNER_PARAMETER = 'autodrive.npc.batch'
 def load_scenario(path=None):
     selected = path or SCENARIO_TOWN04_CONFIGURATION_FILE
     with open(selected,encoding='utf-8') as stream:
-        return json.load(stream)
+        config=json.load(stream)
+    if 'npc_configuration_files' in config:
+        config['npcs']=config.get('npcs',[])+load_vehicle_definitions(config['npc_configuration_files'])
+    identifiers=[vehicle['id'] for vehicle in config['npcs']]
+    if len(set(identifiers))!=len(identifiers):raise ValueError('Duplicate NPC id in scenario.')
+    return config
 
 
 class FixedNpcTraffic:

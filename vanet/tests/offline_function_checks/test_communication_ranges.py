@@ -12,7 +12,7 @@ from vanet.rsu.coverage_display.coverage_circle import CoverageCircle
 from vanet.omnet.map_and_communication_display import scene_configuration
 from vanet.tests.offline_function_checks.test_cooperation import message,state
 
-CONFIG=dict(communication_ranges=dict(v2v_metres=50.,rsu_metres=170.),rsu=dict(id='rsu0',x=193.,y=-179.,z=6.))
+CONFIG=dict(communication_ranges=dict(v2v_metres=50.,rsu_metres=170.),out_of_range_yield_seconds=0.,rsu=dict(id='rsu0',x=193.,y=-179.,z=6.))
 
 
 class RangeLeaseTests(unittest.TestCase):

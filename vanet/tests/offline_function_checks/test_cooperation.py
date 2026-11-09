@@ -175,7 +175,10 @@ class ScenarioTests(unittest.TestCase):
         c.trafficlight.setPhaseDuration.assert_called_with('tl0',42.)
 
     def test_fixed_spawn_waits_for_simulated_depart_offset(self):
-        c=connection();s=ScenarioController(c);s.reset()
+        config=load_scenario()
+        config['npcs']=[dict(config['npcs'][0],id=f'offset_npc_{index}',depart_offset=offset)
+                       for index,offset in enumerate((0.,0.,35.,38.,52.))]
+        c=connection();s=ScenarioController(c,config);s.reset()
         s.traffic.spawn_next_vehicles(20)
         self.assertEqual(s.traffic.next_index,2)
         s.start(100.);s.step(134.);s.traffic.spawn_next_vehicles(20)
@@ -189,7 +192,7 @@ class ScenarioTests(unittest.TestCase):
         s.step(152.);s.traffic.spawn_next_vehicles(20)
         self.assertEqual(s.traffic.next_index,5)
         routes=[call.args[1] for call in c.route.add.call_args_list]
-        self.assertEqual(routes[0],load_scenario()['npcs'][0]['route'])
+        self.assertEqual(routes[0],s.config['npcs'][0]['route'])
         c.vehicle.setRoute.assert_not_called()
 
     def test_scenario_npcs_are_not_additional_lincolns(self):

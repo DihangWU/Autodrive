@@ -7,6 +7,7 @@
   "feedback_lifetime": 3.0,
   "max_backfill_attempts": 3,
   "lease_seconds": 10.0,
+  "out_of_range_yield_seconds": 30.0,
   "maximum_speed_kmh": 120.0,
   "lincoln_clearance_advice": {
     "message_lifetime_seconds": 3.0,

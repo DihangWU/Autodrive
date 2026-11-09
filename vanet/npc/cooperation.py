@@ -28,14 +28,15 @@ class NpcCooperation:
         self.recovering = False
         self.last_time = None
         self.conflict_anchor = None
-        self.range_leases=RangeLeases('communication_ranges' in self.config,self.config.get('lease_seconds',10.))
+        self.range_leases=RangeLeases('communication_ranges' in self.config,self.config.get('lease_seconds',10.),
+            self.config.get('out_of_range_yield_seconds',30.),self.node_id)
         self.communication_path=NpcCommunicationPath(self.config.get('rsu',{}).get('id',self.config.get('rsu_id','rsu0')))
         self.physical_peers=[]
         self.path_beacon_pending=False
 
     def set_communication_links(self,peers,sim_time):
         self.physical_peers=list(peers)
-        self.range_leases.update_links(self.communication_path.filter_peers(peers))
+        self.range_leases.update_links(self.communication_path.filter_peers(peers),sim_time)
 
     def set_communication_path(self,path,sim_time):
         if path not in ('direct','rsu',None):raise ValueError('Unknown NPC communication path.')
@@ -45,7 +46,7 @@ class NpcCooperation:
             self.path_beacon_pending=selection.configured
             self.next_feedback=sim_time
         selection.configured=True;selection.path=path
-        self.range_leases.update_links(selection.filter_peers(self.physical_peers))
+        self.range_leases.update_links(selection.filter_peers(self.physical_peers),sim_time)
 
     def send(self, kind, now, recipient='broadcast', **fields):
         self.sequence += 1
@@ -74,7 +75,7 @@ class NpcCooperation:
         self.range_leases.remember(message,sim_time,new_task)
         self.task = copy.deepcopy(message)
         self.lease_until = sim_time+self.config.get('lease_seconds', 10.)
-        if new_task or (self.recovering and self.reason in ('out_of_communication_range','lease_expired')):
+        if new_task or (self.recovering and self.reason in ('out_of_communication_range','lease_expired','out_of_range_yield_expired')):
             self.recovering = False
             self.conflict_anchor = None
             self.actions.action = None
@@ -114,7 +115,7 @@ class NpcCooperation:
             else:self.task,self.lease_until=current['message'],current['until']
         if self.status == 'received':
             self.append_feedback(messages,sim_time,own_state,'received',self.reason)
-        if sim_time >= self.lease_until:
+        if not self.range_leases.enabled and sim_time >= self.lease_until:
             self.recovering, self.reason = True, 'lease_expired'
         assessment = conflict(own_state, self.task, self.config)
         if assessment['relevant'] and self.conflict_anchor is None:
@@ -135,7 +136,7 @@ class NpcCooperation:
                     connection.vehicle.setSpeed(self.node_id,0.)
             elif not assessment['relevant']:
                 self.status, self.reason = 'cleared', 'outside_current_conflict'
-                if self.actions.saved is not None:
+                if self.actions.saved is not None and not self.range_leases.holding(sim_time):
                     self.recovering = True
             else:
                 self.status, self.reason = self.actions.apply(connection, own_state, assessment)
@@ -155,7 +156,7 @@ class NpcCooperation:
         return messages
 
     def append_feedback(self,messages,now,own_state,status,reason):
-        if self.communication_path.configured and self.range_leases.current(now) is None:return
+        if self.communication_path.configured and self.range_leases.active(now) is None:return
         target=self.communication_path.target()
         if target:
             messages.append(self.send('feedback',now,recipient=target,status=status,reason=reason,
@@ -163,6 +164,10 @@ class NpcCooperation:
                 position={key:own_state.get(key,0.) for key in ('x','y','z')}))
 
     def snapshot(self):
+        now=self.last_time if self.last_time is not None else 0.
+        current=self.range_leases.current(now)
         return dict(id=self.node_id,status=self.status,reason=self.reason,lease_until=self.lease_until,
                     communication_path=self.communication_path.path,
+                    out_of_range_yielding=self.range_leases.holding(now),
+                    out_of_range_yield_until=current['until'] if self.range_leases.holding(now) else None,
                     task_id=self.task.get('task_id') if self.task else None)

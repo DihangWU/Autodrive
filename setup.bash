@@ -84,3 +84,7 @@ run_vanet() {
     vanet_start_script="$(_vanet_python -c 'from vanet.project_paths import VANET_START_SCRIPT_FILE; print(VANET_START_SCRIPT_FILE)')" || return
     bash "$vanet_start_script" "$@"
 }
+
+stop_vanet() {
+    _vanet_python -m vanet.experiments.process_shutdown.shutdown "$@"
+}

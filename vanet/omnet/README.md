@@ -23,13 +23,13 @@ python3 -m vanet.omnet.build_and_launch.run_network
 
 统一读取 `vanet/experiments/experiment_group_configuration/defaults.json` 的 `communication_ranges`：V2V 为 50 米，包含 RSU 的链路为 170 米，按水平距离计算且包含边界。实际帧经过 Veins 无线模型后，应用在分片重组前检查距离；移动出圈时丢弃该来源的未完成重组，旧传输不能靠重新进圈恢复。距离内仍受 PHY/MAC 干扰和丢包影响。
 
-边界结果增加 `communication_ranges` 和 `communication_links`，后者只是可通信的几何邻居，用于撤销出圈来源；不能当作已收到消息。实际 `deliveries` 增加 `communication_link` 距离、类型与上限。NPC 按实际接收来源分别保存有效授权，出圈立即撤销该来源，重新进入必须实际收到新消息；RSU 同样仅使用范围内实际收到的任务及信标。
+边界结果增加 `communication_ranges` 和 `communication_links`，后者只是可通信的几何邻居，不能当作已收到消息。实际 `deliveries` 增加 `communication_link` 距离、类型与上限。NPC 离开有效通道后，可对之前实际收到且仍有效的任务保持避让 30 个仿真秒；这只是本地动作缓存，不生成接收事件、不允许旧任务在新通道反馈，也不改变无线收包距离。保持截止时刻只在首次失去通道时设置，不因无消息的重入延长。RSU 业务仍只使用范围内实际收到的任务及信标。
 
 生成的 `qtenv_scene.json` 保存 Town04 路网、坐标转换、半径及高速边缘间隔，`communication_ranges.json` 保存参数快照。最近高速道路外缘约 173.08 米，当前半径 170 米；生成场景时拒绝覆盖高速的半径。SUMO 的 Y 轴反转一次得到 Qtenv 画布，车辆、道路、范围与箭头共用米制坐标，不会出现上下镜像。
 
 绿色圆表示 RSU 范围，蓝色圆表示 Lincoln 的 50 米范围；NPC 不显示通信圈。通信箭头按双方角色配色：Lincoln ↔ RSU 为亮绿色，Lincoln ↔ NPC 为蓝色，RSU ↔ NPC 为暗绿色；双向同色，以箭头表示方向，不显示消息文字，也不按消息类型区分颜色。同一方向的多种消息复用一条线。箭头仅在实际完整接收后出现，保留 0.5 个仿真秒；Lincoln 发射时通信圈短暂加亮。界面统计是累计发送及完整接收数量；原始事件继续详细写入 JSONL。SUMO 中也显示相同中心、170 米半径的绿色轮廓圆，以及随 Lincoln 车身中心移动的蓝色 50 米圈；在每个交通步结束后更新 SUMO 图形，支持转向和场景复位，无额外仿真时钟。
 
-车辆使用带车窗、轮胎与车灯的俯视小车示意图，并随 CARLA 航向旋转；Lincoln 为深蓝色 `(30,90,230)`、NPC 为灰色 `(165,170,175)`。NPC 间不进行业务通信，普通交通判断复用现有 CARLA 全局状态。50 米内 NPC 的信标及反馈直接发给 Lincoln，RSU 不为该 NPC 重复通知或汇总；超出 50 米、且双方均在 RSU 范围内才经 RSU。切换通道会撤销旧来源授权与反馈，新通道依然需要实际收包。固定种子控制周期信标及反馈的错峰相位，状态变化立即反馈。
+车辆使用带车窗、轮胎与车灯的俯视小车示意图，并随 CARLA 航向旋转；Lincoln 为深蓝色 `(30,90,230)`、NPC 为灰色 `(165,170,175)`。NPC 间不进行业务通信，普通交通判断复用现有 CARLA 全局状态。50 米内 NPC 的信标及反馈直接发给 Lincoln，RSU 不为该 NPC 重复通知或汇总；超出 50 米、且双方均在 RSU 范围内才经 RSU。切换通道后新通信授权仍需实际收包，等待期间原任务可在 30 秒内保持避让。固定种子控制周期信标及反馈的错峰相位，状态变化立即反馈。
 
 运行进程在 Unix socket 接受一个 CoBridge 连接；初始化后停留在网络时间 0，只有收到 `advance` 才推进。每个步长终点安排低优先级边界事件，确保该时刻的无线事件处理完成后再返回结果。桥端非阻塞调用可继续响应 SUMO GUI，不依赖墙上时间推动网络。
 
@@ -81,7 +81,7 @@ python3 -m vanet.tests.live_cosimulation_checks.wireless_range_check --ui Qtenv
 python3 -m vanet.tests.live_cosimulation_checks.communication_path_check
 ```
 
-也可 `source setup.bash` 后执行 `check_vanet_communication_paths`。该检查使用真实 Veins 和项目实际 NPC/RSU/反馈应用，依次验证 RSU 区内直连、超距中转、恢复直连、RSU 区外直连，以及 Lincoln 未连接 RSU 时禁止中转。SUMO 动作使用 mock，不接管当前 CARLA/SUMO 实验，结果及实际交付记录保存在 `vanet/results/communication_path_check_*/`。
+也可 `source setup.bash` 后执行 `check_vanet_communication_paths`。该检查使用真实 Veins 和项目实际 NPC/RSU/反馈应用，依次验证 RSU 区内直连、超距中转、恢复直连、RSU 区外直连、Lincoln 未连接 RSU 时禁止中转，以及没有任何新收包时保持避让 30 个仿真秒后开始恢复。SUMO 动作使用 mock，不接管当前 CARLA/SUMO 实验，结果及实际交付记录保存在 `vanet/results/communication_path_check_*/`。
 
 `wireless_range_check` 使用真实 Veins 验证双向 50/50.1 米、170/170.1 米边界、广播按接收者筛选、分片出圈后重新进入及新传输恢复、水平距离与外部时钟空闲冻结。Qtenv 模式使用离屏 Qt 实际启动、实际收发并保存 `omnet/qtenv_view.png`；添加 `--visible` 可以显示该独立检查窗口。检查不连接现有 CARLA/SUMO，不等同于完整联仿验收。
 

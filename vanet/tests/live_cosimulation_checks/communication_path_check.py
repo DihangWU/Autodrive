@@ -96,6 +96,26 @@ def main():
                     assert not received('notice','npc0') and not received('feedback','lincoln0'),name
                     assert not received('feedback','rsu0'),name
                 cases.append(dict(name=name,path=expected,deliveries=len(observed),feedback_used=advice_received))
+            # The last case has lost all emergency communication paths. Only
+            # the already received NPC task may survive, for 30 simulation s.
+            hold=npc.snapshot()
+            assert hold['out_of_range_yielding'],hold
+            hold_until=hold['out_of_range_yield_until']
+            while network.network_time<hold_until-1e-8:
+                now=network.network_time
+                assert not npc.recovering
+                assert npc.actions.restore_started is None
+                assert not npc.step(now,own,traffic)
+                network.submit(step,round(now+.05,8),nodes,[]);step+=1
+                wait_for(network,lambda:network.pending is None,process)
+                result=network.take_result()
+                npc.set_communication_links(result['communication_links'].get('npc0',[]),result['time'])
+                assert not result['deliveries']
+            npc.step(network.network_time,own,traffic)
+            assert npc.recovering and npc.reason=='out_of_range_yield_expired',npc.snapshot()
+            assert abs(npc.actions.restore_started-hold_until)<1e-8
+            cases.append(dict(name='out_of_range_hold_expires_after_30_sim_seconds',hold_until=hold_until,
+                              recovery_started_at=network.network_time,deliveries=0))
             network.request_shutdown();wait_for(network,lambda:bool(network.results),process)
             network.take_result();process.wait(timeout=10.)
             summary=dict(passed=True,scope='Real OMNeT++/Veins with actual NPC/RSU/advice policies; SUMO actions mocked.',cases=cases)

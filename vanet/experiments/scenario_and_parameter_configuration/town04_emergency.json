@@ -30,44 +30,6 @@
   "npc_speed_factor": 1.0,
   "npcs": [
     {
-      "id": "vanet_npc_front_01",
-      "route": [
-        "-41",
-        "-46",
-        "-47",
-        "-48",
-        "-7",
-        "-8",
-        "-9",
-        "-18",
-        "-19"
-      ],
-      "lane_index": 1,
-      "position": 340.0,
-      "speed": 0.0,
-      "role": "same_direction",
-      "depart_offset": 0.0
-    },
-    {
-      "id": "vanet_npc_front_02",
-      "route": [
-        "-41",
-        "-46",
-        "-47",
-        "-48",
-        "-7",
-        "-8",
-        "-9",
-        "-18",
-        "-19"
-      ],
-      "lane_index": 2,
-      "position": 355.0,
-      "speed": 0.0,
-      "role": "same_direction",
-      "depart_offset": 0.0
-    },
-    {
       "id": "vanet_npc_cross_01",
       "route": [
         "-17",
@@ -115,5 +77,8 @@
     "width": "1.7924479246139526",
     "height": "1.5354934930801392",
     "vClass": "passenger"
-  }
+  },
+  "npc_configuration_files": [
+    "npc_001_lincoln_front_80m.json"
+  ]
 }

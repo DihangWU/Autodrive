@@ -127,9 +127,13 @@ class LincolnEmergencyService:
             self.node.reverse=False
             if self.task.group=='normal':
                 nav=self.node.navigation
-                nav.status=dict(id=self.task.task_id,state='planning',detail='Prepared VANET normal route')
-                nav.result=(self.task.task_id,(path_with_lookahead(route),goal,route,'',local))
-                nav.consume_plan()
+                # VANET supplies an existing plan, bypassing plan_tasks(), which
+                # normally initializes this map. Install both under its lock.
+                with nav.lock:
+                    nav.road_map=self.road_map
+                    nav.status=dict(id=self.task.task_id,state='planning',detail='Prepared VANET normal route')
+                    nav.result=(self.task.task_id,(path_with_lookahead(route),goal,route,'',local))
+                    nav.consume_plan()
                 if nav.snapshot()['state']!='navigating':
                     raise RuntimeError('Normal navigation did not acquire the prepared route.')
             else:

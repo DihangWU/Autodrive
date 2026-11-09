@@ -9,7 +9,7 @@ from vanet.lincoln.v2x_data_exchange.wireless_clearance_advice import WirelessCl
 from vanet.npc.v2x_data_exchange.feedback_schedule import next_feedback_time
 from vanet.tests.offline_function_checks.test_cooperation import message,state,connection
 
-CONFIG=dict(communication_ranges=dict(v2v_metres=50.,rsu_metres=170.),rsu=dict(id='rsu0',x=100.,y=0.))
+CONFIG=dict(communication_ranges=dict(v2v_metres=50.,rsu_metres=170.),out_of_range_yield_seconds=0.,rsu=dict(id='rsu0',x=100.,y=0.))
 
 
 class CommunicationPathTests(unittest.TestCase):

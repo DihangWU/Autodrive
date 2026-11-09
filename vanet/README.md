@@ -16,27 +16,30 @@
 | RSU 无线节点 | `rsu0`，CARLA 世界坐标 `(193, -179, 6)` |
 | 固定种子 | `20261104` |
 | 固定灯态起点 | 每个控制器的程序第 0 相位、完整 42 秒；不继承启动阶段消耗的相位时间 |
-| 固定 NPC | 两辆同向车、一辆交叉口车辆、两辆对向车，Audi A2 |
+| 固定 NPC | 初始同车道前车 1 辆；定时出发的交叉口车 1 辆、对向车 2 辆，共 4 辆，Audi A2 |
 | 仿真步长 | 默认 0.05 秒 |
 | 信标、紧急更新周期 | 默认各 1 个仿真秒 |
 | 协同消息有效期 | 默认 10 个仿真秒，有效更新续期 |
+| 离开通信范围后的避让保持 | 默认 30 个仿真秒，从失去有效通道时计时 |
 | 紧急驾驶速度上限 | 120 km/h；控制器根据曲率、障碍物和冲突减速，并非全程恒速 |
 
 RSU 的 6 米是网络节点高度，现有 CARLA 显示塔的高度和图形范围不代表无线天线高度或可靠覆盖范围。
 
-当前 V2V 有效距离为 **50 米**，RSU 有效半径为 **170 米**，均按水平距离、双向生效，边界包含在内。RSU 圆距最近高速道路外缘约 3.08 米；超出范围不交付消息，离开范围撤销该来源的协同授权，重新进入需收到新消息。范围内仍可能因真实无线干扰、丢包而接收失败。参数统一在 `experiments/experiment_group_configuration/defaults.json` 的 `communication_ranges`。
+当前 V2V 有效距离为 **50 米**，RSU 有效半径为 **170 米**，均按水平距离、双向生效，边界包含在内。RSU 圆距最近高速道路外缘约 3.08 米；超出范围不交付消息。NPC 已实际收到且尚未过期的避让任务，在离开有效通信通道后继续执行最多 **30 个仿真秒**；到期仍无新消息时开始平稳恢复。该时限从离开时计算，覆盖原有 10 秒租期，不随轮询或无消息的进出圈延长。范围内仍可能因真实无线干扰、丢包而接收失败。距离参数统一在 `experiments/experiment_group_configuration/defaults.json` 的 `communication_ranges`，保持时长在同文件的 `out_of_range_yield_seconds`。
 
-协同组采用直连优先：50 米内 NPC 信标和反馈直接发给 Lincoln，RSU 不为这辆车重复通知或汇总；超过 50 米，且双方均在 RSU 圆内时才中转。Lincoln 支持直接使用 NPC 反馈，也能同时使用其他远处车辆的 RSU 汇总。通道切换后需实际收到新通道消息，旧授权及反馈不能直接复活。状态变化立即反馈，周期反馈按固定种子错开发送相位。
+协同组采用直连优先：50 米内 NPC 信标和反馈直接发给 Lincoln，RSU 不为这辆车重复通知或汇总；超过 50 米，且双方均在 RSU 圆内时才中转。Lincoln 支持直接使用 NPC 反馈，也能同时使用其他远处车辆的 RSU 汇总。通道切换等待新消息时，NPC 可在上述 30 秒内保持原避让动作；旧消息不作为新通道的接收或反馈依据。收到新的有效任务消息后使用新消息；收到有效任务取消时立即结束保持。状态变化立即反馈，周期反馈按固定种子错开发送相位。`vanet_status` 的 NPC 状态中，`out_of_range_yielding`、`out_of_range_yield_until` 显示保持状态及截止仿真时刻。
 
 Qtenv 的 Lincoln 小车为深蓝色 `(30,90,230)`、NPC 为灰色 `(165,170,175)`；通信线仍为亮绿色 Lincoln ↔ RSU、蓝色 Lincoln ↔ NPC、暗绿色 RSU ↔ NPC，不标消息文字。SUMO 原有状态配色保持不变。
 
 `run_vanet` 默认启动 **Qtenv 图形界面**，地图方向与 SUMO 一致；绿色圆为 RSU 范围，蓝色圆为 Lincoln 的 50 米范围，NPC 不画通信圈，彩色箭头表示实际完整接收的无线消息。SUMO 同时显示绿色 RSU 覆盖圆与跟随 Lincoln 的蓝色 50 米圈。车辆圈在每个交通步结束后根据实际位置和朝向更新，圆心在车身中心；复位、车辆移除与退出时清理。网络自动等待 CoBridge 时间指令，不需要手动点 Qtenv Run，也不会因此开始紧急实验。Qtenv Stop 会阻止网络推进，联仿期间请保持网络运行。
 
-固定 NPC 的路线、初始车道、位置、速度与出车时间在 `experiments/scenario_and_parameter_configuration/town04_emergency.json`；通用参数在 `experiments/experiment_group_configuration/defaults.json`；无线参数在 `omnet/simulation_configuration/radio_parameters.json`。每轮重置恢复固定 NPC 和保存的信号灯状态，不使用原有随机续路机制。
+原有两辆初始同向前车已删除。3 辆定时出发车辆的配置保留在 `experiments/scenario_and_parameter_configuration/town04_emergency.json`；新增车辆逐辆放在 `npc/scenario_vehicle_configuration/`，由场景的 `npc_configuration_files` 清单加载。通用参数在 `experiments/experiment_group_configuration/defaults.json`；无线参数在 `omnet/simulation_configuration/radio_parameters.json`。每轮重置恢复固定 NPC 和保存的信号灯状态，不使用原有随机续路机制。
+
+第一辆新增车为 `vanet_npc_001`，配置文件 `npc/scenario_vehicle_configuration/npc_001_lincoln_front_80m.json`。它在初始车道 `-41_1`，车身中心沿车道位于 Lincoln 初始车身中心前方 80 米；SUMO 出生位置为车头里程 `373.47237146932656` 米，已补偿半车长及车道声明长度与几何长度之差。由于道路弯曲，两车中心直线距离约 79.44 米。准备时只出现这一辆 NPC，保持静止；正式开始后正常行驶并参与现有通信与避让，其余 3 辆仍在第 35、38、52 个仿真秒出发。重启 `run_vanet` 并恢复场景后生效，不会向当前运行中的实验强行插车。
 
 当前配置已根据首次现场记录修正前级红灯阻塞：交叉口车改为从 `-17_2`、位置 35 米、正式开始后 52 秒出车，路线为 `-17 → -18 → -19`；两辆对向车改从 `10_3` 出车，保留位置 8/24 米和 35/38 秒出车时间，路线为 `10 → 9 → 8 → 7`。旧配置从 `-16` 和 `11` 出车，会在前一级路口长期等红灯，未能到达 RSU 附近的冲突位置。
 
-这些调整已通过独立 headless SUMO 的 80 秒检查：5 辆固定车辆均实际出现，3 辆延迟出车的车辆都前进超过 10 米，随后重置成功。调整仅对下一次加载场景生效，没有改变当前运行现场。修订后的参数仍需完整联仿复验，不能仅凭固定出车时间保证冲突和无线投递。**实际收到信标或 clearance，不能单独证明 notice → NPC 避让 → feedback → RSU 汇总闭环已经发生。**
+出生位置检查使用真实 SUMO 车道形状和车长测量中心间距，避免把 SUMO 声明里程直接当作几何距离。完整 CARLA/SUMO 联仿仍需运行验证。**实际收到信标或 clearance，不能单独证明 notice → NPC 避让 → feedback → RSU 汇总闭环已经发生。**
 
 ## 2. 首次启动与一键入口
 
@@ -46,6 +49,15 @@ Qtenv 的 Lincoln 小车为深蓝色 `(30,90,230)`、NPC 为灰色 `(165,170,175
 source setup.bash
 run_vanet
 ```
+
+关闭本工程的联仿进程和对应终端、车辆窗口、RViz、Qtenv，保留 CARLA、当前执行命令的终端和无关终端：
+
+```bash
+source setup.bash
+stop_vanet
+```
+
+可先用 `stop_vanet --dry-run` 查看将关闭的进程，不发送退出信号。关闭顺序为启动器、Lincoln / NPC / RSU / 观察视角、CoBridge、OMNeT++、SUMO；先等待程序正常清理，超时才逐步强制退出。详细记录保存在 `vanet/results/shutdown_*/`。手动启动的项目终端若还有其他任务则保留；不依赖过期的 PID 文件，也不会批量关闭终端服务器。
 
 `run_vanet` 调用 `vanet/start_vanet_experiment.sh`，依赖步骤依次检查并启动：
 
