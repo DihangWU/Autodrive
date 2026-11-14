@@ -108,7 +108,8 @@ public:
                     ready = !response.value("pending", false);
                     const auto error = response.value("error", "");
                     if (!error.empty()) showError(error);
-                    else if (ready) window->setStatusBarText(selection.value("sumo_id", "")
+                    else if (ready && !(lincolnNavigationUI && lincolnNavigationUI->isSelecting()))
+                        window->setStatusBarText(selection.value("sumo_id", "")
                         + (confirmed ? ": GTA Mode ON (ignore traffic lights)" : ": GTA Mode OFF (obey traffic lights)"));
                 }
             } catch (const std::exception& error) {

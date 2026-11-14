@@ -106,6 +106,7 @@ def run(args, stopped):
         try:
             binary = SUMO_BINARY if args.headless else str(ensure_sumo_gui())
             command = [binary, '-c', str(config),
+                       '+a', str(Path(__file__).with_name('lincoln_types.add.xml')),
                        '--remote-port', str(args.port), '--step-length', str(args.step_length),
                        '--lateral-resolution', str(SUMO_LATERAL_RESOLUTION),
                        '--start', SUMO_START, '--quit-on-end', SUMO_QUIT_ON_END,

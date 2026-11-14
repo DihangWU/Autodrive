@@ -275,7 +275,10 @@ class LincolnNavigation:
                     lengths.append(lengths[-1] + first.transform.location.distance(second.transform.location))
                 local = None
                 if (getattr(self.node.driver, 'supports_junction_local_control', False) is True
-                        and any(point.is_junction for point in route)):
+                        and (any(point.is_junction for point in route) or any(
+                            (first.road_id, first.section_id) == (second.road_id, second.section_id)
+                            and first.lane_id != second.lane_id
+                            for first, second in zip(route, route[1:])))):
                     local = JunctionLocalController(self.node, route, self.road_map, lengths)
                     if not local.windows:
                         local = None

@@ -95,6 +95,8 @@ public:
     }
     ~LincolnNavigationUI() override { getApp()->removeTimeout(this, ID_REFRESH); }
 
+    bool isSelecting() const { return pickingView != nullptr; }
+
     void beginSelection(const std::string& name) {
         auto* view = window->getActiveView();
         if (!view || !window->getRunner()->networkAvailable()) return;
@@ -169,7 +171,7 @@ public:
                     detail = "Navigation rejected; restart CoBridge/Lincoln or check their logs.";
             }
             states[pendingName] = {state, detail};
-            window->setStatusBarText("Navigation " + state + ": " + detail);
+            if (!isSelecting()) window->setStatusBarText("Navigation " + state + ": " + detail);
             pollCountdown = 4;
         }
         if (!queued.is_null() && !pending.valid()) {

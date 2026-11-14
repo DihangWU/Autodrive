@@ -379,17 +379,46 @@ class ManualNavigationTests(unittest.TestCase):
         node.navigation = SimpleNamespace(cancel=Mock(), hold_brake=False)
         node.driver = Mock()
         node.autopilot, node.reverse, node.active, node.cruise_speed = False, False, None, None
-        node.car = SimpleNamespace(is_alive=True, apply_control=Mock())
+        node.car = SimpleNamespace(id=7, is_alive=True, apply_control=Mock())
+        node.client = Mock()
+        command_patch = patch('modules.lincoln.driving.manual_driving.carla.command.ApplyVehicleControl',
+                              side_effect=lambda actor_id, control: SimpleNamespace(actor_id=actor_id, control=control))
+        command_patch.start()
+        self.addCleanup(command_patch.stop)
+        self.commands = []
+
+        def apply_batch(commands, do_tick):
+            self.assertFalse(do_tick)
+            self.commands.extend(commands)
+
+        node.client.apply_batch.side_effect = apply_batch
 
     def test_arrival_brake_is_held_until_manual_input(self):
         node = self.node
         node.navigation.hold_brake = True
         node.drive()
-        self.assertEqual(node.car.apply_control.call_args.args[0].brake, 1.)
+        self.assertEqual(self.commands[-1].control.brake, 1.)
         node.xbox.update.return_value = (.5, 0., .2)
         node.drive()
         node.navigation.cancel.assert_called_once()
-        self.assertAlmostEqual(node.car.apply_control.call_args.args[0].throttle, .5)
+        self.assertAlmostEqual(self.commands[-1].control.throttle, .5)
+
+    def test_arrival_brake_replaces_tm_control_despite_stale_local_cache(self):
+        node = self.node
+        # The local Vehicle cached a previous full-brake command, while TM
+        # subsequently left a different control on the server.
+        server_control = SimpleNamespace(brake=.7)
+
+        def apply_batch(commands, do_tick):
+            self.assertFalse(do_tick)
+            self.assertEqual(commands[0].actor_id, node.car.id)
+            server_control.brake = commands[0].control.brake
+
+        node.client.apply_batch.side_effect = apply_batch
+        node.navigation.hold_brake = True
+        node.drive()
+        self.assertEqual(server_control.brake, 1.)
+        node.car.apply_control.assert_not_called()
 
     def test_panel_cancel_also_cancels_a_pending_plan(self):
         self.node.set_autopilot(False)
@@ -400,6 +429,7 @@ class ManualNavigationTests(unittest.TestCase):
         self.node.autopilot = True
         self.node.drive()
         self.node.car.apply_control.assert_not_called()
+        self.node.client.apply_batch.assert_not_called()
 
 
 @unittest.skipUnless(importlib.util.find_spec('geometry_msgs'), '需要加载 ROS 2 环境以复用绿色轨迹采样')
@@ -658,11 +688,38 @@ class JunctionBranchClassificationTests(unittest.TestCase):
         self.assertTrue(classifier.requires_local_control(self.entry,self.incoming,self.branch_probe))
         self.assertFalse(classifier.requires_local_control(self.main,self.incoming,self.main_probe))
 
-    def test_curved_mainline_is_not_taken_over_for_a_straighter_narrow_exit(self):
+    def test_shared_lane_curved_mainline_is_local_at_a_straighter_narrow_exit(self):
         self.main_probe.transform.rotation.yaw = -27.
         classifier = self.classifier()
-        self.assertFalse(classifier.requires_local_control(self.main,self.incoming,self.main_probe))
+        self.assertTrue(classifier.requires_local_control(self.main,self.incoming,self.main_probe))
         self.assertTrue(classifier.requires_local_control(self.entry,self.incoming,self.branch_probe))
+
+    def test_mainline_sharing_its_entry_lane_with_a_ramp_requires_selection(self):
+        classifier = self.classifier()
+        self.assertTrue(classifier.requires_mainline_selection(self.main,self.incoming))
+        self.assertTrue(classifier.requires_local_control(self.main,self.incoming,self.main_probe))
+
+    def test_lane_changes_without_junctions_build_one_continuous_local_window(self):
+        from modules.lincoln.driving.junction_local_controller import JunctionLocalController
+        local = JunctionLocalController.__new__(JunctionLocalController)
+        local.route = [Waypoint(x, lane=lane) for x,lane in
+                       [(0,-4),(20,-4),(32,-3),(44,-2),(56,-1),(80,-1)]]
+        local.route_lengths = [0.,20.,32.,44.,56.,80.]
+        windows = local.find_junction_windows()
+        self.assertEqual(len(windows),1)
+        self.assertEqual(windows[0],dict(start=12.,entry=20.,exit=56.,exit_index=4))
+
+    def test_ramp_on_another_entry_lane_does_not_take_over_the_mainline(self):
+        classifier = self.classifier()
+        branch = classifier.connections[99][0]
+        branch.find('laneLink').set('from','-2')
+        self.assertFalse(classifier.requires_mainline_selection(self.main,self.incoming))
+        self.assertFalse(classifier.requires_local_control(self.main,self.incoming,self.main_probe))
+
+    def test_ordinary_right_turn_alternative_is_not_a_gentle_mainline_fork(self):
+        classifier = self.classifier()
+        self.branch_probe.transform.rotation.yaw = 90.
+        self.assertFalse(classifier.requires_mainline_selection(self.main,self.incoming))
 
     def test_real_classifier_builds_windows_for_turn_but_not_straight(self):
         from modules.lincoln.driving.junction_local_controller import JunctionLocalController
