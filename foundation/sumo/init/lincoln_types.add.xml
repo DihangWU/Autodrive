@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<additional>
+    <!-- CARLA owns these proxies, including their stationary position. -->
+    <vType id="autodrive_lincoln_proxy" vClass="passenger" guiShape="passenger/sedan"
+           timeToTeleport="-1" timeToTeleportBidi="-1"/>
+</additional>

@@ -8,6 +8,12 @@ REVERSE_THROTTLE = 0.45
 
 
 class ManualDrivingMixin:
+    def apply_driving_control(self, control):
+        # TM writes through another client, so Vehicle.apply_control's local
+        # duplicate cache can still contain an older manual command. Send the
+        # actual command every time without advancing the shared world clock.
+        self.client.apply_batch([carla.command.ApplyVehicleControl(self.car.id, control)], False)
+
     def drive(self):
         with self.control_lock:
             xbox = self.xbox.update(self)
@@ -25,12 +31,12 @@ class ManualDrivingMixin:
                 self.cruise_speed = None
                 self.control_source = 'xbox'
                 if self.car.is_alive:
-                    self.car.apply_control(carla.VehicleControl(throttle=xbox[0], brake=xbox[1],
-                                                               steer=xbox[2], reverse=self.reverse))
+                    self.apply_driving_control(carla.VehicleControl(throttle=xbox[0], brake=xbox[1],
+                                                                   steer=xbox[2], reverse=self.reverse))
                 return
             if self.navigation.hold_brake and not active:
                 if self.car.is_alive:
-                    self.car.apply_control(carla.VehicleControl(brake=1.))
+                    self.apply_driving_control(carla.VehicleControl(brake=1.))
                 return
             self.control_source = 'panel' if active else ('cruise' if self.cruise_speed is not None else 'idle')
             if 'go' in active or 'brake' in active:
@@ -49,7 +55,7 @@ class ManualDrivingMixin:
                 steer=-.45 if 'left' in active else (.45 if 'right' in active else 0.),
                 brake=1. if 'brake' in active else 0., reverse=self.reverse)
             if self.car.is_alive:
-                self.car.apply_control(control)
+                self.apply_driving_control(control)
 
     def toggle_reverse(self):
         """面板与 LB 共用的换挡逻辑；车速超过 0.5 m/s 时不换挡。"""
@@ -96,13 +102,13 @@ class ManualDrivingMixin:
                 handled, control = service.control(snapshot or self.world.get_snapshot())
                 if handled:
                     if control is not None:
-                        self.car.apply_control(control)
+                        self.apply_driving_control(control)
                     return
             control = self.navigation.update(snapshot or self.world.get_snapshot())
             if control is not None:
-                self.car.apply_control(control)
+                self.apply_driving_control(control)
                 return
             if self.autopilot:
                 control = self.driver.update(snapshot or self.world.get_snapshot())
                 if control is not None:
-                    self.car.apply_control(control)
+                    self.apply_driving_control(control)

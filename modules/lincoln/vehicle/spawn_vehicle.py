@@ -11,7 +11,9 @@ SNAPSHOT_WAIT_INTERVAL = 0.05
 class SpawnVehicleMixin:
     def spawn_car(self):
         bp = self.world.get_blueprint_library().find('vehicle.lincoln.mkz_2020')
-        bp.set_attribute('role_name', self.uid)
+        # TM exempts hero vehicles from its blocked-vehicle destruction timer.
+        bp.set_attribute('role_name', 'hero')
+        bp.set_attribute('ros_name', self.uid)
         bp.set_attribute('color', '30,90,230')
         points = self.world.get_map().get_spawn_points()
         if self.args.pose:

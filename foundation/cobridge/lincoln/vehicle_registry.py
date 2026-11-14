@@ -134,7 +134,9 @@ class LincolnVehicleRegistry:
             actor = carla.world.get_actor(record['actor_id'])
             if actor is None:
                 raise ValueError('CARLA 车辆已经删除。')
-            if actor.type_id != BLUEPRINT_ID or actor.attributes.get('role_name') != record['role_name']:
+            role = actor.attributes.get('role_name')
+            identity = actor.attributes.get('ros_name') if role == 'hero' else role
+            if actor.type_id != BLUEPRINT_ID or identity != record['role_name']:
                 raise ValueError('CARLA 车辆类型或身份不匹配。')
             record['actor'] = actor
         actor_snapshot = snapshot.find(record['actor_id'])

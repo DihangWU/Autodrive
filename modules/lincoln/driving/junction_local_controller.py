@@ -2,7 +2,7 @@
 
 Pure Pursuit 负责转向，纵向 PID 负责速度；红黄灯及轨迹上的动态障碍物
 触发减速停车等待，不主动绕过障碍物。使用 CARLA 快照的仿真时间，
-路口转弯或选择分流支路时接管；未选择分支的主线直行继续由 TM 驾驶。
+路口转弯或分岔选路时接管；没有竞争出口的主线直行继续由 TM 驾驶。
 不创建传感器、不推进世界、不修改地图或交通灯。控制权切换由 navigation.py 负责。
 """
 import bisect
@@ -139,6 +139,8 @@ class JunctionBranchClassifier:
             return True
         if self.requires_exit_selection(entry, incoming):
             return True
+        if self.requires_mainline_selection(entry, incoming):
+            return True
         # 等宽缓分岔也可能需要选支路：比较同一来向的各条出口，避免只看车道数量。
         connections = self.connections.get(entry.junction_id, [])
         chosen = [item for item in connections if int(item.get('connectingRoad')) == entry.road_id]
@@ -167,6 +169,45 @@ class JunctionBranchClassifier:
                         angle = heading_error(end.transform.rotation.yaw, incoming_yaw)
                         if selected_angle >= angle + BRANCH_DIRECTION_MARGIN:
                             return True
+        return False
+
+    def requires_mainline_selection(self, entry, incoming=None):
+        """共享入口车道可驶入匝道时，主线也必须按规划选路。
+
+        TM 的 Straight 动作不能区分缓分岔的两个出口。只检查实际入口
+        车道的连接，避免因其他车道存在匝道就接管整个主线。
+        """
+        incoming_yaw = self.incoming_heading(entry, incoming)
+        connections = self.connections.get(entry.junction_id, [])
+        for chosen in connections:
+            if int(chosen.get('connectingRoad')) != entry.road_id:
+                continue
+            incoming_id = int(chosen.get('incomingRoad'))
+            if incoming is not None and incoming_id != incoming.road_id:
+                continue
+            source_lanes = {int(link.get('from')) for link in chosen.findall('laneLink')
+                            if int(link.get('to')) == entry.lane_id
+                            and (incoming is None or int(link.get('from')) == incoming.lane_id)}
+            selected_exit = self.outgoing_lane(chosen, incoming_id)
+            if not source_lanes or selected_exit is None:
+                continue
+            selected_count = self.lane_count(*selected_exit)
+            if not self.gentle_branch(entry, entry.road_id, incoming_yaw):
+                continue
+            for alternative in connections:
+                if int(alternative.get('incomingRoad')) != incoming_id:
+                    continue
+                if not any(int(link.get('from')) in source_lanes
+                           for link in alternative.findall('laneLink')):
+                    continue
+                other_exit = self.outgoing_lane(alternative, incoming_id)
+                if other_exit is None or other_exit == selected_exit:
+                    continue
+                other_count = self.lane_count(*other_exit)
+                if not 0 < other_count < selected_count:
+                    continue
+                if self.gentle_branch(entry, int(alternative.get('connectingRoad')), incoming_yaw):
+                    return True
         return False
 
     def gentle_branch(self, entry, connector_id, incoming_yaw):
@@ -273,7 +314,27 @@ class JunctionLocalController:
                     start = min(start, max(0., self.route_lengths[prior] - LANE_CHANGE_LEAD))
             windows.append(dict(start=start, entry=self.route_lengths[entry],
                                 exit=self.route_lengths[exit_index], exit_index=exit_index))
-        return windows
+        # TM ImportPath selects roads but does not reliably execute the planned
+        # lane on the same road. Follow explicit lane-change curves locally,
+        # including changes between junctions and routes with no junctions.
+        for index, (first, second) in enumerate(zip(self.route, self.route[1:])):
+            if (first.road_id, first.section_id) != (second.road_id, second.section_id):
+                continue
+            if first.lane_id == second.lane_id or first.is_junction or second.is_junction:
+                continue
+            windows.append(dict(start=max(0., self.route_lengths[index] - LANE_CHANGE_LEAD),
+                                entry=self.route_lengths[index],
+                                exit=self.route_lengths[index+1], exit_index=index+1))
+        merged = []
+        for window in sorted(windows, key=lambda item: item['start']):
+            if merged and window['start'] <= merged[-1]['exit'] + EXIT_DISTANCE + 10.:
+                previous = merged[-1]
+                previous['entry'] = min(previous['entry'], window['entry'])
+                if window['exit'] > previous['exit']:
+                    previous.update(exit=window['exit'], exit_index=window['exit_index'])
+            else:
+                merged.append(dict(window))
+        return merged
 
     def next_window(self):
         return self.windows[self.window_index] if self.window_index < len(self.windows) else None

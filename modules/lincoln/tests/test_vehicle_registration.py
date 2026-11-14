@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 from foundation.cobridge.lincoln.vehicle_registry import LincolnVehicleRegistry
 from modules.lincoln.driving.controller import DrivingController, load_driving_controller
 from modules.lincoln.driving.carla_autopilot import CarlaAutopilotController
+from modules.lincoln.vehicle.vehicle_cleanup import VehicleCleanupMixin
 
 
 class VehicleRegistrationTests(unittest.TestCase):
@@ -50,12 +51,48 @@ class VehicleRegistrationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.registry.synchronize_one_vehicle('20:10', self.registry.records['20:10'], carla, Mock())
 
+    def test_cleanup_accepts_already_deleted_actors_and_reports_remaining_failures(self):
+        actor = SimpleNamespace(id=10)
+        for present in (False, True):
+            with self.subTest(present=present):
+                world = Mock(id=20, get_actor=Mock(return_value=actor if present else None))
+                client = Mock()
+                client.get_world.return_value = world
+                client.apply_batch_sync.return_value = [SimpleNamespace(error='destroy failed')]
+                node = SimpleNamespace(actors=[actor], world=world, client=client)
+                if present:
+                    with self.assertRaisesRegex(RuntimeError, 'destroy failed'):
+                        VehicleCleanupMixin.destroy_owned_actors(node)
+                else:
+                    VehicleCleanupMixin.destroy_owned_actors(node)
+
     def test_mismatched_world_never_uses_recycled_actor_id(self):
         self.registry.handle_request(self.command, self.owner)
         world = Mock(id=21)
         with self.assertRaises(ValueError):
             self.registry.synchronize_one_vehicle('20:10', self.registry.records['20:10'], SimpleNamespace(world=world), Mock())
         world.get_actor.assert_not_called()
+
+    def test_hero_and_legacy_actors_keep_their_unique_registration_identity(self):
+        for attributes, accepted in (
+            (dict(role_name='lincoln_1234567890'), True),
+            (dict(role_name='hero', ros_name='lincoln_1234567890'), True),
+            (dict(role_name='hero', ros_name='lincoln_abcdef1234'), False),
+            (dict(role_name='hero'), False),
+        ):
+            with self.subTest(attributes=attributes):
+                registry = LincolnVehicleRegistry()
+                registry.handle_request(self.command, self.owner)
+                actor = SimpleNamespace(type_id='vehicle.lincoln.mkz_2020', attributes=attributes)
+                carla = SimpleNamespace(world=Mock(id=20, get_actor=Mock(return_value=actor)))
+                registry.projection = Mock()
+                if accepted:
+                    registry.synchronize_one_vehicle('20:10', registry.records['20:10'], carla, Mock())
+                    registry.projection.create_proxy.assert_called_once()
+                else:
+                    with self.assertRaisesRegex(ValueError, '身份不匹配'):
+                        registry.synchronize_one_vehicle('20:10', registry.records['20:10'], carla, Mock())
+                    registry.projection.create_proxy.assert_not_called()
 
     def test_lost_sumo_waits_without_deleting_carla(self):
         self.registry.handle_request(self.command, self.owner)

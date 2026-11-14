@@ -51,9 +51,11 @@ class VehicleCleanupMixin:
             return
         if self.client.get_world().id != self.world.id:
             return  # 世界已重载，不能把旧 actor ID 用于新世界。
+        actors = list(reversed(self.actors))
         responses = self.client.apply_batch_sync(
-            [carla.command.DestroyActor(actor.id) for actor in reversed(self.actors)], False)
-        errors = [reply.error for reply in responses if reply.error]
+            [carla.command.DestroyActor(actor.id) for actor in actors], False)
+        errors = [reply.error for actor, reply in zip(actors, responses)
+                  if reply.error and self.world.get_actor(actor.id) is not None]
         if errors:
             raise RuntimeError('CARLA 清理结果：' + '; '.join(errors))
 
