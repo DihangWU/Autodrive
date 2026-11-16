@@ -191,6 +191,31 @@ class CoordinatorContractTests(unittest.TestCase):
         output=c.application_step([])
         self.assertEqual(output[0]['payload']['experiment_mode'],'mode2')
 
+    def test_signal_priority_requires_in_range_rsu_reception_in_either_mode(self):
+        from vanet.rsu.cooperation import RsuCooperation
+        c=self.coordinator;c.phase='running'
+        c.signal_priority=Mock();c.signal_priority.task=None
+        payload=dict(type='emergency',source='lincoln0',task_id=c.task_id,route_version=1,
+                     sequence=1,sent_at=.01,route=c.lincoln_status['route'],position=dict(x=0.,y=0.,z=0.))
+        delivery=dict(sender='lincoln0',recipient='rsu0',payload=payload,received_at=.02,sent_at=.01)
+        for mode in ('mode1','mode2'):
+            c.group=mode;c.rsu=RsuCooperation(c.config);c.signal_priority.reset_mock()
+            # A boundary with no complete packet must never trigger priority.
+            c.network_result=dict(time=.05,deliveries=[],stats={},communication_links={'rsu0':['lincoln0']})
+            c.after_step();c.signal_priority.receive.assert_not_called()
+            # Complete packet but outside effective RSU coverage is rejected.
+            c.network_result=dict(time=.1,deliveries=[delivery],stats={},communication_links={})
+            c.after_step();c.signal_priority.receive.assert_not_called()
+            c.network_result=dict(time=.15,deliveries=[delivery],stats={},communication_links={'rsu0':['lincoln0']})
+            c.after_step();c.signal_priority.receive.assert_called_once()
+            self.assertEqual(c.signal_priority.receive.call_args.args[0],payload)
+
+    def test_operator_cancel_restores_signal_priority_without_waiting_for_radio(self):
+        c=self.coordinator;c.phase='running'
+        c.signal_priority=Mock();c.signal_priority.task=None
+        c.handle(self.gui('vanet.cancel'))
+        c.signal_priority.release_all.assert_called_once_with(c.network_time,'operator_cancelled')
+
     def test_mode2_enables_main_and_ramp_cooperation_without_altering_mode1_scene_flags(self):
         c=self.coordinator
         states=[dict(id='lincoln0',role='lincoln',x=0.,y=0.)]

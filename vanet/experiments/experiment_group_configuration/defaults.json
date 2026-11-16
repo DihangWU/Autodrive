@@ -35,6 +35,13 @@
   "hard_brake_mps2": 4.0,
   "seed": 20261104,
   "group": "mode1",
+  "rsu_traffic_signal_priority": {
+    "enabled": true,
+    "route_tolerance_metres": 2.5,
+    "tracking_tolerance_metres": 6.0,
+    "passed_clearance_metres": 1.0,
+    "state_check_interval_seconds": 0.25
+  },
   "rsu": {
     "id": "rsu0",
     "x": 193.0,

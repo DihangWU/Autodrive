@@ -13,6 +13,7 @@ from vanet.experiments.metrics_and_event_recording.metrics import Metrics
 from vanet.cobridge.mobility_snapshot import collect_mobility
 from vanet.npc.cooperation import NpcCooperation
 from vanet.rsu.cooperation import RsuCooperation
+from vanet.rsu.traffic_signal_priority.priority_controller import TrafficSignalPriority
 from vanet.experiments.scenario_and_parameter_configuration.scenario_controller import ScenarioController, load_scenario
 from foundation.cobridge.lincoln.navigation import resolve_destination
 from vanet.sumo.vehicle_state_display.vehicle_state_display import VehicleStateDisplay
@@ -58,6 +59,7 @@ class ExperimentCoordinator:
         self.communication_paths={}
         self.rsu_connected=False
         self.rsu=RsuCooperation(self.config)
+        self.signal_priority=TrafficSignalPriority(self.config,lambda *args,**fields:self.log.emit(*args,**fields))
         self.rsu_counters=dict(received=0,notice_sent=0,feedback_received=0,clearance_sent=0,backfill_sent=0)
         self.deliveries=[]
         self.task_id=''
@@ -85,7 +87,7 @@ class ExperimentCoordinator:
                     destination=self.destination,results=str(self.folder),
                     lincoln={k:v for k,v in self.lincoln_status.items() if k not in ('route','position')},
                     scenario=self.scenario.snapshot() if self.scenario else None,
-                    rsu=dict(self.rsu.snapshot(),counters=dict(self.rsu_counters)),
+                    rsu=dict(self.rsu.snapshot(),counters=dict(self.rsu_counters),signal_priority=self.signal_priority.snapshot()),
                     npc_states={name:component.snapshot() for name,component in self.npc.items()})
 
     def issue(self, action, **fields):
@@ -154,6 +156,7 @@ class ExperimentCoordinator:
             self.issue('start');self.starting=True;self.detail='Waiting for Lincoln start acknowledgement.'
         elif action=='vanet.cancel':
             if not self.emergency:raise RuntimeError('Lincoln 当前没有紧急身份。')
+            self.signal_priority.release_all(self.network_time,'operator_cancelled')
             self.issue('cancel')
             for component in self.npc.values():component.cancel_from_operator(self.task_id)
             if self.phase=='running':
@@ -185,6 +188,7 @@ class ExperimentCoordinator:
         bridge=self.bridge
         if len(bridge.lincoln.records)!=1:raise RuntimeError('场景需要一辆已登记的 Lincoln。')
         if any(name!='vanet_scenario' for name in bridge.npc.batches):raise RuntimeError('请先关闭独立随机 NPC 批次，以保证固定场景。')
+        self.signal_priority.release_all(self.network_time,'scene_reset')
         if self.display:self.display.close()
         if self.lincoln_coverage:self.lincoln_coverage.close()
         self.display=VehicleStateDisplay(bridge.sumo.connection)
@@ -318,6 +322,11 @@ class ExperimentCoordinator:
 
     def application_step(self, states):
         now=self.network_time;messages=self.outgoing;self.outgoing=[]
+        priority=self.signal_priority
+        if priority.task and (not self.emergency or self.phase!='running' or
+                              priority.task['route_version']!=self.lincoln_status.get('route_version')):
+            priority.release_all(now,'emergency_or_route_changed')
+        priority.update(next((state for state in states if state['role']=='lincoln'),None),now)
         if self.group in ('mode1','mode2'):
             paths,connected=select_communication_paths(states,self.config['rsu'],self.config['communication_ranges'])
             if paths!=self.communication_paths or connected!=self.rsu_connected:
@@ -401,6 +410,11 @@ class ExperimentCoordinator:
                     if self.rsu.receive(message,delivery['received_at']):
                         self.rsu_counters['received']+=1
                         if message.get('type')=='feedback':self.rsu_counters['feedback_received']+=1
+                        if (message.get('type')=='emergency' and message.get('source')=='lincoln0'
+                                and self.phase=='running' and self.emergency and not self.ended
+                                and message.get('route_version')==self.lincoln_status.get('route_version')):
+                            self.signal_priority.receive(message,delivery['received_at'],self.bridge.sumo.connection,
+                                self.bridge.sumo.network['network_file'],self.lincoln_status.get('position'))
                 elif recipient in self.npc:
                     component=self.npc[recipient]
                     accepted=component.receive(message,delivery['received_at'])
@@ -409,9 +423,11 @@ class ExperimentCoordinator:
                             message.get('task_id'),'valid_wireless_message')
                 elif recipient=='lincoln0':self.deliveries.append(delivery)
         states,_=collect_mobility(self.bridge,self.config['rsu'])
+        self.signal_priority.update(next((state for state in states if state['role']=='lincoln'),None),self.network_time)
         elapsed=self.network_time-self.run_start_network_time
         if not self.ended:self.metrics.sample(elapsed,states,self.bridge.sumo.connection)
         if self.lincoln_status.get('state')=='arrived' and not self.ended:
+            self.signal_priority.release_all(self.network_time,'route_arrived')
             self.ended=True;self.phase='arrived';self.metrics.values.update(arrived=True,status='arrived',elapsed_seconds=elapsed)
             self.queue_cancel('route_arrived');self.log.emit('experiment_arrived',self.network_time,elapsed_seconds=elapsed)
             self.log.save_metrics(self.metrics.values);self.detail='Arrived. Emergency identity remains until cancelled in SUMO.'
@@ -429,6 +445,11 @@ class ExperimentCoordinator:
         self.log.close()
 
     def close(self):
+        signal_error=None
+        try:self.signal_priority.release_all(self.network_time,'coordinator_closed')
+        except Exception as error:
+            signal_error=error
+            self.log.logger.exception('Traffic signal restoration incomplete')
         self.metrics.values['status']='closed' if not self.ended else self.metrics.values['status']
         self.log.save_metrics(self.metrics.values)
         if self.display:self.display.close()
@@ -450,3 +471,4 @@ class ExperimentCoordinator:
             finally:self.network.close()
         self.log.emit('coordinator_closed',self.network_time)
         self.close_log()
+        if signal_error:raise RuntimeError(str(signal_error)) from signal_error

@@ -25,6 +25,8 @@ def summarize_status(status):
                 received=counters.get('received',0),notice_sent=counters.get('notice_sent',0),
                 feedback_received=counters.get('feedback_received',0),
                 clearance_sent=counters.get('clearance_sent',0),backfill_sent=counters.get('backfill_sent',0),
+                priority_lights=sorted((rsu.get('signal_priority') or {}).get('active',[])),
+                restored_lights=sorted((rsu.get('signal_priority') or {}).get('passed',[])),
                 npc_states=states,npc_counts=dict(Counter(states.values())),feedback=feedback,
                 detail=status.get('detail',''))
 
@@ -38,6 +40,8 @@ def render_status(summary, simulation_time=None):
             f"收包={summary['received']} 定向通知={summary['notice_sent']} 回补={summary['backfill_sent']} "
             f"收到反馈={summary['feedback_received']} 清空汇总={summary['clearance_sent']} "
             f"选中={','.join(summary['selected']) or '无'} NPC[{count_text}] 反馈[{feedback_text}] "
+            f"优先绿灯={','.join(summary.get('priority_lights',[])) or '无'} "
+            f"已通过恢复={','.join(summary.get('restored_lights',[])) or '无'} "
             f"{summary['detail']}")
 
 
