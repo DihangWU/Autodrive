@@ -8,7 +8,17 @@
   "max_backfill_attempts": 3,
   "lease_seconds": 10.0,
   "out_of_range_yield_seconds": 30.0,
-  "maximum_speed_kmh": 120.0,
+  "maximum_speed_kmh": null,
+  "lincoln_highest_right_of_way": true,
+  "lincoln_collision_guard": {
+    "braking_deceleration_mps2": 4.0,
+    "reaction_seconds": 0.35,
+    "minimum_gap_metres": 3.0,
+    "release_margin_metres": 3.0,
+    "clearance_stable_seconds": 0.25,
+    "brake_release_per_second": 2.0,
+    "throttle_rise_per_second": 1.5
+  },
   "lincoln_clearance_advice": {
     "message_lifetime_seconds": 3.0,
     "lookahead_metres": 120.0,

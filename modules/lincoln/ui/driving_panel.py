@@ -7,6 +7,8 @@ from tkinter import ttk
 def navigation_control_display(status, automatic):
     """自动驾驶开关表示整项任务；此行单独说明实际控制者与等待原因。"""
     state = status.get('state')
+    if status.get('controller')=='highest_priority' and state=='running':
+        return '驾驶控制：最高路权自动驾驶', '#1557b0'
     if state == 'unreachable':
         return '导航失败：目的地不可达', '#b00020'
     if state == 'error':
@@ -250,6 +252,9 @@ def run_mouse_driving_panel(node, done):
         free_follow_button.config(relief='sunken' if node.free_follow else 'raised')
         autopilot_button.config(text='关闭自动驾驶' if node.autopilot else '开启自动驾驶')
         navigation_state = node.navigation.snapshot()
+        service=getattr(node,'emergency_service',None)
+        if service is not None and service.highest_right_of_way and service.controller is not None:
+            navigation_state=service.snapshot(include_route=False)
         status_text, status_color = navigation_control_display(navigation_state, node.autopilot)
         navigation_status.config(text=status_text, fg=status_color)
         velocity = node.car.get_velocity()
@@ -266,7 +271,8 @@ def run_mouse_driving_panel(node, done):
         xbox_status.config(text=node.xbox.status)
         command_source = 'Xbox' if xbox_active else node.active or '收油／滑行'
         if node.autopilot:
-            command_source = '路口局部控制' if navigation_state.get('controller') == 'local' else 'TM 自动驾驶'
+            if navigation_state.get('controller')=='highest_priority':command_source='最高路权自动驾驶'
+            else:command_source = '路口局部控制' if navigation_state.get('controller') == 'local' else 'TM 自动驾驶'
         speed.config(text=f'{math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)*3.6:.1f} km/h'
                      + (f'  定速目标：{node.cruise_speed*3.6:.1f} km/h' if node.cruise_speed is not None else '')
                      + f'\n指令：{command_source}  油门：{control.throttle:.2f}  刹车：{control.brake:.2f}')

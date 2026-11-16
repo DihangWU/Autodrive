@@ -103,6 +103,8 @@ def sample_route(waypoints, road_map=None):
             if road_map is not None and same_lane:
                 waypoint = road_map.get_waypoint_xodr(first.road_id, first.lane_id,
                                                       first.s + (second.s - first.s)*fraction)
+                orient=getattr(first,'orient_sample',None)
+                if waypoint is not None and orient is not None:waypoint=orient(waypoint)
             samples.append(sample_waypoint(waypoint) if waypoint is not None
                            else interpolate_segment(first, second, fraction))
     return samples

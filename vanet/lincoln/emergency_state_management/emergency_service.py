@@ -10,7 +10,8 @@ from vanet.lincoln.emergency_driving_control.trajectory_controller import Emerge
 from vanet.lincoln.emergency_route_planning.borrowing_planner import BorrowingPlanner
 from modules.lincoln.driving.navigation import plan_route, path_with_lookahead
 from modules.lincoln.driving.junction_local_controller import JunctionLocalController
-from vanet.lincoln.emergency_driving_control.control_configuration import load_control_configuration, load_clearance_configuration
+from vanet.lincoln.emergency_driving_control.control_configuration import load_control_configuration, load_clearance_configuration, load_highest_right_of_way
+from vanet.lincoln.emergency_route_planning.priority_route_planner import plan_priority_route
 from vanet.lincoln.v2x_data_exchange.wireless_clearance_advice import WirelessClearanceAdvice
 from vanet.lincoln.v2x_data_exchange.detailed_logging import initialize_logging
 
@@ -26,7 +27,8 @@ class LincolnEmergencyService:
         self.road_map = node.world.get_map()
         self.controller = None
         self.maximum_speed,self.borrowing_configuration=load_control_configuration()
-        self.borrowing_planner = BorrowingPlanner(node,self.road_map,self.borrowing_configuration)
+        self.highest_right_of_way=load_highest_right_of_way()
+        self.borrowing_planner = BorrowingPlanner(node,self.road_map,self.borrowing_configuration,highest_right_of_way=self.highest_right_of_way)
         self.route = []
         self.goal = None
         self.prepared = None
@@ -49,7 +51,7 @@ class LincolnEmergencyService:
         self.arrival_sent = False
         self.resume_after_plan = False
         self.log_handler=initialize_logging(self)
-        LOG.info('SERVICE_READY maximum_speed_kmh=%s borrowing_configuration=%s',self.maximum_speed,self.borrowing_configuration)
+        LOG.info('SERVICE_READY maximum_speed_kmh=%s highest_right_of_way=%s borrowing_configuration=%s',self.maximum_speed,self.highest_right_of_way,self.borrowing_configuration)
 
     def receive_command(self, command):
         if not isinstance(command,dict) or not isinstance(command.get('id'),str):
@@ -125,7 +127,7 @@ class LincolnEmergencyService:
             self.node.navigation.hold_brake=False
             self.node.active=None
             self.node.reverse=False
-            if self.task.group=='normal':
+            if self.task.group=='normal' and not self.highest_right_of_way:
                 nav=self.node.navigation
                 # VANET supplies an existing plan, bypassing plan_tasks(), which
                 # normally initializes this map. Install both under its lock.
@@ -179,9 +181,13 @@ class LincolnEmergencyService:
         def work():
             try:
                 target=carla.Location(**{key:float(destination[key]) for key in ('x','y','z')})
-                route,goal=plan_route(self.road_map,origin,target,cancelled)
+                if self.highest_right_of_way:
+                    route,goal=plan_priority_route(self.road_map,self.node.world,origin,target,cancelled,
+                        heading=self.node.car.get_transform().rotation.yaw)
+                else:
+                    route,goal=plan_route(self.road_map,origin,target,cancelled)
                 controller=local=None
-                if group!='normal':
+                if group!='normal' or self.highest_right_of_way:
                     controller=EmergencyTrajectoryController(self.node,route,self.road_map,self.maximum_speed)
                 elif getattr(self.node.driver,'supports_junction_local_control',False):
                     lengths=[0.]
@@ -245,7 +251,7 @@ class LincolnEmergencyService:
     def control(self, snapshot):
         with self.lock:
             state=self.task.state
-            if state!='running' or self.task.group=='normal':
+            if state!='running' or (self.task.group=='normal' and not self.highest_right_of_way):
                 self.clearance_advice.inactive('inactive_control')
             if state in ('preparing','prepared','reset','cancelled','error','arrived') and not self.task.manual:
                 return True,carla.VehicleControl(brake=1.)
@@ -254,7 +260,7 @@ class LincolnEmergencyService:
                     self.next_advisory=snapshot.timestamp.elapsed_seconds+1.
                     self.launch_plan(advisory=True)
                 return False,None
-            if state!='running' or self.task.group=='normal':
+            if state!='running' or (self.task.group=='normal' and not self.highest_right_of_way):
                 return False,None
             if self.controller is None:
                 return True,carla.VehicleControl(brake=1.)
@@ -269,9 +275,11 @@ class LincolnEmergencyService:
                 (location.x,location.y,location.z),self.controller.samples,self.controller.distances,self.controller.progress)
             signature=(advice['active'],advice['reason'],tuple(advice['vehicles']))
             if signature!=self.last_advice_state:
-                LOG.info('CLEARANCE_ADVICE %s',advice)
+                LOG.info('CLEARANCE_ADVICE diagnostic_only=True %s',advice)
                 self.last_advice_state=signature
-            speed_limit=0. if self.borrowing_planner.predicted_conflict else advice['speed_limit_kmh']
+            # Radio reception and pending feedback must not impose a speed
+            # cap. Keep physical obstacle and borrowing-conflict checks active.
+            speed_limit=0. if self.borrowing_planner.predicted_conflict else None
             control=self.controller.run_step(snapshot,speed_limit)
             remaining=self.controller.distances[-1]-self.controller.progress
             distance=ego.get_transform().location.distance(self.goal.transform.location)
@@ -300,7 +308,7 @@ class LincolnEmergencyService:
                 self.position=dict(x=p.x,y=p.y,z=p.z)
                 self.speed=ego.get_velocity().length()
                 self.heading=transform.rotation.yaw
-            if self.task.group=='normal' and self.task.state=='running':
+            if self.task.group=='normal' and not self.highest_right_of_way and self.task.state=='running':
                 nav=self.node.navigation.snapshot()
                 if nav['state']=='arrived':self.task.arrive()
                 elif nav['state'] in ('error','unreachable'):
@@ -309,10 +317,12 @@ class LincolnEmergencyService:
             is_new_frame=snapshot.frame!=self.ack_frame
             self.ack_frame=snapshot.frame
             if is_new_frame:
-                LOG.debug('CONTROL_FRAME state=%s emergency=%s position=%s speed_mps=%.3f controller=%s route_version=%s wait_reason=%s clearance_advice=%s',
+                LOG.debug('CONTROL_FRAME state=%s emergency=%s position=%s speed_mps=%.3f controller=%s route_version=%s wait_reason=%s clearance_advice=%s collision_guard=%s longitudinal_control=%s',
                           self.task.state,self.task.emergency,self.position,self.speed,
-                          'emergency' if self.controller else 'existing',self.task.route_version,
-                          self.controller.wait_reason if self.controller else '',self.clearance_advice.state)
+                          ('highest_priority' if self.highest_right_of_way else 'emergency') if self.controller else 'existing',self.task.route_version,
+                          self.controller.wait_reason if self.controller else '',self.clearance_advice.state,
+                          getattr(self.controller,'collision_guard_state',None),
+                          getattr(self.controller,'longitudinal_state',None))
 
         if is_new_frame and self.network:self.network.notify_frame()
 
@@ -337,7 +347,8 @@ class LincolnEmergencyService:
                         task_id=self.task.task_id,route_version=self.task.route_version,manual=self.task.manual,
                         eta=remaining/max(2.,self.speed),position=self.position,speed=self.speed,heading=self.heading,
                         remaining_distance=remaining,error=self.task.error,
-                        controller='emergency' if self.controller else ('manual' if self.task.manual else 'normal'),
+                        controller=('highest_priority' if self.highest_right_of_way else 'emergency') if self.controller else ('manual' if self.task.manual else 'normal'),
+                        highest_right_of_way=self.highest_right_of_way,maximum_speed_kmh=self.maximum_speed,
                         target_speed=self.controller.target_speed if self.controller else None,
                         borrowing=self.controller.borrowing if self.controller else False,
                         clearance_advice=dict(self.clearance_advice.state))

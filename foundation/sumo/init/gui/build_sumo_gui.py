@@ -28,15 +28,20 @@ SOURCE_TARGETS = {
     Path('gui'): 'gui',
     Path('utils/gui/windows'): 'utils_gui_windows',
     Path('utils/gui/globjects'): 'utils_gui_globjects',
+    Path('guisim'): 'guisim',
+    Path('traci-server'): 'traciserver',
 }
 
 sys.path.insert(0, str(PROJECT_DIR))
 from foundation.sumo.init.gui import low_latency_sumo_gui, coordinate_sumo_gui, simu_speed_sumo_gui, lincoln_track_sumo_gui, lincoln_navigation_sumo_gui, lincoln_gta_mode_sumo_gui
 
 from vanet.sumo.gui_build_and_integration import experiment_gui
+from foundation.sumo.init.gui import traci_render_sumo_gui
 
-FEATURE_MODULES = (low_latency_sumo_gui, coordinate_sumo_gui, simu_speed_sumo_gui, lincoln_track_sumo_gui, lincoln_navigation_sumo_gui, lincoln_gta_mode_sumo_gui, experiment_gui)
-BUILD_MODULE_FILES = (MODULE_FILE, *(Path(module.__file__).resolve() for module in FEATURE_MODULES))
+FEATURE_MODULES = (low_latency_sumo_gui, coordinate_sumo_gui, simu_speed_sumo_gui, lincoln_track_sumo_gui, lincoln_navigation_sumo_gui, lincoln_gta_mode_sumo_gui, experiment_gui, traci_render_sumo_gui)
+BUILD_SUPPORT_FILES = tuple(path for feature in FEATURE_MODULES
+                            for path in getattr(feature, 'SUPPORT_FILES', ()))
+BUILD_MODULE_FILES = (MODULE_FILE, *(Path(module.__file__).resolve() for module in FEATURE_MODULES), *BUILD_SUPPORT_FILES)
 
 
 def collect_source_patches():
@@ -172,6 +177,8 @@ def ensure_sumo_gui():
             return GUI_BINARY
         patched_sources = [patch_source_text(item) for item in sources]
         WORK_DIR.mkdir(exist_ok=True)
+        for support in BUILD_SUPPORT_FILES:
+            shutil.copy2(support, WORK_DIR / support.name)
         print('[SUMO] 正在构建 GUI：低延迟、双坐标与复制、仿真倍率、Lincoln 跟踪、导航与 GTA Mode…', flush=True)
         with BUILD_LOG_FILE.open('a') as log:
             objects = [compile_source_copy(build_src, item, text, command[0], log)

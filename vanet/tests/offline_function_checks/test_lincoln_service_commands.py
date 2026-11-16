@@ -32,7 +32,8 @@ class ServiceCommandTests(unittest.TestCase):
         node.car.get_location.return_value=carla.Location()
         node.driver.supports_junction_local_control=False
         node.navigation=LincolnNavigation(node)
-        service=LincolnEmergencyService(node)
+        with patch('vanet.lincoln.emergency_state_management.emergency_service.load_highest_right_of_way',return_value=False):
+            service=LincolnEmergencyService(node)
         return node,service
 
     def test_prepare_finishes_without_world_tick_and_start_uses_existing_plan(self):
@@ -126,7 +127,7 @@ class ServiceCommandTests(unittest.TestCase):
             node.car.set_transform.assert_not_called()
         finally:service.close();node.navigation.close()
 
-    def test_received_clearance_limits_controller_and_predicted_collision_still_forces_stop(self):
+    def test_wireless_feedback_does_not_limit_speed_and_physical_conflict_still_stops(self):
         node,service=self.make_service()
         try:
             service.task.state='running';service.task.group='cooperative';service.task.task_id='trip'
@@ -144,12 +145,17 @@ class ServiceCommandTests(unittest.TestCase):
             ego.get_velocity.return_value=carla.Vector3D(x=5.)
             snapshot=Mock(timestamp=SimpleNamespace(elapsed_seconds=10.))
             snapshot.find.return_value=ego
-            service.receive_deliveries([dict(payload=dict(type='clearance',source='rsu0',task_id='trip',route_version=1,
-                sequence=1,sent_at=10.,vehicles={'npc-a':'unknown'},conflict_points={'npc-a':dict(x=40,y=0,z=0)}))])
-            service.control(snapshot)
-            self.assertGreater(controller.run_step.call_args.args[1],0.)
-            self.assertLess(controller.run_step.call_args.args[1],50.)
-            self.assertTrue(service.snapshot(False)['clearance_advice']['active'])
+            payloads=[dict(type='clearance',source='rsu0',task_id='trip',route_version=1,
+                sequence=1,sent_at=10.,vehicles={'npc-a':'unknown'},conflict_points={'npc-a':dict(x=48,y=0,z=0)}),
+                dict(type='feedback',source='npc-a',task_id='trip',route_version=1,sequence=1,sent_at=10.,
+                     status='received',position=dict(x=48,y=0,z=0),conflict_point=dict(x=48,y=0,z=0))]
+            for payload in payloads:
+                with self.subTest(message_type=payload['type']):
+                    service.clearance_advice.reset()
+                    service.receive_deliveries([dict(payload=payload)])
+                    service.control(snapshot)
+                    self.assertIsNone(controller.run_step.call_args.args[1])
+                    self.assertTrue(service.snapshot(False)['clearance_advice']['active'])
             service.borrowing_planner.predicted_conflict=True
             service.control(snapshot)
             self.assertEqual(controller.run_step.call_args.args[1],0.)

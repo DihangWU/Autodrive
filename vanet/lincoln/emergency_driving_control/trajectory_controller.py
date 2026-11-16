@@ -4,6 +4,9 @@ import math
 from types import SimpleNamespace
 import carla
 from modules.lincoln.driving.junction_local_controller import JunctionLocalController
+from .collision_guard import collision_speed_limit
+from .guard_actuation import GuardActuation
+from .control_configuration import load_collision_configuration
 
 
 class EmergencyTrajectoryController(JunctionLocalController):
@@ -16,11 +19,18 @@ class EmergencyTrajectoryController(JunctionLocalController):
             lengths.append(lengths[-1] + first.transform.location.distance(second.transform.location))
         super().__init__(node, route, road_map, lengths)
         self.ignore_traffic_lights = True
-        self.maximum_speed = maximum_speed
+        self.maximum_speed = math.inf if maximum_speed is None else maximum_speed
         self.original_samples = tuple(self.samples)
         self.target_speed = 0.
         self.borrowing = False
         self.borrow_until = None
+        self.collision_configuration=load_collision_configuration()
+        self.collision_obstacles=None
+        self.collision_guard_state=None
+        self.collision_active_actors=set()
+        self.collision_minimum_brake=0.
+        self.guard_actuation=GuardActuation(self.collision_configuration)
+        self.longitudinal_state=None
         self.activate(0.)
 
     def replace_samples(self, samples, borrowing=False, borrow_until=None):
@@ -47,7 +57,19 @@ class EmergencyTrajectoryController(JunctionLocalController):
         target = self.obstacle_speed_limit(snapshot, target, speed, now)
         self.target_speed = target * 3.6
         throttle, brake = self.longitudinal_control(speed, target, dt)
+        minimum=getattr(self,'collision_minimum_brake',0.)
+        if not hasattr(self,'guard_actuation'):
+            self.guard_actuation=GuardActuation(getattr(self,'collision_configuration',None) or load_collision_configuration())
+        throttle,brake=self.guard_actuation.apply(throttle,brake,minimum,bool(getattr(self,'collision_active_actors',set())),dt)
+        if self.guard_actuation.recovering:self.integral=0.
+        self.longitudinal_state=dict(target_speed_kmh=self.target_speed,throttle=throttle,brake=brake,
+            guard_active=bool(getattr(self,'collision_active_actors',set())),recovering=self.guard_actuation.recovering)
         return carla.VehicleControl(throttle=throttle, brake=brake, steer=steer)
+
+    def obstacle_speed_limit(self,snapshot,target,speed,now):
+        if self.collision_obstacles is None:
+            return super().obstacle_speed_limit(snapshot,target,speed,now)
+        return collision_speed_limit(self,self.collision_obstacles,target,speed)
 
     def route_payload(self, maximum_points=600):
         begin = max(0, bisect.bisect_left(self.distances, self.progress)-1)

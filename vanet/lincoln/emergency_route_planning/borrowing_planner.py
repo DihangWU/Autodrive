@@ -4,13 +4,15 @@ import logging
 import math
 import carla
 from .borrowing_geometry import blend_borrowing_segment, trajectory_clear
+from .priority_lane_access import physically_connected
 
 LOG = logging.getLogger('vanet.lincoln.borrowing')
 
 
 class BorrowingPlanner:
-    def __init__(self, node, road_map, configuration=None):
+    def __init__(self, node, road_map, configuration=None,highest_right_of_way=False):
         self.node, self.road_map = node, road_map
+        self.highest_right_of_way=highest_right_of_way
         from vanet.lincoln.emergency_driving_control.control_configuration import DEFAULT_BORROWING
         self.configuration=dict(DEFAULT_BORROWING)
         self.configuration.update(configuration or {})
@@ -44,7 +46,7 @@ class BorrowingPlanner:
                 if now > then and sum(v*v for v in motion) < .01:
                     motion = tuple((point[i]-previous[i])/(now-then) for i in range(3))
             current[actor.id] = (now, point)
-            result.append(dict(id=actor.id,center=point,velocity=motion,
+            result.append(dict(id=actor.id,kind=actor.type_id,center=point,velocity=motion,
                                yaw=math.radians(transform.rotation.yaw+box.rotation.yaw),
                                length=box.extent.x,width=box.extent.y,height=box.extent.z))
         self.previous = current
@@ -52,6 +54,7 @@ class BorrowingPlanner:
 
     def evaluate(self, controller, snapshot):
         obstacles = self.obstacles(snapshot)
+        controller.collision_obstacles=obstacles
         now = snapshot.timestamp.elapsed_seconds
         self.predicted_conflict=False
         if controller.borrowing:
@@ -85,13 +88,23 @@ class BorrowingPlanner:
             self.report('normal_corridor_clear')
             return False
         targets, finish = [], begin-1
+        selected_side=None
         for index in range(begin,end+1):
             sample=controller.samples[index]
             waypoint=self.road_map.get_waypoint(carla.Location(*sample.center),project_to_road=True,lane_type=carla.LaneType.Driving)
-            adjacent=waypoint.get_left_lane() if waypoint is not None else None
+            if self.highest_right_of_way and waypoint is not None:
+                sides=('right','left') if selected_side is None else (selected_side,)
+                adjacent=None
+                for side in sides:
+                    candidate=getattr(waypoint,'get_'+side+'_lane')()
+                    if (candidate is not None and candidate.lane_type==carla.LaneType.Driving
+                            and candidate.road_id==waypoint.road_id
+                            and physically_connected(self.node.world,waypoint,candidate)):
+                        adjacent=candidate;selected_side=side;break
+            else:adjacent=waypoint.get_left_lane() if waypoint is not None else None
             if (waypoint is None or waypoint.is_junction or adjacent is None or adjacent.is_junction
                     or adjacent.lane_type != carla.LaneType.Driving or adjacent.road_id != waypoint.road_id
-                    or adjacent.lane_id*waypoint.lane_id >= 0):
+                    or (not self.highest_right_of_way and adjacent.lane_id*waypoint.lane_id >= 0)):
                 break
             target=adjacent.transform.location
             if abs(target.z-sample.center[2])>.5 or target.distance(waypoint.transform.location)>waypoint.lane_width+1.:
@@ -115,5 +128,5 @@ class BorrowingPlanner:
             self.report('predicted_opposing_or_other_conflict')
             return False
         controller.replace_samples(candidate,True,finish)
-        self.report('borrow_to_pass_slower_traffic',start=begin,finish=finish)
+        self.report('priority_lane_change_to_pass' if self.highest_right_of_way else 'borrow_to_pass_slower_traffic',start=begin,finish=finish)
         return True

@@ -5,6 +5,7 @@ from pathlib import Path
 VANET_DIRECTORY = Path(__file__).resolve().parent
 PROJECT_DIRECTORY = VANET_DIRECTORY.parent
 PROJECT_SETUP_FILE = PROJECT_DIRECTORY / 'setup.bash'
+SUMO_GUI_TRACI_RENDER_LOCK_HEADER_FILE = PROJECT_DIRECTORY / 'foundation/sumo/init/gui/traci_render_lock.hpp'
 VANET_START_SCRIPT_FILE = VANET_DIRECTORY / 'start_vanet_experiment.sh'
 EXPERIMENT_RESULTS_DIRECTORY = VANET_DIRECTORY / 'results'
 EXPERIMENT_OMNET_RELATIVE_DIRECTORY = Path('omnet')
