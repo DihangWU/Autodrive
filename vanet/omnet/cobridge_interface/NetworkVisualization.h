@@ -3,8 +3,10 @@
 #include <nlohmann/json.hpp>
 #include <map>
 #include <string>
+#include <memory>
 using nlohmann::json;
 using namespace omnetpp;
+class QtLincolnFollow;
 
 class NetworkVisualization {
     struct Link {cLineFigure* figure;std::string sender,receiver;double until;};
@@ -17,9 +19,12 @@ class NetworkVisualization {
     std::map<std::string,cGroupFigure*> vehicleIcons;
     std::map<std::string,double> pulses;
     std::map<std::string,Link> links;
+    std::unique_ptr<QtLincolnFollow> follow;
     cFigure::Point position(const std::string& id) const;
 public:
     NetworkVisualization(cModule* root,const std::string& sceneFile);
+    ~NetworkVisualization();
+    json followView(const json& command);
     void synchronize(const json& values,const std::map<std::string,cModule*>& modules);
     void transmitted(const std::string& sender,const std::string& kind,double now);
     void received(const std::string& sender,const std::string& receiver,const std::string& kind,double now);

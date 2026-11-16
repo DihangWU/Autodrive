@@ -247,6 +247,9 @@ void NetworkGateway::processCommand(const json& command) {
                 sendResponse({{"ok",true},{"stopped",true}});
                 if(hasGUI())stopQtEnvironment();
                 endSimulation(); return;
+            } else if(action=="visualization.follow") {
+                if(!visualization)throw std::runtime_error("Qtenv is required for view tracking");
+                sendResponse({{"ok",true},{"follow",visualization->followView(command)},{"time",simTime().dbl()}});
             } else if(action=="visualization.snapshot") {
                 if(!hasGUI())throw std::runtime_error("Qtenv is required for a visualization snapshot");
                 auto path=std::filesystem::path(par("eventFile").stringValue()).parent_path()/"qtenv_view.png";
