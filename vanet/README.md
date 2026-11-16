@@ -35,7 +35,7 @@ Lincoln 不因 NPC 进入 50 米通信范围、收到 `feedback` 或 RSU `cleara
 
 Lincoln 的车辆防撞判断改为使用沿实际轨迹的相对闭合速度，不再把正在前进的 NPC 当静态障碍来计算停车限速。远处同向前车不会仅因进入旧的长距离避障窗口而压低目标速度；静止/对向车辆会按实际闭合风险更早触发保护。SUMO 代理的零物理速度由相邻 CARLA 帧位置差补偿，避免误判为停车。共享的障碍物快照由借道规划器逐帧提供，不新增传感器。
 
-`lincoln_collision_guard` 配置制动减速度估计 4 m/s²、响应时间 0.35 秒、间距余量 3 米；触发后退出边界再加 3 米滞回。需要制动时立即收油并执行刹车下限；风险解除连续确认 0.25 个仿真秒，刹车每秒最多释放 2.0、油门每秒最多增加 1.5，避免反复刹车/加速。行人、实体设施、弯道和终点保护保留。每帧日志的 `collision_guard` 和 `longitudinal_control` 记录物理间距、闭合速度、制动边界、实际油门/刹车与恢复状态。离线闭环已检查“80 米前车、两车初速约 55.8/50.4 km/h，进入 50 米前继续加速”及“30 米前车延迟 3 秒让开时制动后恢复”；这些是简化动力学回归，不代替完整 CARLA 联仿验收。
+`lincoln_collision_guard` 配置制动减速度估计 4 m/s²、响应时间 0.35 秒、间距余量 3 米；触发后退出边界再加 3 米滞回。需要制动时立即收油并执行刹车下限；风险解除连续确认 0.25 个仿真秒，刹车每秒最多释放 2.0、油门每秒最多增加 1.5，避免反复刹车/加速。行人、实体设施、弯道和终点保护保留。 车辆碰撞走廊按 Lincoln 路径朝向与 NPC 真实车身朝向进行双矩形分离轴检查，避免已进入相邻车道但仍有横摆角的车辆触发误刹；仍然占据本车路径的切入车辆保留制动。每帧日志的 `collision_guard` 和 `longitudinal_control` 记录物理间距、闭合速度、制动边界、实际油门/刹车与恢复状态。离线闭环已检查“80 米前车、两车初速约 55.8/50.4 km/h，进入 50 米前继续加速”及“30 米前车延迟 3 秒让开时制动后恢复”；这些是简化动力学回归，不代替完整 CARLA 联仿验收。
 
 实验组仍决定紧急身份和通信协同是否启用：第 1 组不自动启用紧急身份或通知 NPC 避让，第 2、3 组保留原有身份规则，第 3 组仍按原通信范围协同。NPC 的正常交通规则、RSU、网络和 CoBridge 时钟不因该本车策略改变。第 1 组现在不再代表“遵守交通规则”的基线，旧结果应与此配置分开比较。配置需重启联仿后生效。
 
@@ -67,7 +67,7 @@ Qtenv 的 Lincoln 小车为深蓝色 `(30,90,230)`、NPC 为灰色 `(165,170,175
 
 进城分流口为 `-48`：第 3 车道的 20 辆从创建时就规划为 `-48 → -49 → -50` 直行驶离。第 4 车道的 20 辆由 `junction_route_split.py` 在进入路口前的 `-47/-48` 时按实际前后到达顺序决定路线：按“3 辆直行、1 辆右转”循环 5 次，第 4、8、12、16、20 辆右转进城，其余 15 辆提前并入第 3 车道驶离。加上第 3 车道原有 20 辆，最终 35 辆直行、5 辆进城。`vehicles_per_lane` 定义每列数量，`departure_pattern` 定义分流周期。直行车辆由 SUMO 普通路线选择提前并入第 3 车道，右转车辆保持第 4 车道沿 `-7 → -8 → -9 → -18 → -19` 行驶；不从第 4 车道直接穿过没有直行连接的路口。同帧到达按实际道路进度排序，分流只设置一次路线，不强制变道或跳变位置。日志 `HIGHWAY_SPLIT` 记录顺序、车辆和路线；场景状态 `junction_departures` 可查看决定列表，复位后从第 1 辆直行重新计数。
 
-联网与避让单独配置：`network_enabled: true`、`yielding_enabled: false`。新车正常加入网络并发送信标；实际收到 emergency/notice 后反馈 `received`，原因为 `yielding_disabled_for_scenario`，不发送“已让开”的虚假反馈，也不执行任何紧急变道、停车、降速或恢复驾驶命令。普通交通控制器仍可因跟车或路线需求变道、减速。该标记从场景定义传入协调器和 NPC 应用，SUMO 参数 `vanet.scenario.yielding_enabled` 与 NPC 状态也显示它。原有 4 辆的避让策略保持启用。今后可将该批配置的 `vehicle_defaults.yielding_enabled` 改为 `true`，重启后启用避让。
+Mode1 的联网与避让单独配置：`network_enabled: true`、`yielding_enabled: false`。新车正常加入网络并发送信标；实际收到 emergency/notice 后反馈 `received`，原因为 `yielding_disabled_for_scenario`，不发送“已让开”的虚假反馈，也不执行任何紧急变道、停车、降速或恢复驾驶命令。普通交通控制器仍可因跟车或路线需求变道、减速。该标记从场景定义传入协调器和 NPC 应用，SUMO 参数 `vanet.scenario.yielding_enabled` 与 NPC 状态也显示它。原有 4 辆的避让策略保持启用。今后可将该批配置的 `vehicle_defaults.yielding_enabled` 改为 `true`，重启后启用避让。
 
 图示右侧匝道位于路口 1061，配置为 `npc/highway_ramp_merging/town04_ramp_merging.json`。30 辆联网但不执行紧急避让的车全部在初始场景生成，保留原前 10 辆的位置及 10.8 米前后间距。队列沿匝道向上游延伸：13 辆在 `31_1`，6 辆在连接弯道 `:1082_16_0/:1082_9_0`，11 辆在 `39_1`；不挤压车距，也不等 Lincoln 经过才生成车辆。`ramp_queue_placement.py` 根据 `initial_queue_lanes` 连续排布，内部连接只在创建时一次定位。首车仍在匝道里程 140 米，距真实合流点约 63.7 米。上游车辆沿 `39 → 31` 自然进入匝道，后续路线统一为 `31 → -47 → -48 → -49 → -50`：汇入左数第 4 道（SUMO 1），随后由普通路线选道提前并入左数第 3 道，直行驶离，不右转进城。原有 40 辆主路车和 100 辆不联网车的数量、出生配置及分流路线保持原值。
 
@@ -79,7 +79,7 @@ Qtenv 的 Lincoln 小车为深蓝色 `(30,90,230)`、NPC 为灰色 `(165,170,175
 
 日志 `RAMP_ZIPPER_APPROACH` 记录无空闲时隙时上游正常跟车启动，`RAMP_ZIPPER_SLOT` 记录预约主路车、预计汇入时刻和配速上限，`RAMP_ZIPPER_CROSS` 记录实际通过冲突点，`RAMP_ZIPPER_SLOT_CANCEL` 记录预约主路车离开检测路径后的解除，`RAMP_MERGE_COMPLETE` 记录进入第 4 道并恢复普通选道。DEBUG 日志记录局部跟车参数和路口冲突过滤的启用、恢复。场景状态 `ramp_merging` 显示开始、释放、完成数，`ramp_zipper_meter` 显示实际通过数和预约列表；兼容字段 `gap_main` 始终为空，已不再指定主路车减速留空。开关仍为 `highway_ramp_merging=true`，复位清空预约并恢复原排布。
 
-`run_vanet` 在启动 SUMO 前通过 `zipper_network.py` 生成实验专用路网副本 `vanet/runtime_state/sumo_zipper_network/Town04/`。仅将 1061 的匝道和主路第 4 道设为原生拉链合流（连接状态 Z），移除匝道与其他内侧主路车道的错误冲突关系；车道几何、坐标、信号灯和原始 `.runtime/maps/Town04` 文件保持原值。副本包含匹配的 OpenDRIVE 文件，桥端地图指纹校验保持有效，操作命令从当前 SUMO 配置取得实际路网路径。需要 `stop_vanet` 后重新 `run_vanet` 加载，当前运行中的 SUMO 不会热替换规则。
+`run_vanet` 在启动 SUMO 前通过 `zipper_network.py` 生成实验专用路网副本 `vanet/runtime_state/sumo_zipper_network/Town04/`。仅将 1061 的匝道和主路第 4 道设为原生拉链合流（连接状态 Z），移除匝道与其他内侧主路车道的错误冲突关系；车道形状、坐标、信号灯和原始 `.runtime/maps/Town04` 文件保持原值。实验副本同时统一平行四车道路口内部连接的逻辑长度，解除 SUMO 因各车道长度不同而禁止跨线的限制；该改动不改变道路形状。副本包含匹配的 OpenDRIVE 文件，桥端地图指纹校验保持有效，操作命令从当前 SUMO 配置取得实际路网路径。需要 `stop_vanet` 后重新 `run_vanet` 加载，当前运行中的 SUMO 不会热替换规则。
 
 汇入检查：`VANET_RUN_LIVE_SUMO=1 _vanet_python -m unittest vanet.tests.live_cosimulation_checks.test_highway_ramp_merging -v`。使用独立 SUMO、完整车流、开启路口碰撞检查，验证前 20 次冲突点通过严格为主路/匝道交替、30 辆最终均沿直行出口离开、主路无停车和急刹、无碰撞/传送/位置跳变及复位恢复。记录冲突点速度与最大减速度，额外随机种子通过 `VANET_SUMO_TEST_SEED` 指定。原生 SUMO 的 Lincoln 代理仅用于普通跟车交互记录，不能替代实际 CARLA Lincoln 的决策验收；同时验证后 10 辆在取得空流时隙之前已实际起步、在代理到达真实冲突点前已进入匝道，且代理经过时 50 米内仍有车辆汇入，实际 CARLA Lincoln 的行驶与决策仍需联仿检查。
 
@@ -136,26 +136,36 @@ CoBridge 每完成 20 帧输出一次 `frame_timing`，包含 `mean_ms` 中的�
 
 一键启动只把实验准备到可操作状态，**不会替操作者开启紧急状态或正式开始计时**。准备、开始和取消仍由操作者在 SUMO 或下面的等价命令中明确执行。
 
-## 3. 三组实验的操作步骤
+## 3. 两种模式的操作步骤
 
 | 组名 | CLI 参数 | 行为 |
 | --- | --- | --- |
-| 1 Normal | `normal` | 非紧急身份，Lincoln 最高路权驾驶，无协同避让 |
-| 2 Emergency | `emergency` | 紧急身份，Lincoln 最高路权驾驶，无通信驱动的 NPC 避让 |
-| 3 V2V + RSU | `cooperative` | 紧急身份和最高路权驾驶，加真实 V2V / V2I / RSU 协同 |
+| Mode1 | `mode1` | 原 V2V + RSU 模式，保持现有协同与场景车辆的避让开关 |
+| Mode2 | `mode2` | 路径前方第 4 道联网车辆安全并入第 3 道；匝道车收到任务后停车等待，Lincoln 通过后恢复 |
+
+Mode2 保留灰色第 1/2 道背景车不联网、不参与避让。其余联网同向前车收到真实 emergency/notice 后，进入 Lincoln 规划道路前方 45 米时，左数第 4 道立即请求并入第 3 道；第 3 道车辆保持原车道。取消固定 8/19 米车距门槛、普通跟车时距、长时域间距预测、路口白名单、退回与重试冷却。目标空位使用实际保险杠间距：还原 TraCI 邻车距离中已扣除的 minGap，避免把预留跟车距离误当作车身占用。仅保留目标车位占用和直接碰撞检查：目标车身位置放得下、并入不会直接相撞就横移；已经开始后不主动退回，SUMO 保留车身重叠和纵向碰撞保护。
+
+目标道后车正在追近时，变道动作会给它一个有限时长的 slowDown 指令配合腾位，避免第 4 道前车一直被动等空隙。后车保持原车道，不修改其最大速度或碰撞参数，指令到期自动结束；SUMO 仍可按实际跟车情况进一步制动。Lincoln 和灰色背景车不接受这项配速。该动作复用现有仿真控制，不新增 NPC 间无线转发；日志 MODE2_REAR_GAP_ASSIST 记录配合车辆、目标速度和持续时间。真实车身占位仍会等待，空位可用后继续变道。
+
+变道期间采用 SUMO 的 NOOVERLAP 方式，并去除普通跟车间距对横移的阻挡；参数在恢复驾驶时还原。横向速度上限 3.5 m/s、横向加速度 8 m/s²，空位可用后的目标动作时间约 1.5 秒。跨路段时按“左数第 3 道”重新映射目标，不沿用失效的 SUMO 车道索引，避免误向第 2 道继续并道。路口不额外禁止跨线：实验路网为同一对道路间的平行四车道内部连接统一逻辑长度，解除 SUMO 的结构性跨线限制，保留物理占位和碰撞保护。车身让出 Lincoln 通行宽度后立即反馈清空，不要求车尾摆正；之后仍完成剩余横移。Mode2 的收到消息/变道进度反馈仅报告状态，不额外限制 Lincoln 车速；Lincoln 原有物理碰撞保护继续生效。相关代码在 `npc/mode2_route_clearance/`，动作参数在 `defaults.json` 的 `mode2`。
+
+
+已经汇入主路的匝道车按同向前车执行左让，不再使用匝道停车策略。Mode2 匝道停车请求只由实际收包触发，`highway_ramp_merging/emergency_hold.py` 与原拉链控制器统一拥有速度写入权：停车期间暂停该车的预约配速，防止下一帧被普通汇入逻辑重新加速。车辆在有足够距离时平稳停在合流前；已经没有足够刹停距离的车辆先清空合流区。已停车辆即使离开通信范围也保持等待，复用现有 Lincoln 位置信息确认其通过合流点 8 米后恢复，或由用户取消紧急状态释放。操作者取消是本地实验清理事件，断联车辆也会解除停车，且延迟到达的旧任务不会重新触发；该清理不伪造无线接收记录。恢复时清除过期预约，按剩余主路流量重新安排，保留原生碰撞、跟车和变道间距检查。日志 `MODE2_RAMP_BRAKE`、`MODE2_RAMP_CLEAR_MERGE`、`MODE2_RAMP_RESUME` 记录停车、清空和恢复。
+
+检查命令：`VANET_RUN_LIVE_SUMO=1 _vanet_python -m unittest vanet.tests.live_cosimulation_checks.test_mode2_yielding vanet.tests.live_cosimulation_checks.test_mode2_dense_lane_change -v` 使用独立真实 SUMO 验证多前车连续左让、Town04 完整车流中的快速插空、跨路口车道映射、车位占用与直接碰撞保护，以及匝道停车/恢复；驾驶专项的无线收包由 receive 注入，完整车流回归按日志时刻触发动作；`check_vanet_communication_paths --mode mode2` 则运行真实 OMNeT++/Veins，验证 50 米直连、RSU 中转、实际接收与反馈。完整 CARLA/SUMO/Qtenv 联仿的通行时间仍需现场验收。
 
 每组使用同一固定场景和种子。更改场景配置后，应重新运行需要比较的各组；不能把不同出车配置混作同一套对照结果。
 
 正常 GUI 流程：选择组别 → **Reset scene** → 等待就绪 → **Prepare / Enable** → 等待车辆、路线和网络准备完毕 → **Start experiment**。准备阶段不发送任务协同消息、不提前避让。正式开始后才计算本轮时间。
 
-SUMO GUI 按钮不可点击或需要明确查看返回信息时，可由操作者使用 `vanet_control`。下面以第 3 组为例，每一步分别执行并检查状态，不能用固定等待时间代替就绪确认：
+SUMO GUI 按钮不可点击或需要明确查看返回信息时，可由操作者使用 `vanet_control`。下面以 Mode1 为例，每一步分别执行并检查状态，不能用固定等待时间代替就绪确认：
 
 ```bash
-vanet_control reset --group cooperative
+vanet_control reset --group mode1
 vanet_control status
 # 等待 phase 为 ready
 
-vanet_control prepare --group cooperative
+vanet_control prepare --group mode1
 vanet_control status
 # 等待 phase 为 prepared
 
@@ -163,7 +173,7 @@ vanet_control start
 vanet_control status
 ```
 
-第 1 组把两处 `cooperative` 改为 `normal`，第 2 组改为 `emergency`。这些命令是人工操作入口；`prepare` 在紧急组会明确启用紧急身份，`start` 才开始运行实验。使用命令代替按钮不意味着后台自动启用紧急状态。
+Mode2 把两处 `mode1` 改为 `mode2`。Normal、Emergency 不再提供为可选实验模式。两种模式的 `prepare` 都明确启用紧急身份，`start` 才开始运行实验。使用命令代替按钮不意味着后台自动启用紧急状态。
 
 需要取消紧急状态时，由操作者执行：
 
@@ -188,8 +198,8 @@ vanet_control status
 | `add_vanet_npc` | 向已启用 VANET 的 CoBridge 请求固定场景初始化；不是随机加车 |
 | `vanet_status` | 查询当前实验状态 |
 | `vanet_control status` | 查询当前实验状态 |
-| `vanet_control reset --group normal` | 重置固定场景并选择组别 |
-| `vanet_control prepare --group normal` | 准备该组路线和控制状态 |
+| `vanet_control reset --group mode1` | 重置固定场景并选择组别 |
+| `vanet_control prepare --group mode1` | 准备该组路线和控制状态 |
 | `vanet_control start` | 在准备完成后正式开始 |
 | `vanet_control cancel` | 人工取消当前 Lincoln 紧急身份 |
 

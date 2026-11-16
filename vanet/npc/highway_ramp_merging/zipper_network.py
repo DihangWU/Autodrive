@@ -1,8 +1,9 @@
-"""生成几何不变的实验路网副本，仅修正 1061 的双流拉链汇入。"""
+"""生成道路形状不变的实验路网副本，修正拉链汇入及平行内部车道横移。"""
 import json
 import shutil
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from vanet.npc.mode2_route_clearance.highway_lane_change_network import normalize_parallel_internal_lengths
 
 from vanet.project_paths import (SUMO_TOWN04_CONFIGURATION_FILE,SUMO_TOWN04_NETWORK_FILE,
                                  SUMO_TOWN04_OPENDRIVE_FILE,SCENARIO_ZIPPER_NETWORK_DIRECTORY,
@@ -44,6 +45,7 @@ def prepare_zipper_configuration(directory=None):
             changed.append(connection.get('via'))
     if set(changed) != {':1061_0_1',':1061_2_1'} or len(changed) != 2:
         raise ValueError('Expected one ramp and one main-road connection for zipper merging.')
+    parallel_lengths=normalize_parallel_internal_lengths(root)
     network = directory / SUMO_TOWN04_NETWORK_FILE.name
     tree.write(network,encoding='utf-8',xml_declaration=True)
     # Keep map-name/fingerprint discovery compatible with the existing bridge.
@@ -54,5 +56,6 @@ def prepare_zipper_configuration(directory=None):
     config.write(configuration,encoding='utf-8',xml_declaration=True)
     (directory/SCENARIO_ZIPPER_RULES_RELATIVE_FILE).write_text(json.dumps(dict(junction='1061',
         main_lane='-46_1',ramp_lane='31_1',target_lane='-47_1',native_link_state='Z',
-        source_network=str(SUMO_TOWN04_NETWORK_FILE),geometry_changed=False),indent=2)+'\n')
+        source_network=str(SUMO_TOWN04_NETWORK_FILE),geometry_changed=False,
+        parallel_internal_logical_lengths=parallel_lengths),indent=2)+'\n')
     return configuration

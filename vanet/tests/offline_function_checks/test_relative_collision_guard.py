@@ -50,6 +50,23 @@ class RelativeCollisionGuardTests(unittest.TestCase):
             controller=self.controller()
             self.assertEqual(collision_speed_limit(controller,[obstacle],200./3.6,28.),200./3.6)
 
+    def test_slanted_adjacent_vehicle_does_not_rotate_lincolns_collision_corridor(self):
+        controller=self.controller()
+        # Reproduce Town04: a yielded car is 2.96 m left and still yawed 8.6
+        # degrees. Its real body clears the route, but the old inflated box did not.
+        obstacle=self.obstacle(x=10.,y=2.96,speed=10.)
+        obstacle['yaw']=math.radians(-8.6)
+        self.assertEqual(collision_speed_limit(controller,[obstacle],30.,20.),30.)
+        self.assertIsNone(controller.collision_guard_state)
+
+    def test_slanted_car_still_crossing_the_route_requires_braking(self):
+        for yaw in (-25.,25.,90.):
+            controller=self.controller()
+            obstacle=self.obstacle(x=10.,y=1.5,speed=10.)
+            obstacle['yaw']=math.radians(yaw)
+            self.assertLess(collision_speed_limit(controller,[obstacle],30.,20.),20.)
+            self.assertGreater(controller.collision_minimum_brake,0.)
+
     def test_pedestrian_and_static_facilities_keep_conservative_checks(self):
         for kind in ('walker.pedestrian','static.prop.barrier'):
             controller=self.controller()

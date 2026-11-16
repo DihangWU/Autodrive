@@ -21,6 +21,8 @@ class RollingMergePriority:
         self.external = []
         self.reservations = {}
         self.main_crossings = {}
+        self.held=set()
+        self.use_physical_order=False
 
     def update(self, created, states, constants, active):
         if not self.configuration:
@@ -32,8 +34,16 @@ class RollingMergePriority:
         main_states = {name:state for name,state in states.items() if isinstance(state,dict)
                        and value(state,constants.VAR_LANE_ID) in
                        (*policy['main_approach_lanes'],policy['counting_lane'])}
-        order = {reservation['main']:created[ramp]['scenario']['merge_queue_index']
-                 for ramp,reservation in self.reservations.items() if reservation['main'] is not None}
+        order={reservation['main']:created[ramp]['scenario']['merge_queue_index']
+               for ramp,reservation in self.reservations.items() if reservation['main'] is not None}
+        order={reservation['main']:created[ramp]['scenario']['merge_queue_index']
+               for ramp,reservation in self.reservations.items() if reservation['main'] is not None}
+        def main_distance(state):
+            lane=value(state,constants.VAR_LANE_ID);position=value(state,constants.VAR_LANEPOSITION)
+            if position is None:return None
+            if lane==policy['counting_lane']:return policy['main_conflict_position_metres']-position
+            extra=policy['main_upstream_distances_metres'].get(lane)
+            return None if extra is None else policy['main_conflict_position_metres']+extra-position
         for name in sorted(active|set(self.applied)|set(main_states)):
             state = states.get(name)
             if not isinstance(state,dict):continue
@@ -62,8 +72,19 @@ class RollingMergePriority:
                     # An upstream car without a slot is still behind the
                     # scheduled ramp queue; it must not trigger an early yield
                     # by a main car that already owns an earlier turn.
-                    follows_main = record['scenario']['merge_queue_index'] >= order.get(name,float('inf'))
-                    if own_leader_ahead or before_merge and follows_main:
+                    leader_distance=main_distance(states.get(leader,{}))
+                    distance=main_distance(state)
+                    ramp_remaining=policy['ramp_conflict_position_metres']-(ramp_station or 0.)
+                    if ramp_lane==policy['ramp_approach_lane']:ramp_remaining+=policy['ramp_approach_lane_length_metres']
+                    ramp_speed=value(ramp_state,constants.VAR_SPEED) or 0.
+                    safely_upstream=ramp_remaining>ramp_speed*ramp_speed/(2*policy['ramp_braking_mps2'])+6.
+                    follows_main=(ramp not in self.reservations and safely_upstream or leader_distance is not None
+                                  and distance is not None and distance<=leader_distance)
+                    if not self.use_physical_order:
+                        follows_main=record['scenario']['merge_queue_index']>=order.get(name,float('inf'))
+                    if not self.use_physical_order:
+                        follows_main=record['scenario']['merge_queue_index']>=order.get(name,float('inf'))
+                    if own_leader_ahead or before_merge and (follows_main or ramp in self.held):
                         ignored.add(ramp)
             if name in active and lane==policy['ramp_internal_lane'] and position is not None:
                 length = float(created[name]['spec']['length'])

@@ -2,6 +2,7 @@
 import argparse
 import json
 from foundation.cobridge.control import ControlClient
+from vanet.protocol.message_validation.messages import GROUPS
 from vanet.project_paths import SUMO_TOWN04_NETWORK_FILE
 from foundation.sumo.client import SumoClient
 from foundation.cobridge.network import read_network
@@ -10,7 +11,7 @@ from foundation.cobridge.network import read_network
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('operation',choices=['status','initialize','reset','prepare','start','cancel'],default='status',nargs='?')
-    parser.add_argument('--group',choices=['normal','emergency','cooperative'])
+    parser.add_argument('--group',choices=GROUPS)
     args=parser.parse_args()
     client=ControlClient()
     try:

@@ -1,6 +1,9 @@
 {
   "step_length": 0.05,
-  "communication_ranges": {"v2v_metres": 50.0, "rsu_metres": 170.0},
+  "communication_ranges": {
+    "v2v_metres": 50.0,
+    "rsu_metres": 170.0
+  },
   "beacon_interval": 1.0,
   "beacon_phase_spread_seconds": 0.8,
   "emergency_interval": 1.0,
@@ -31,7 +34,38 @@
   "controller_timeout_seconds": 15.0,
   "hard_brake_mps2": 4.0,
   "seed": 20261104,
-  "group": "normal",
-  "rsu": {"id": "rsu0", "x": 193.0, "y": -179.0, "z": 6.0},
-  "groups": ["normal", "emergency", "cooperative"]
+  "group": "mode1",
+  "rsu": {
+    "id": "rsu0",
+    "x": 193.0,
+    "y": -179.0,
+    "z": 6.0
+  },
+  "groups": [
+    "mode1",
+    "mode2"
+  ],
+  "mode2": {
+    "lane_change_trigger_metres": 45.0,
+    "lateral_speed_mps": 3.5,
+    "lateral_acceleration_mps2": 8.0,
+    "lane_request_interval_seconds": 0.2,
+    "passed_clearance_metres": 8.0,
+    "ramp_stop_margin_metres": 6.0,
+    "ramp_braking_mps2": 4.0,
+    "ramp_merge_point": {
+      "x": 15.9,
+      "y": 96.0,
+      "z": 0.0
+    },
+    "merge_route_tolerance_metres": 6.0,
+    "road_half_width_metres": 4.5,
+    "ramp_approach_edges": [
+      "39",
+      ":1082_9",
+      ":1082_16",
+      "31",
+      ":1061_0"
+    ]
+  }
 }

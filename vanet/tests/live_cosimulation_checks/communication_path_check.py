@@ -1,4 +1,5 @@
 """真实 Veins 检查直连/中转切换；SUMO 动作使用 mock，不接管现有实验。"""
+import argparse
 import json
 import subprocess
 import sys
@@ -20,17 +21,23 @@ from vanet.lincoln.v2x_data_exchange.wireless_clearance_advice import WirelessCl
 def mock_traffic():
     traffic=SimpleNamespace(vehicle=Mock(),edge=Mock(),lane=Mock())
     for method,value in dict(getSpeedMode=31,getLaneChangeMode=1621,getMaxSpeed=13.89,
-        getLaneIndex=0,getRoadID='edge',getLaneID='edge_0',getLateralLanePosition=0.,couldChangeLane=True).items():
+        getLaneIndex=1,getRoadID='edge',getLaneID='edge_1',getLateralLanePosition=0.,couldChangeLane=True,
+        getMaxSpeedLat=1.,getParameter='1',getSpeed=5.,getLateralSpeed=0.,getDecel=4.5,
+        getLeftLeaders=[],getLeftFollowers=[],getSecureGap=5.).items():
         getattr(traffic.vehicle,method).return_value=value
-    traffic.edge.getLaneNumber.return_value=2;traffic.lane.getWidth.return_value=3.5
+    traffic.edge.getLaneNumber.return_value=5;traffic.lane.getWidth.return_value=3.5
     return traffic
 
 
 def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--mode',choices=('mode1','mode2'),default='mode1')
+    args=parser.parse_args()
     folder=new_result_directory('communication_path_check')
     config=dict(communication_ranges=dict(v2v_metres=50.,rsu_metres=170.),
                 beacon_phase_spread_seconds=.8,seed=20261104,
                 rsu=dict(id='rsu0',x=100.,y=0.,z=6.))
+    config.update(experiment_mode=args.mode,scenario_role='same_direction')
     npc=NpcCooperation('npc0',config);rsu=RsuCooperation(config);advice=WirelessClearanceAdvice()
     traffic=mock_traffic();network=None;process=None;history=[];cases=[];step=0;sequence=0
     with (folder/COMMUNICATION_PATH_CHECK_LOG_RELATIVE_FILE).open('w') as log:
@@ -51,7 +58,7 @@ def main():
                 ('return_to_direct',0.,30.,'direct'),('direct_outside_rsu',300.,330.,'direct'),
                 ('no_relay_without_lincoln_rsu_link',300.,100.,None)),1):
                 observed=[];advice_received=False
-                own=dict(id='npc0',role='npc',x=npc_x,y=0.,z=.6,speed=5.,heading=0.,width=1.8,lane_id='edge_0')
+                own=dict(id='npc0',role='npc',x=npc_x,y=0.,z=.6,speed=5.,heading=0.,width=1.8,lane_id='edge_1')
                 states=[dict(id='lincoln0',role='lincoln',x=ego_x,y=0.,z=.6),own]
                 nodes=[{k:v for k,v in state.items() if k in ('id','role','x','y','z','heading','speed')} for state in states]
                 nodes.append(dict(config['rsu'],role='rsu'))
@@ -65,7 +72,7 @@ def main():
                     transmissions=npc.step(now,own,traffic)+rsu.step(now)
                     if tick%20==0:
                         sequence+=1
-                        payload=dict(type='emergency',source='lincoln0',task_id='path-check',route_version=version,
+                        payload=dict(type='emergency',source='lincoln0',experiment_mode=args.mode,task_id='path-check',route_version=version,
                             sequence=sequence,sent_at=now,position=dict(x=ego_x,y=0.,z=.6),speed=10.,
                             route=[dict(x=ego_x,y=0.,z=.6),dict(x=ego_x+200.,y=0.,z=.6)])
                         transmissions.append(dict(sender='lincoln0',recipient='broadcast',payload=payload))
@@ -118,7 +125,7 @@ def main():
                               recovery_started_at=network.network_time,deliveries=0))
             network.request_shutdown();wait_for(network,lambda:bool(network.results),process)
             network.take_result();process.wait(timeout=10.)
-            summary=dict(passed=True,scope='Real OMNeT++/Veins with actual NPC/RSU/advice policies; SUMO actions mocked.',cases=cases)
+            summary=dict(passed=True,mode=args.mode,scope='Real OMNeT++/Veins with actual NPC/RSU/advice policies; SUMO actions mocked.',cases=cases)
             (folder/COMMUNICATION_PATH_CHECK_SUMMARY_RELATIVE_FILE).write_text(json.dumps(summary,indent=2)+'\n')
             print(json.dumps(dict(**summary,results=str(folder)),ensure_ascii=False,indent=2))
         finally:

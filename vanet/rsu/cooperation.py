@@ -4,6 +4,7 @@ import logging
 from vanet.npc.route_conflict_assessment.route_geometry import conflict, project
 from vanet.npc.v2x_data_exchange.message_guard import MessageGuard
 from vanet.rsu.vehicle_beacon_tracking.beacon_cache import BeaconCache
+from vanet.npc.mode2_route_clearance.route_assessment import assess as mode2_assess
 
 LOG = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ class RsuCooperation:
         task = self.task or {}
         payload = dict(type=kind,source=self.node_id,task_id=task.get('task_id',''),
                        route_version=task.get('route_version',0),sequence=self.sequence,sent_at=now)
+        if task.get('experiment_mode'):payload['experiment_mode']=task['experiment_mode']
         payload.update(fields)
         return dict(sender=self.node_id,recipient=recipient,payload=payload)
 
@@ -89,7 +91,9 @@ class RsuCooperation:
             if message['source'] not in self.selected:
                 return False
             self.feedback[message['source']] = dict(status=message.get('status','unknown'),
-                                                    reason=message.get('reason',''),received_at=sim_time)
+                reason=message.get('reason',''),received_at=sim_time,
+                informational=(message.get('experiment_mode')=='mode2' and message.get('scenario_role')=='same_direction'
+                               and message.get('status') in ('received','yielding')))
             item = self.selected[message['source']]
             if item['backfill_attempts']:
                 LOG.info('RSU feedback resets backfill sim_time=%.3f target=%s task=%s previous_attempts=%s',
@@ -116,7 +120,9 @@ class RsuCooperation:
         for name,state in states.items():
             if name == self.task['source']:
                 continue
-            assessment = conflict(state,self.task,self.config)
+            if self.task.get('experiment_mode')=='mode2' and state.get('scenario_role') in ('same_direction','ramp_merging'):
+                assessment=mode2_assess(state,self.task,dict(self.config,scenario_role=state['scenario_role']))
+            else:assessment = conflict(state,self.task,self.config)
             if assessment['relevant']:
                 wanted[name] = assessment
             elif name in self.selected:
@@ -153,7 +159,7 @@ class RsuCooperation:
                 else:
                     reason = 'feedback_expired' if feedback else 'feedback_missing'
                 fields = {key:copy.deepcopy(self.task[key]) for key in
-                          ('route','position','emergency_position','speed','eta','destination') if key in self.task}
+                          ('route','position','emergency_position','speed','eta','destination','experiment_mode') if key in self.task}
                 fields.update(emergency_source=self.task['source'],conflict_kind=assessment['kind'],
                               lease_seconds=self.config.get('lease_seconds',10.),
                               backfill=backfill)
@@ -173,6 +179,8 @@ class RsuCooperation:
                                for name,item in self.selected.items()}
             messages.append(self.send('clearance',sim_time,self.task['source'],vehicles=statuses,
                                       conflict_points=conflict_points,
+                                      informational_vehicles=[name for name in statuses if name in self.feedback and
+                                          sim_time-self.feedback[name]['received_at']<=lifetime and self.feedback[name].get('informational',False)],
                                       all_cleared=bool(statuses) and all(s=='cleared' for s in statuses.values()),
                                       selected_count=len(statuses),known_vehicle_count=len(states)))
             self.next_summary = sim_time+self.config.get('summary_interval',1.)

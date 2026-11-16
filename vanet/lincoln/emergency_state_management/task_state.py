@@ -1,14 +1,14 @@
 """紧急身份和一次导航任务分开保存；只有 SUMO cancel 清除紧急身份。"""
 from dataclasses import dataclass, field
 
-GROUPS = frozenset({'normal', 'emergency', 'cooperative'})
+from vanet.protocol.message_validation.messages import GROUPS
 
 
 @dataclass
 class EmergencyTaskState:
     emergency: bool = False
     state: str = 'idle'
-    group: str = 'normal'
+    group: str = 'mode1'
     task_id: str | None = None
     destination: dict | None = None
     route_version: int = 0
@@ -21,10 +21,8 @@ class EmergencyTaskState:
         group = command.get('group', self.group)
         if group not in GROUPS:
             raise ValueError('Unknown experiment group: ' + str(group))
-        if self.emergency and group == 'normal':
-            raise ValueError('Cancel emergency in SUMO before selecting the normal group.')
         self.group = group
-        self.emergency = self.emergency or group != 'normal'
+        self.emergency = True
         self.task_id = str(command.get('task_id') or command['id'])
         self.destination = dict(command['destination'])
         self.state, self.manual, self.error = 'preparing', False, ''

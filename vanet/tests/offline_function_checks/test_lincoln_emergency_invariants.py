@@ -17,7 +17,7 @@ class Sample:
 class EmergencyIdentityTests(unittest.TestCase):
     def prepare(self):
         task=EmergencyTaskState()
-        task.prepare(dict(id='prepare-1',group='cooperative',task_id='trip-1',destination=dict(x=100,y=0,z=0)))
+        task.prepare(dict(id='prepare-1',group='mode1',task_id='trip-1',destination=dict(x=100,y=0,z=0)))
         task.prepared();task.start()
         return task
 
@@ -35,7 +35,7 @@ class EmergencyIdentityTests(unittest.TestCase):
 
     def test_normal_group_cannot_silently_clear_existing_emergency(self):
         task=self.prepare()
-        with self.assertRaisesRegex(ValueError,'Cancel emergency'):
+        with self.assertRaisesRegex(ValueError,'Unknown experiment group'):
             task.prepare(dict(id='prepare-2',group='normal',destination=dict(x=0,y=0,z=0)))
         self.assertTrue(task.emergency)
 

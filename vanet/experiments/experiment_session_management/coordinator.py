@@ -27,7 +27,7 @@ class ExperimentCoordinator:
         self.scenario_config=load_scenario()
         self.phase='waiting'
         self.detail='Select a group and reset the scene in SUMO.'
-        self.group='normal'
+        self.group='mode1'
         self.folder=new_result_directory('bridge')
         self.log=EventLog(self.folder,'CoBridge')
         logging.getLogger('vanet.npc').setLevel(logging.DEBUG)
@@ -155,6 +155,7 @@ class ExperimentCoordinator:
         elif action=='vanet.cancel':
             if not self.emergency:raise RuntimeError('Lincoln 当前没有紧急身份。')
             self.issue('cancel')
+            for component in self.npc.values():component.cancel_from_operator(self.task_id)
             if self.phase=='running':
                 self.metrics.values['status']='user_cancelled'
                 self.ended=True
@@ -317,7 +318,7 @@ class ExperimentCoordinator:
 
     def application_step(self, states):
         now=self.network_time;messages=self.outgoing;self.outgoing=[]
-        if self.group=='cooperative':
+        if self.group in ('mode1','mode2'):
             paths,connected=select_communication_paths(states,self.config['rsu'],self.config['communication_ranges'])
             if paths!=self.communication_paths or connected!=self.rsu_connected:
                 self.log.emit('communication_paths_changed',now,paths=paths,rsu_connected=connected)
@@ -327,10 +328,17 @@ class ExperimentCoordinator:
             if state['role']=='npc':
                 component=self.npc.get(state['id'])
                 if component is None:
-                    component=NpcCooperation(state['id'],dict(self.config,yielding_enabled=state.get('yielding_enabled',True)))
+                    npc_config=dict(self.config,experiment_mode=self.group,scenario_role=state.get('scenario_role','traffic'),
+                        yielding_enabled=state.get('yielding_enabled',True))
+                    if self.group=='mode2' and state.get('scenario_role') in ('same_direction','ramp_merging'):
+                        npc_config['yielding_enabled']=True
+                        if state['scenario_role']=='ramp_merging':
+                            npc_config['ramp_controller']=self.scenario.traffic.ramp_merging
+                    component=NpcCooperation(state['id'],npc_config)
                     self.npc[state['id']]=component
+                component.set_emergency_vehicle_state(next((item for item in states if item['role']=='lincoln'),None))
                 component.set_communication_links(self.communication_links.get(state['id'],[]),now)
-                if self.group=='cooperative':component.set_communication_path(self.communication_paths.get(state['id']),now)
+                if self.group in ('mode1','mode2'):component.set_communication_path(self.communication_paths.get(state['id']),now)
                 messages.extend(component.step(now,state,self.bridge.sumo.connection))
                 if not self.ended:
                     self.metrics.note_yield_state(state['id'],component.status,now-self.run_start_network_time,
@@ -339,7 +347,7 @@ class ExperimentCoordinator:
             elif state['role']=='lincoln' and self.display:
                 self.display.lincoln(state.get('sumo_id',state['id']),self.emergency,self.lincoln_status.get('state',''))
         if self.display:self.display.prune(state.get('sumo_id',state['id']) for state in states)
-        if self.group=='cooperative':
+        if self.group in ('mode1','mode2'):
             messages.extend(self.rsu.step(now))
             version=self.lincoln_status.get('route_version',0)
             if self.emergency and (now+1e-8>=self.next_emergency or version!=self.last_route_version):
@@ -347,13 +355,13 @@ class ExperimentCoordinator:
                 kind='emergency' if route and self.phase=='running' and not self.ended else 'identity'
                 self.sequence+=1
                 position=self.lincoln_status.get('position') or {}
-                payload=dict(type=kind,source='lincoln0',task_id=self.task_id,route_version=version,
+                payload=dict(type=kind,source='lincoln0',experiment_mode=self.group,task_id=self.task_id,route_version=version,
                     sequence=self.sequence,sent_at=now,route=route if kind=='emergency' else [],
                     position=position,eta=self.lincoln_status.get('eta'),speed=self.lincoln_status.get('speed',0.),heading=self.lincoln_status.get('heading',0.))
                 messages.append(dict(sender='lincoln0',recipient='broadcast',payload=payload))
                 self.next_emergency=now+self.config['emergency_interval'];self.last_route_version=version
         # 非协同组仅允许常规信标，不下发紧急协同消息。
-        if self.group!='cooperative':messages=[m for m in messages if m['payload']['type']=='beacon']
+        if self.group not in ('mode1','mode2'):messages=[m for m in messages if m['payload']['type']=='beacon']
         else:
             rsu_id=self.config['rsu']['id']
             messages=[message for message in messages if message['sender']!=rsu_id or
@@ -388,7 +396,7 @@ class ExperimentCoordinator:
             if message.get('type') not in ('beacon','identity') and message.get('task_id')!=self.task_id:
                 self.log.emit('stale_task_discarded',self.network_time,level='debug',message=message)
                 continue
-            if self.group=='cooperative':
+            if self.group in ('mode1','mode2'):
                 if recipient==self.config['rsu']['id']:
                     if self.rsu.receive(message,delivery['received_at']):
                         self.rsu_counters['received']+=1

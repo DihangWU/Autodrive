@@ -23,6 +23,7 @@ class ZipperReleaseMeter:
         self.commanded = {}
         self.last_update = None
         self.start_time = None
+        self.rebooking=False
 
     def start(self, sim_time):
         if self.start_time is None:
@@ -46,7 +47,7 @@ class ZipperReleaseMeter:
         upstream = self.configuration['ramp_upstream_distances_metres'].get(lane)
         return None if upstream is None else remaining+upstream
 
-    def update_slots(self, created, states, constants, released, completed, sim_time):
+    def update_slots(self, created, states, constants, released, completed, sim_time, held=()):
         if not self.configuration or self.start_time is None:
             return
         self.observe(created,states,constants,sim_time)
@@ -77,6 +78,7 @@ class ZipperReleaseMeter:
                        if record['scenario'].get('role')=='ramp_merging' and name not in completed)
         predictions = {name:(eta,speed) for _,name,eta,speed in main}
         for _,name in queue:
+            if name in held:continue
             state = states.get(name)
             if not isinstance(state,dict):
                 continue
@@ -89,7 +91,14 @@ class ZipperReleaseMeter:
                 continue
             reservation = self.reservations.get(name)
             if reservation is None:
-                candidate = next((item for item in main if item[1] not in reserved),None)
+                velocity=value(state,constants.VAR_SPEED) or 0.
+                acceleration=policy['prediction_acceleration_mps2']
+                limit=policy['ramp_merge_speed_kmh']/3.6
+                accelerating=max(0.,(limit*limit-velocity*velocity)/(2*acceleration))
+                travel=((math.sqrt(velocity*velocity+2*acceleration*max(0.,distance))-velocity)/acceleration
+                        if distance<=accelerating else max(0.,(limit-velocity)/acceleration)+(distance-accelerating)/limit)
+                candidate = next((item for item in main if item[1] not in reserved
+                                  and (not self.rebooking or item[2]+policy['slot_headway_seconds']>=sim_time+travel)),None)
                 if candidate is not None:
                     _,leader,eta,speed = candidate
                     reservation = dict(main=leader,target=eta+policy['slot_headway_seconds'],speed=speed)

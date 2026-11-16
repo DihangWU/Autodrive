@@ -1,6 +1,7 @@
 """按相对闭合速度判断车辆碰撞边界，不对远处前车提前跟车限速。"""
 import bisect
 import math
+from .vehicle_footprints import overlaps_route_vehicle
 
 
 def collision_speed_limit(controller,obstacles,target,speed):
@@ -18,6 +19,7 @@ def collision_speed_limit(controller,obstacles,target,speed):
         vehicle=obstacle.get('kind','vehicle.').startswith('vehicle.')
         latched=vehicle and obstacle['id'] in previous
         cosine,sine=math.cos(obstacle['yaw']),math.sin(obstacle['yaw'])
+        body_reach=math.hypot(obstacle['length'],obstacle['width'])+math.hypot(controller.front,controller.half_width)+.4
         for index in indices:
             sample=controller.samples[index]
             lead_speed=sum(obstacle['velocity'][axis]*sample.forward[axis] for axis in range(3))
@@ -27,9 +29,12 @@ def collision_speed_limit(controller,obstacles,target,speed):
             horizon=boundary+(release if latched else 0.) if vehicle else max(12.,speed*2.+speed*speed/5.)
             if gap>horizon+controller.front+2.*obstacle['length']+5.:break
             dx,dy,dz=(sample.center[axis]-obstacle['center'][axis] for axis in range(3))
-            if (abs(dx*cosine+dy*sine)>=obstacle['length']+controller.front+.4 or
-                    abs(-dx*sine+dy*cosine)>=obstacle['width']+controller.half_width+.4 or
-                    abs(dz)>=obstacle['height']+1.):continue
+            if abs(dz)>=obstacle['height']+1.:continue
+            if vehicle:
+                if abs(dx)>=body_reach or abs(dy)>=body_reach:continue
+                if not overlaps_route_vehicle(sample,obstacle,controller.front,controller.half_width):continue
+            elif (abs(dx*cosine+dy*sine)>=obstacle['length']+controller.front+.4 or
+                  abs(-dx*sine+dy*cosine)>=obstacle['width']+controller.half_width+.4):continue
             required=brake=0.
             if vehicle:
                 if gap>boundary+(release if latched else 0.):break
@@ -44,7 +49,9 @@ def collision_speed_limit(controller,obstacles,target,speed):
             else:limit=math.sqrt(5.*max(0.,gap-2.))
             candidate=dict(actor_id=obstacle['id'],gap_metres=gap,closing_speed_mps=closing,
                 braking_boundary_metres=boundary,release_boundary_metres=boundary+release,
-                required_deceleration_mps2=required,minimum_brake=brake,kind=obstacle.get('kind','vehicle.'))
+                required_deceleration_mps2=required,minimum_brake=brake,kind=obstacle.get('kind','vehicle.'),
+                obstacle_center=obstacle['center'],obstacle_yaw_degrees=math.degrees(obstacle['yaw']),
+                route_point=sample.center)
             if vehicle and (nearest is None or gap<nearest['gap_metres']):nearest=candidate
             if limit<target:
                 target=limit

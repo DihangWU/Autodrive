@@ -45,7 +45,7 @@ private:
     void request(const char* action) {
         const bool operation = std::string(action) != "vanet.status";
         if (userOperationPending || (!operation && pending.valid())) return;
-        const char* groups[] = {"normal", "emergency", "cooperative"};
+        const char* groups[] = {"mode1", "mode2"};
         char* resolved = ::realpath(OptionsCont::getOptions().getString("net-file").c_str(), nullptr);
         if (!resolved) {
             available = false;
@@ -70,8 +70,8 @@ public:
         FXHorizontalFrame(parent, LAYOUT_SIDE_BOTTOM | LAYOUT_FILL_X), window(application) {
         new FXLabel(this, "VANET");
         group = new FXComboBox(this, 14, this, ID_GROUP, COMBOBOX_STATIC | FRAME_SUNKEN | FRAME_THICK);
-        group->appendItem("1 Normal"); group->appendItem("2 Emergency"); group->appendItem("3 V2V + RSU");
-        group->setNumVisible(3); group->setCurrentItem(0);
+        group->appendItem("Mode1"); group->appendItem("Mode2");
+        group->setNumVisible(2); group->setCurrentItem(0);
         new FXButton(this, "Reset scene", nullptr, this, ID_RESET);
         new FXButton(this, "Prepare / Enable", nullptr, this, ID_PREPARE);
         new FXButton(this, "Start experiment", nullptr, this, ID_START);
@@ -106,7 +106,8 @@ public:
                 prepared = response.value("prepared", false);
                 emergency = response.value("emergency", false);
                 const auto detail = response.value("detail", "");
-                showStatus("VANET: " + phase + " / " + response.value("group", ""), detail);
+                const auto selectedMode = response.value("group", "");
+                showStatus("VANET: " + phase + " / " + (selectedMode == "mode1" ? "Mode1" : selectedMode == "mode2" ? "Mode2" : selectedMode), detail);
             } catch (const std::exception& error) {
                 available = false;
                 showStatus("VANET: request failed", error.what());

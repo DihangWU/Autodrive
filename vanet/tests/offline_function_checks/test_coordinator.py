@@ -97,7 +97,7 @@ class CoordinatorContractTests(unittest.TestCase):
         self.coordinator.scenario.snapshot.return_value=dict(initial_npcs_added=True)
         self.coordinator.ack_frame=100
         self.coordinator.task_id='current-task'
-        self.coordinator.group='cooperative'
+        self.coordinator.group='mode1'
         self.coordinator.lincoln_status=dict(emergency=True,state='prepared',manual=False,
                                             route_version=1,route=[dict(x=0,y=0,z=0),dict(x=10,y=0,z=0)],
                                             position=dict(x=0,y=0,z=0),speed=0.,heading=0.,eta=5.)
@@ -180,16 +180,26 @@ class CoordinatorContractTests(unittest.TestCase):
         c.after_step()
         npc.receive.assert_called_once()
 
-    def test_noncooperative_group_records_delivery_without_triggering_yield(self):
-        c=self.coordinator;c.phase='running';c.group='emergency'
+    def test_mode2_still_delivers_actual_wireless_messages(self):
+        c=self.coordinator;c.phase='running';c.group='mode2'
         npc=Mock();c.npc['npc-a']=npc
         message=self.delivery()
         self.put_result([message])
         self.assertTrue(c.before_step());c.after_step()
-        npc.receive.assert_not_called()
-        c.rsu.receive.assert_not_called()
+        npc.receive.assert_called_once_with(message['payload'],.02)
         self.assertEqual(c.metrics.deliveries,[message])
-        self.assertEqual(c.application_step([]),[])
+        output=c.application_step([])
+        self.assertEqual(output[0]['payload']['experiment_mode'],'mode2')
+
+    def test_mode2_enables_main_and_ramp_cooperation_without_altering_mode1_scene_flags(self):
+        c=self.coordinator
+        states=[dict(id='lincoln0',role='lincoln',x=0.,y=0.)]
+        states += [dict(id=role,role='npc',scenario_role=role,x=20.,y=0.,yielding_enabled=False)
+                   for role in ('same_direction','ramp_merging')]
+        for mode,enabled in (('mode1',False),('mode2',True)):
+            c.group=mode;c.npc={};c.application_step(states)
+            for component in c.npc.values():self.assertEqual(component.config['yielding_enabled'],enabled)
+            self.assertTrue(all(not state.get('yielding_enabled',False) for state in states))
 
     def test_stale_task_messages_cannot_reach_npc_rsu_or_lincoln(self):
         c=self.coordinator;c.phase='running'

@@ -63,7 +63,7 @@ class HighestRightOfWayTests(unittest.TestCase):
         self.assertLess(goal.transform.get_forward_vector().x,-.99)
 
     def test_all_groups_use_trajectory_control_without_starting_tm(self):
-        for group in ('normal','emergency','cooperative'):
+        for group in ('mode1','mode2'):
             with self.subTest(group=group):
                 node,service=service_fixtures.ServiceCommandTests().make_service()
                 service.highest_right_of_way=True

@@ -53,7 +53,7 @@ class VehicleStateDisplayTests(unittest.TestCase):
 
 class RsuStatusTests(unittest.TestCase):
     def status(self):
-        return dict(phase='running',group='cooperative',simulation_time=10.,
+        return dict(phase='running',group='mode1',simulation_time=10.,
                     rsu=dict(id='rsu0',beacon_count=2,selected=['npc0'],feedback={'npc0':dict(status='yielding')},
                              counters=dict(received=3,notice_sent=2,feedback_received=1,clearance_sent=1,backfill_sent=0)),
                     npc_states={'npc0':dict(status='yielding'),'npc1':dict(status='normal')})

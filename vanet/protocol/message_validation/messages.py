@@ -1,7 +1,7 @@
 """程序边界的输入校验；拒绝非有限数、过期版本与未知实验组。"""
 import math
 
-GROUPS = ('normal', 'emergency', 'cooperative')
+GROUPS = ('mode1', 'mode2')
 WIRELESS_TYPES = {'beacon', 'emergency', 'notice', 'feedback', 'clearance', 'cancel', 'identity'}
 
 

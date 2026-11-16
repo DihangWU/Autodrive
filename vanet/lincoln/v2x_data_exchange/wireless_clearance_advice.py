@@ -33,6 +33,8 @@ class WirelessClearanceAdvice(ClearanceAdvice):
             normalized=copy.deepcopy(message)
             normalized.update(type='clearance',vehicles={source:message['status']},
                 conflict_points={source:message.get('conflict_point') or message.get('position')})
+            normalized['informational_vehicles']=([source] if message.get('experiment_mode')=='mode2'
+                and message.get('scenario_role')=='same_direction' and message.get('status') in ('received','yielding') else [])
             advice=self.direct.get(source) or ClearanceAdvice(self.configuration,source)
             if not advice.receive(normalized,sim_time,task_id,route_version):return False
             self.direct[source]=advice

@@ -34,6 +34,7 @@ def collect_mobility(bridge, rsu):
             y=offset[1]-point[1]-length/2*math.sin(radians)
             states.append(dict(id=name,role='npc',x=x,y=y,z=point[2]+.75,
                 yielding_enabled=record.get('scenario',{}).get('yielding_enabled',True),
+                scenario_role=record.get('scenario',{}).get('role','traffic'),
                 heading=heading,speed=connection.vehicle.getSpeed(name),length=length,
                 width=connection.vehicle.getWidth(name),height=1.5,
                 lane_id=connection.vehicle.getLaneID(name),road_id=connection.vehicle.getRoadID(name),

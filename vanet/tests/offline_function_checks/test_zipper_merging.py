@@ -22,7 +22,22 @@ class ZipperMergingTests(unittest.TestCase):
             config=prepare_zipper_configuration(Path(folder))
             base=ET.fromstring(original);patched=ET.parse(read_network(config)['network_file']).getroot()
             self.assertEqual(read_network(config)['xodr_sha256'],read_network(SUMO_TOWN04_CONFIGURATION_FILE)['xodr_sha256'])
-            self.assertEqual([ET.tostring(v) for v in base.findall('edge')],[ET.tostring(v) for v in patched.findall('edge')])
+            changed_lengths=set()
+            for before,after in zip(base.findall('edge'),patched.findall('edge')):
+                self.assertEqual(before.attrib,after.attrib)
+                before_lanes=before.findall('lane');after_lanes=after.findall('lane')
+                self.assertEqual(len(before_lanes),len(after_lanes))
+                for old,new in zip(before_lanes,after_lanes):
+                    old_attributes=dict(old.attrib);new_attributes=dict(new.attrib)
+                    old_length=old_attributes.pop('length');new_length=new_attributes.pop('length')
+                    self.assertEqual(old_attributes,new_attributes)
+                    if old_length!=new_length:
+                        self.assertEqual(before.get('function'),'internal')
+                        self.assertGreaterEqual(len(before_lanes),4)
+                        self.assertEqual(float(new_length),max(float(l.get('length')) for l in before_lanes))
+                        changed_lengths.add(before.get('id'))
+            self.assertIn(':134_10',changed_lengths)
+            self.assertEqual(len({l.get('length') for l in patched.find("edge[@id=':134_10']").findall('lane')}),1)
             self.assertEqual([ET.tostring(v) for v in base.findall('tlLogic')],[ET.tostring(v) for v in patched.findall('tlLogic')])
             for before,after in zip(base.findall('junction'),patched.findall('junction')):
                 if before.get('id')!='1061':self.assertEqual(ET.tostring(before),ET.tostring(after))

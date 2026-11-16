@@ -78,6 +78,8 @@ class ClearanceAdvice:
         candidates=[]
         for vehicle,status in message['vehicles'].items():
             if status in ('cleared','normal'):continue
+            informational=message.get('informational_vehicles',[])
+            if message.get('experiment_mode')=='mode2' and isinstance(informational,list) and vehicle in informational:continue
             point=message['conflict_points'].get(vehicle)
             try:
                 xyz=tuple(float(point[axis]) for axis in ('x','y','z'))

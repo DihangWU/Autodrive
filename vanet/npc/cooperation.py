@@ -9,6 +9,8 @@ from vanet.npc.v2x_data_exchange.range_leases import RangeLeases
 from vanet.npc.v2x_data_exchange.communication_path import NpcCommunicationPath
 from vanet.npc.v2x_data_exchange.feedback_schedule import next_feedback_time
 from vanet.npc.highway_background_traffic.communication_only import communication_only_step
+from vanet.npc.mode2_route_clearance.yielding_actions import Mode2YieldingActions
+from vanet.npc.mode2_route_clearance.route_assessment import assess as mode2_assess, passed_anchor, on_ramp
 
 LOG = logging.getLogger(__name__)
 
@@ -19,6 +21,13 @@ class NpcCooperation:
         self.config = dict(config or {})
         self.guard = MessageGuard(self.config.get('lease_seconds', 10.))
         self.actions = YieldingActions(node_id, self.config)
+        self.mode2=(self.config.get('experiment_mode')=='mode2' and
+                    self.config.get('scenario_role') in ('same_direction','ramp_merging'))
+        if self.mode2:self.actions=Mode2YieldingActions(node_id,self.config)
+        self.emergency_vehicle_state=None
+        self.current_role=self.config.get('scenario_role','traffic')
+        self.cancel_requested=False
+        self.operator_cancelled_tasks=set()
         self.task = None
         self.lease_until = -1.
         self.next_beacon = None
@@ -34,6 +43,17 @@ class NpcCooperation:
         self.communication_path=NpcCommunicationPath(self.config.get('rsu',{}).get('id',self.config.get('rsu_id','rsu0')))
         self.physical_peers=[]
         self.path_beacon_pending=False
+
+    def set_emergency_vehicle_state(self, state):
+        self.emergency_vehicle_state=state
+
+    def cancel_from_operator(self, task_id):
+        if not self.mode2:return
+        self.operator_cancelled_tasks.add(task_id)
+        if self.task and self.task['task_id']==task_id:
+            self.cancel_requested=self.recovering=True
+            self.reason='operator_cancelled_mode2'
+            LOG.info('NPC operator cancellation node=%s task=%s',self.node_id,task_id)
 
     def set_communication_links(self,peers,sim_time):
         self.physical_peers=list(peers)
@@ -54,10 +74,13 @@ class NpcCooperation:
         task = self.task or {}
         payload = dict(type=kind, source=self.node_id, task_id=task.get('task_id', ''),
                        route_version=task.get('route_version', 0), sequence=self.sequence, sent_at=now)
+        if self.config.get('experiment_mode'):
+            payload.update(experiment_mode=self.config['experiment_mode'],scenario_role=self.current_role)
         payload.update(fields)
         return dict(sender=self.node_id, recipient=recipient, payload=payload)
 
     def receive(self, message, sim_time):
+        if message.get('type') in ('emergency','notice') and message.get('task_id') in self.operator_cancelled_tasks:return False
         if self.communication_path.configured and message.get('source')!=self.communication_path.target():return False
         if not self.range_leases.can_receive(message.get('source')):return False
         if message.get('type') not in ('emergency', 'notice', 'cancel') or not self.guard.accept(message, sim_time):
@@ -68,6 +91,7 @@ class NpcCooperation:
                 self.range_leases.cancel(message)
                 if not self.range_leases.enabled or self.range_leases.current(sim_time) is None:
                     self.recovering = True
+                    self.cancel_requested=True
                     self.reason = message.get('reason', 'task_cancelled')
             return True
         if not message.get('route') or len(message['route']) < 2:
@@ -75,6 +99,7 @@ class NpcCooperation:
         new_task = not self.task or (message['task_id'], message['route_version']) != (self.task['task_id'], self.task['route_version'])
         self.range_leases.remember(message,sim_time,new_task)
         self.task = copy.deepcopy(message)
+        self.cancel_requested=False
         self.lease_until = sim_time+self.config.get('lease_seconds', 10.)
         if new_task or (self.recovering and self.reason in ('out_of_communication_range','lease_expired','out_of_range_yield_expired')):
             self.recovering = False
@@ -89,6 +114,11 @@ class NpcCooperation:
         if self.last_time is not None and sim_time < self.last_time:
             raise ValueError('NPC simulation time moved backwards; reset the cooperation instance.')
         self.last_time = sim_time
+        if self.mode2:
+            self.current_role='ramp_merging' if on_ramp(own_state,self.config) else 'same_direction'
+            if self.actions.action=='ramp_hold' and self.current_role=='same_direction':
+                self.actions.restore(connection,own_state,sim_time)
+                self.conflict_anchor=None
         messages = []
         if self.next_beacon is None:
             seed = self.config.get('seed', 0)
@@ -102,7 +132,8 @@ class NpcCooperation:
         beacon_due=sim_time+1e-8 >= self.next_beacon
         if beacon_due or self.path_beacon_pending:
             state = {k: copy.deepcopy(v) for k, v in own_state.items() if k in
-                     ('id','x','y','z','speed','heading','route','lane_id','width','length','in_junction')}
+                     ('id','x','y','z','speed','heading','route','lane_id','road_id','width','length','in_junction','scenario_role')}
+            if self.mode2:state['scenario_role']=self.current_role
             target=self.communication_path.target()
             if target:messages.append(self.send('beacon', sim_time, recipient=target, state=state))
             if beacon_due:self.next_beacon = sim_time+self.config.get('beacon_interval', 1.)
@@ -116,25 +147,37 @@ class NpcCooperation:
             current=self.range_leases.current(sim_time)
             if current is None:self.recovering,self.reason=True,self.range_leases.reason(sim_time)
             else:self.task,self.lease_until=current['message'],current['until']
-        if self.status == 'received':
+        if self.status == 'received' and self.reason=='valid_wireless_message':
             self.append_feedback(messages,sim_time,own_state,'received',self.reason)
         if not self.range_leases.enabled and sim_time >= self.lease_until:
             self.recovering, self.reason = True, 'lease_expired'
-        assessment = conflict(own_state, self.task, self.config)
+        assessment = mode2_assess(own_state,self.task,self.config,sim_time) if self.mode2 else conflict(own_state,self.task,self.config)
+        assessment['sim_time']=sim_time
         if assessment['relevant'] and self.conflict_anchor is None:
             self.conflict_anchor = (assessment.get('prediction') or assessment).get('point')
+        if self.mode2 and self.actions.saved is not None:
+            anchor=self.conflict_anchor if self.current_role=='ramp_merging' else own_state
+            if passed_anchor(anchor,self.task,self.emergency_vehicle_state,self.config):
+                self.recovering,self.reason=True,'lincoln_passed_conflict'
+            elif self.current_role=='ramp_merging' and not self.cancel_requested:
+                self.recovering=False
         if not assessment['relevant'] and self.actions.saved is not None and self.conflict_anchor:
             anchor = project(self.conflict_anchor,self.task['route'])
             emergency = project(self.task.get('position',self.task.get('emergency_position',self.task['route'][0])),self.task['route'])
             if anchor and emergency and anchor['distance'] < 2. and anchor['station']+self.config.get('passed_clearance',8.) > emergency['station']:
                 assessment['hold_clearance'] = True
+        if (self.mode2 and self.actions.saved is not None and not self.recovering and not self.cancel_requested
+                and not assessment['relevant'] and self.current_role=='same_direction'):
+            assessment['hold_clearance']=True
         try:
             if self.recovering:
                 self.status = 'recovering'
                 if self.actions.restore(connection, own_state, sim_time):
                     self.status = 'normal'
             elif assessment.get('hold_clearance'):
-                self.status,self.reason = 'cleared','holding_until_emergency_passes'
+                if self.mode2 and self.current_role=='same_direction' and self.actions.action=='lane_change':
+                    self.status,self.reason=self.actions.apply(connection,own_state,dict(assessment,kind='same_direction'))
+                else:self.status,self.reason = 'cleared','holding_until_emergency_passes'
                 if self.actions.action == 'wait_before_conflict':
                     connection.vehicle.setSpeed(self.node_id,0.)
             elif not assessment['relevant']:

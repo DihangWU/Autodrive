@@ -5,6 +5,7 @@ from vanet.npc.highway_background_traffic.junction_route_split import value
 from vanet.npc.highway_ramp_merging.zipper_release_meter import ZipperReleaseMeter
 from vanet.npc.highway_ramp_merging.rolling_merge_priority import RollingMergePriority
 from vanet.npc.highway_ramp_merging.merge_following_gaps import MergeFollowingGaps
+from vanet.npc.highway_ramp_merging.emergency_hold import RampEmergencyHold
 
 LOG = logging.getLogger(__name__)
 
@@ -16,6 +17,7 @@ class RampMergeController:
         self.meter = ZipperReleaseMeter(connection,(configuration or {}).get('zipper_meter'))
         self.rolling_priority = RollingMergePriority(connection,(configuration or {}).get('zipper_meter'))
         self.following = MergeFollowingGaps(connection,(configuration or {}).get('zipper_meter'))
+        self.emergency_hold = RampEmergencyHold(connection,self.meter)
         self.reset()
 
     def reset(self):
@@ -26,6 +28,7 @@ class RampMergeController:
         self.meter.reset()
         self.rolling_priority.reset()
         self.following.reset()
+        self.emergency_hold.reset()
 
     def start(self, created, sim_time):
         self.start_time = float(sim_time)
@@ -53,10 +56,13 @@ class RampMergeController:
         if not self.configuration:
             return
         self.following.update(created,states,constants,self.completed,sim_time)
-        self.meter.update_slots(created,states,constants,self.released,self.completed,sim_time)
+        held=self.emergency_hold.update(states,constants,sim_time)
+        self.meter.update_slots(created,states,constants,self.released,self.completed,sim_time,held)
         self.rolling_priority.reservations = self.meter.reservations
         self.rolling_priority.main_crossings = self.meter.main_crossings
-        self.rolling_priority.update(created,states,constants,self.released-self.completed)
+        self.rolling_priority.held=held
+        self.rolling_priority.use_physical_order=self.meter.rebooking
+        self.rolling_priority.update(created,states,constants,self.released-self.completed-held)
         target = self.configuration['target_sumo_lane_index']
         for name in sorted(self.released-self.completed):
             if sim_time < self.next_request.get(name,0.):
