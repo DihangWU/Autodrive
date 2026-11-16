@@ -32,7 +32,7 @@ class FixedSumoScenarioTests(unittest.TestCase):
                             port=port,label=label)
                 connection=traci.getConnection(label)
                 scenario=ScenarioController(connection);scenario.reset()
-                scenario.traffic.spawn_next_vehicles(20)
+                scenario.traffic.spawn_next_vehicles(scenario.traffic.count)
                 for _ in range(3):connection.simulationStep()
                 initial=set(connection.vehicle.getIDList())
                 self.assertEqual(len(initial),scenario.traffic.initial_count)
@@ -58,10 +58,12 @@ class FixedSumoScenarioTests(unittest.TestCase):
                 seen = set()
                 positions = {}
                 maximum_travel = {}
+                moving_ids = {entry['id'] for entry in scenario.config['npcs'] if not entry.get('stationary',False)}
                 for index in range(1,1601):
                     scenario.step(index*.05);scenario.traffic.spawn_next_vehicles(20);connection.simulationStep()
-                    for vehicle_id in connection.vehicle.getIDList():
-                        seen.add(vehicle_id)
+                    present = set(connection.vehicle.getIDList())
+                    seen.update(present)
+                    for vehicle_id in present & moving_ids:
                         position = connection.vehicle.getPosition(vehicle_id)
                         origin = positions.setdefault(vehicle_id,position)
                         maximum_travel[vehicle_id] = max(maximum_travel.get(vehicle_id,0.),math.dist(origin,position))
@@ -72,7 +74,7 @@ class FixedSumoScenarioTests(unittest.TestCase):
                 for entry in scenario.config['npcs']:
                     if entry.get('depart_offset',0.) > 0:
                         self.assertGreater(maximum_travel[entry['id']],10.,entry['id'])
-                scenario.reset();scenario.traffic.spawn_next_vehicles(20)
+                scenario.reset();scenario.traffic.spawn_next_vehicles(scenario.traffic.count)
                 for _ in range(3):connection.simulationStep()
                 self.assertEqual(set(connection.vehicle.getIDList()),initial)
                 self.assertTrue(all(connection.vehicle.getSpeed(name)==0. for name in initial))

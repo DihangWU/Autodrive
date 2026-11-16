@@ -38,6 +38,8 @@ class NpcSumoAdapter:
         self.available_actors = set()
         self.spawned_actors = set()
         self.destroyed_actors = set()
+        self.stationary_actors = set()
+        self.stationary_states = {}
         tc = tools.constants
         self.variables = [tc.VAR_POSITION3D, tc.VAR_ANGLE, tc.VAR_SLOPE,
                           tc.VAR_SIGNALS, tc.VAR_ROUTE_INDEX, tc.VAR_ROAD_ID, tc.VAR_EDGES]
@@ -48,7 +50,12 @@ class NpcSumoAdapter:
     def prepare_frame(self, present, states, departed, arrived, teleport_start, teleport_end):
         """车辆生命周期来自 SUMO 事件；传送中的车辆不当作驶离后重新生成。"""
         owned = set(self.traffic.created)
+        self.stationary_actors = {name for name, record in self.traffic.created.items()
+                                 if record.get('scenario', {}).get('stationary', False)}
         self.available_actors = present & owned
+        for name in self.stationary_states.keys() - self.available_actors:
+            del self.stationary_states[name]
+            self.subscribed.discard(name)
         self.states = {name: state for name, state in states.items() if name in self.available_actors}
         started = teleport_start & owned
         self.teleport_count += len(started)
@@ -77,7 +84,7 @@ class NpcSumoAdapter:
         """对应官方 SumoSimulation.get_actor；静态车型来自创建时的记录。"""
         if actor_id not in self.available_actors:
             return None
-        state = self.states.get(actor_id)
+        state = self.stationary_states.get(actor_id) or self.states.get(actor_id)
         if not state:
             state = self.adapter.connection.vehicle.getSubscriptionResults(actor_id)
             if not state:
@@ -87,6 +94,11 @@ class NpcSumoAdapter:
         position = state[str(tc.VAR_POSITION3D)]
         if any(not math.isfinite(v) or v == tc.INVALID_DOUBLE_VALUE for v in position):
             return None
+        if actor_id in self.stationary_actors and actor_id not in self.stationary_states:
+            # Keep lifecycle registration in `subscribed`, but stop sending this
+            # fixed pose through TraCI and JSON on every frame.
+            self.stationary_states[actor_id] = dict(state)
+            self.adapter.connection.vehicle.unsubscribe(actor_id)
         record = self.traffic.created[actor_id]
         spec = record['spec']
         transform = t.carla.Transform(t.carla.Location(*position),

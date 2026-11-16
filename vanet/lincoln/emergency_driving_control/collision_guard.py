@@ -11,11 +11,14 @@ def collision_speed_limit(controller,obstacles,target,speed):
     previous=getattr(controller,'collision_active_actors',set())
     active=set();nearest=None;minimum_brake=0.
     begin=max(0,bisect.bisect_left(controller.distances,controller.progress))
-    for obstacle in obstacles:
+    candidates = (obstacles.collision_candidates(controller,speed,begin)
+                  if hasattr(obstacles,'collision_candidates') else
+                  ((obstacle,range(begin,len(controller.samples))) for obstacle in obstacles))
+    for obstacle,indices in candidates:
         vehicle=obstacle.get('kind','vehicle.').startswith('vehicle.')
         latched=vehicle and obstacle['id'] in previous
         cosine,sine=math.cos(obstacle['yaw']),math.sin(obstacle['yaw'])
-        for index in range(begin,len(controller.samples)):
+        for index in indices:
             sample=controller.samples[index]
             lead_speed=sum(obstacle['velocity'][axis]*sample.forward[axis] for axis in range(3))
             closing=max(0.,speed-lead_speed)

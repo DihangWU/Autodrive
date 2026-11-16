@@ -41,6 +41,7 @@ class SimulationSynchronization:
         self.sync_vehicle_lights = sync_vehicle_lights
         self.sumo2carla_ids = {}
         self.retry_spawns = set()
+        self.stationary_synchronized = set()
 
     def synchronize_vehicles(self):
         """每个 CoBridge 步骤调用一次；读取已完成的 SUMO 帧，不自行 tick。"""
@@ -51,7 +52,10 @@ class SimulationSynchronization:
 
         # 官方 SUMO→CARLA 阶段：订阅并生成新车辆。
         # 适配：只处理本批 NPC，暂时生成失败的车辆在后续步骤重试。
-        sumo_spawned_actors = self.sumo.spawned_actors | self.retry_spawns
+        # Directly placed junction obstacles can be visible before SUMO reports
+        # their departure on the next step. Never create a second CARLA proxy.
+        sumo_spawned_actors = (self.sumo.spawned_actors | self.retry_spawns) - self.sumo2carla_ids.keys()
+        self.stationary_synchronized.difference_update(sumo_spawned_actors)
         for sumo_actor_id in sorted(sumo_spawned_actors & self.sumo.available_actors):
             self.sumo.subscribe(sumo_actor_id)
             sumo_actor = self.sumo.get_actor(sumo_actor_id)
@@ -77,9 +81,13 @@ class SimulationSynchronization:
                 self.carla.destroy_actor(self.sumo2carla_ids[sumo_actor_id])
                 del self.sumo2carla_ids[sumo_actor_id]
             self.retry_spawns.discard(sumo_actor_id)
+            self.stationary_synchronized.discard(sumo_actor_id)
 
         # 官方阶段：用 SUMO 姿态更新 CARLA，车灯仍用官方位转换。
+        newly_stationary = set()
         for sumo_actor_id, carla_actor_id in self.sumo2carla_ids.items():
+            if sumo_actor_id in self.stationary_synchronized:
+                continue
             sumo_actor = self.sumo.get_actor(sumo_actor_id)
             if sumo_actor is None:
                 continue  # SUMO 传送期间可能没有有效姿态，不生成第二个代理。
@@ -90,12 +98,17 @@ class SimulationSynchronization:
             else:
                 carla_lights = None
             self.carla.synchronize_vehicle(carla_actor_id, carla_transform, carla_lights)
+            if (sumo_actor_id in getattr(self.sumo, 'stationary_actors', ())
+                    and sumo_actor_id not in getattr(self.carla, 'errors', {})):
+                newly_stationary.add(sumo_actor_id)
 
         # 适配：批量发送，False 表示不附带 CARLA tick。
         self.carla.flush_updates()
+        self.stationary_synchronized.update(newly_stationary)
 
     def close(self):
         """只清理本批代理，不关闭仿真器或更改同步模式。"""
         self.carla.close()
         self.sumo2carla_ids.clear()
         self.retry_spawns.clear()
+        self.stationary_synchronized.clear()

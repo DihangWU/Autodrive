@@ -20,7 +20,10 @@ def collect_mobility(bridge, rsu):
     offset=bridge.sumo.network['offset']
     present=set(connection.vehicle.getIDList())
     for batch in bridge.npc.batches.values():
-        for name in batch['traffic'].created:
+        for name,record in batch['traffic'].created.items():
+            # Physical queue obstacles remain in SUMO/CARLA but have no VANET
+            # application, radio node, cooperative colour or per-frame RPC reads.
+            if not record.get('scenario',{}).get('network_enabled',True):continue
             if name not in present:continue
             point=connection.vehicle.getPosition3D(name)
             angle=connection.vehicle.getAngle(name)

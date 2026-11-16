@@ -1,0 +1,21 @@
+{
+  "id_prefix": "vanet_obstacle_highway",
+  "color": [165, 170, 175, 255],
+  "bumper_gap_metres": 2.8,
+  "stop_duration_seconds": 1000000000.0,
+  "description": "Same-direction leftmost driving lanes 3 and 4, from Lincoln's initial body centre to the right turn from -48 into -7, including their matching junction connectors. Positions are SUMO front-bumper lane stations, not geometric shape distances.",
+  "segments": [
+    {"edge": "-41", "end_position": 904.66, "lane_start_positions": {"3": 292.928613, "4": 291.995216}},
+    {"edge": "-46", "end_position": 139.29, "lane_start_positions": {"3": 6.6, "4": 6.6}},
+    {"edge": "-47", "end_position": 108.37, "lane_start_positions": {"3": 6.6, "4": 6.6}},
+    {"edge": "-48", "end_position": 59.53, "lane_start_positions": {"3": 6.6, "4": 6.6}}
+  ],
+  "junction_connectors": [
+    {"from_edge": "-41", "to_edge": "-46", "from_lane": 3, "internal_lane": ":134_10_2", "length": 74.81},
+    {"from_edge": "-41", "to_edge": "-46", "from_lane": 4, "internal_lane": ":134_10_3", "length": 73.54},
+    {"from_edge": "-46", "to_edge": "-47", "from_lane": 3, "internal_lane": ":1061_2_3", "length": 77.15},
+    {"from_edge": "-46", "to_edge": "-47", "from_lane": 4, "internal_lane": ":1061_2_4", "length": 77.15},
+    {"from_edge": "-47", "to_edge": "-48", "from_lane": 3, "internal_lane": ":764_3_2", "length": 51.46},
+    {"from_edge": "-47", "to_edge": "-48", "from_lane": 4, "internal_lane": ":764_3_3", "length": 51.46}
+  ]
+}

@@ -28,6 +28,7 @@
   },
   "npc_vehicle_type": "vehicle.audi.a2",
   "npc_speed_factor": 1.0,
+  "stationary_highway_queues": true,
   "npcs": [
     {
       "id": "vanet_npc_cross_01",

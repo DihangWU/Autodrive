@@ -1,10 +1,10 @@
 """对同向慢车主动评估对向借道；跨层、实体隔离及来车冲突时拒绝。"""
 import bisect
 import logging
-import math
 import carla
 from .borrowing_geometry import blend_borrowing_segment, trajectory_clear
 from .priority_lane_access import physically_connected
+from vanet.npc.stationary_traffic_obstacles.carla_obstacle_cache import CarlaObstacleCache
 
 LOG = logging.getLogger('vanet.lincoln.borrowing')
 
@@ -16,7 +16,7 @@ class BorrowingPlanner:
         from vanet.lincoln.emergency_driving_control.control_configuration import DEFAULT_BORROWING
         self.configuration=dict(DEFAULT_BORROWING)
         self.configuration.update(configuration or {})
-        self.previous = {}
+        self.obstacle_cache = CarlaObstacleCache(node)
         self.last_evaluation = -1.
         self.last_reason = None
         self.predicted_conflict = False
@@ -27,30 +27,7 @@ class BorrowingPlanner:
             self.last_reason = reason
 
     def obstacles(self, snapshot):
-        now = snapshot.timestamp.elapsed_seconds
-        result, current = [], {}
-        for actor in self.node.world.get_actors():
-            if actor.id == self.node.car.id or not actor.type_id.startswith(('vehicle.', 'walker.', 'static.prop.')):
-                continue
-            state = snapshot.find(actor.id)
-            if state is None:
-                continue
-            transform, box = state.get_transform(), actor.bounding_box
-            center = transform.transform(carla.Location(x=box.location.x,y=box.location.y,z=box.location.z))
-            point = (center.x,center.y,center.z)
-            velocity = state.get_velocity()
-            motion = (velocity.x,velocity.y,velocity.z)
-            # SUMO 代理关闭物理模拟；用连续帧位置差恢复其运动速度。
-            if actor.id in self.previous:
-                then, previous = self.previous[actor.id]
-                if now > then and sum(v*v for v in motion) < .01:
-                    motion = tuple((point[i]-previous[i])/(now-then) for i in range(3))
-            current[actor.id] = (now, point)
-            result.append(dict(id=actor.id,kind=actor.type_id,center=point,velocity=motion,
-                               yaw=math.radians(transform.rotation.yaw+box.rotation.yaw),
-                               length=box.extent.x,width=box.extent.y,height=box.extent.z))
-        self.previous = current
-        return result
+        return self.obstacle_cache.collect(snapshot)
 
     def evaluate(self, controller, snapshot):
         obstacles = self.obstacles(snapshot)

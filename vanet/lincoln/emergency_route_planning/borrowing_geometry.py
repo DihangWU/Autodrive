@@ -39,7 +39,9 @@ def trajectory_clear(samples, obstacles, speed, ego_half_width, ego_front, margi
         distance += math.dist(previous, sample.center)
         previous = sample.center
         arrival = distance/max(2., speed)
-        for obstacle in obstacles:
+        candidates = (obstacles.near(sample.center,ego_front+ego_half_width+2.*margin)
+                      if hasattr(obstacles,'near') else obstacles)
+        for obstacle in candidates:
             center = tuple(obstacle['center'][j] + obstacle['velocity'][j]*arrival for j in range(3))
             dx, dy, dz = (sample.center[j]-center[j] for j in range(3))
             if abs(dz) > obstacle['height']+1.:

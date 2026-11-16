@@ -40,6 +40,7 @@ SHUTDOWN_PROJECT_ENTRY_FILES = {
 }
 SCENARIO_TOWN04_CONFIGURATION_FILE = VANET_DIRECTORY / 'experiments/scenario_and_parameter_configuration/town04_emergency.json'
 SCENARIO_NPC_DEFINITIONS_DIRECTORY = VANET_DIRECTORY / 'npc/scenario_vehicle_configuration'
+SCENARIO_STATIONARY_HIGHWAY_QUEUE_FILE = VANET_DIRECTORY / 'npc/stationary_traffic_obstacles/town04_left_lane_queues.json'
 EXPERIMENT_DEFAULT_CONFIGURATION_FILE = VANET_DIRECTORY / 'experiments/experiment_group_configuration/defaults.json'
 OMNET_DIRECTORY = VANET_DIRECTORY / 'omnet'
 OMNET_COMPILED_OUTPUT_DIRECTORY = OMNET_DIRECTORY / 'compiled_output'
