@@ -41,9 +41,12 @@ class HighwayBackgroundTrafficTests(unittest.TestCase):
         self.assertFalse(npc.snapshot()['out_of_range_yielding'])
         self.assertEqual(c.vehicle.mock_calls,[])
 
-    def test_configuration_retains_twenty_distinct_networked_vehicles(self):
+    def test_configuration_retains_forty_distinct_networked_vehicles(self):
         vehicles,limits=load_staggered_traffic()
-        self.assertEqual(len(vehicles),20)
+        self.assertEqual(len(vehicles),40)
+        self.assertEqual([sum(v['lane_index']==lane for v in vehicles) for lane in (1,2)],[20,20])
+        offsets=[v['initial_placement']['corridor_distance_metres'] for v in vehicles]
+        self.assertAlmostEqual(max(offsets)-min(offsets),665.)
         self.assertTrue(all(v['network_enabled'] and not v['yielding_enabled'] for v in vehicles))
         self.assertEqual(limits['maximum_speed_kmh'],100.)
         self.assertFalse(any(lane.endswith('_0') for lane in limits['lanes'] if not lane.startswith(':')))

@@ -1,13 +1,14 @@
 {
-  "description": "20 networked normal-driving cars, 180 m ahead of Lincoln; lane 3 straight, lane 4 alternating by actual approach order.",
+  "description": "40 networked normal-driving cars, 180 m ahead of Lincoln; same 665 m footprint, 20 per lane; lane 4 sends three straight then one city.",
   "placement_reference": {
     "sumo_body_center": [
       65.29605309131885,
       27.36168447200315
     ],
-    "same_lane_pitch_metres": 70.0,
-    "stagger_metres": 35.0,
-    "lincoln_to_first_vehicle_metres": 180.0
+    "same_lane_pitch_metres": 34.1025641025641,
+    "stagger_metres": 17.05128205128205,
+    "lincoln_to_first_vehicle_metres": 180.0,
+    "convoy_span_metres": 665.0
   },
   "highway_speed_limit_kmh": 100.0,
   "speed_limit_lane_ids": [
@@ -124,7 +125,7 @@
     {
       "id": "vanet_npc_highway_lane4_02",
       "lane_index": 1,
-      "position": 540.86086,
+      "position": 505.514874,
       "route": [
         "-41",
         "-46",
@@ -142,7 +143,7 @@
           65.29605309131885,
           27.36168447200315
         ],
-        "corridor_distance_metres": 70.0,
+        "corridor_distance_metres": 34.1025641025641,
         "lane_id": "-41_1",
         "left_to_right_lane": 4
       },
@@ -167,7 +168,7 @@
     {
       "id": "vanet_npc_highway_lane4_03",
       "lane_index": 1,
-      "position": 609.785532,
+      "position": 539.093561,
       "route": [
         "-41",
         "-46",
@@ -185,7 +186,7 @@
           65.29605309131885,
           27.36168447200315
         ],
-        "corridor_distance_metres": 140.0,
+        "corridor_distance_metres": 68.2051282051282,
         "lane_id": "-41_1",
         "left_to_right_lane": 4
       },
@@ -210,7 +211,7 @@
     {
       "id": "vanet_npc_highway_lane4_04",
       "lane_index": 1,
-      "position": 678.710203,
+      "position": 572.672247,
       "route": [
         "-41",
         "-46",
@@ -228,7 +229,7 @@
           65.29605309131885,
           27.36168447200315
         ],
-        "corridor_distance_metres": 210.0,
+        "corridor_distance_metres": 102.3076923076923,
         "lane_id": "-41_1",
         "left_to_right_lane": 4
       },
@@ -253,7 +254,7 @@
     {
       "id": "vanet_npc_highway_lane4_05",
       "lane_index": 1,
-      "position": 747.634875,
+      "position": 606.250933,
       "route": [
         "-41",
         "-46",
@@ -271,7 +272,7 @@
           65.29605309131885,
           27.36168447200315
         ],
-        "corridor_distance_metres": 280.0,
+        "corridor_distance_metres": 136.4102564102564,
         "lane_id": "-41_1",
         "left_to_right_lane": 4
       },
@@ -296,7 +297,7 @@
     {
       "id": "vanet_npc_highway_lane4_06",
       "lane_index": 1,
-      "position": 816.559547,
+      "position": 639.829619,
       "route": [
         "-41",
         "-46",
@@ -314,7 +315,7 @@
           65.29605309131885,
           27.36168447200315
         ],
-        "corridor_distance_metres": 350.0,
+        "corridor_distance_metres": 170.5128205128205,
         "lane_id": "-41_1",
         "left_to_right_lane": 4
       },
@@ -339,7 +340,7 @@
     {
       "id": "vanet_npc_highway_lane4_07",
       "lane_index": 1,
-      "position": 885.484218,
+      "position": 673.408305,
       "route": [
         "-41",
         "-46",
@@ -357,7 +358,7 @@
           65.29605309131885,
           27.36168447200315
         ],
-        "corridor_distance_metres": 420.0,
+        "corridor_distance_metres": 204.6153846153846,
         "lane_id": "-41_1",
         "left_to_right_lane": 4
       },
@@ -382,7 +383,7 @@
     {
       "id": "vanet_npc_highway_lane4_08",
       "lane_index": 1,
-      "position": 47.479215,
+      "position": 706.986992,
       "route": [
         "-41",
         "-46",
@@ -400,11 +401,10 @@
           65.29605309131885,
           27.36168447200315
         ],
-        "corridor_distance_metres": 490.0,
-        "lane_id": ":134_10_0",
+        "corridor_distance_metres": 238.71794871794873,
+        "lane_id": "-41_1",
         "left_to_right_lane": 4
       },
-      "placement_lane_id": ":134_10_0",
       "junction_departure": {
         "approach_edges": [
           "-47",
@@ -426,8 +426,9 @@
     {
       "id": "vanet_npc_highway_lane4_09",
       "lane_index": 1,
-      "position": 39.845397,
+      "position": 740.565678,
       "route": [
+        "-41",
         "-46",
         "-47",
         "-48",
@@ -443,8 +444,8 @@
           65.29605309131885,
           27.36168447200315
         ],
-        "corridor_distance_metres": 560.0,
-        "lane_id": "-46_1",
+        "corridor_distance_metres": 272.8205128205128,
+        "lane_id": "-41_1",
         "left_to_right_lane": 4
       },
       "junction_departure": {
@@ -468,7 +469,311 @@
     {
       "id": "vanet_npc_highway_lane4_10",
       "lane_index": 1,
-      "position": 109.331942,
+      "position": 774.144364,
+      "route": [
+        "-41",
+        "-46",
+        "-47",
+        "-48",
+        "-7",
+        "-8",
+        "-9",
+        "-18",
+        "-19"
+      ],
+      "initial_placement": {
+        "reference": "red_box_body_center",
+        "sumo_reference": [
+          65.29605309131885,
+          27.36168447200315
+        ],
+        "corridor_distance_metres": 306.9230769230769,
+        "lane_id": "-41_1",
+        "left_to_right_lane": 4
+      },
+      "junction_departure": {
+        "approach_edges": [
+          "-47",
+          "-48"
+        ],
+        "straight_suffix": [
+          "-49",
+          "-50"
+        ],
+        "city_suffix": [
+          "-7",
+          "-8",
+          "-9",
+          "-18",
+          "-19"
+        ]
+      }
+    },
+    {
+      "id": "vanet_npc_highway_lane4_11",
+      "lane_index": 1,
+      "position": 807.72305,
+      "route": [
+        "-41",
+        "-46",
+        "-47",
+        "-48",
+        "-7",
+        "-8",
+        "-9",
+        "-18",
+        "-19"
+      ],
+      "initial_placement": {
+        "reference": "red_box_body_center",
+        "sumo_reference": [
+          65.29605309131885,
+          27.36168447200315
+        ],
+        "corridor_distance_metres": 341.025641025641,
+        "lane_id": "-41_1",
+        "left_to_right_lane": 4
+      },
+      "junction_departure": {
+        "approach_edges": [
+          "-47",
+          "-48"
+        ],
+        "straight_suffix": [
+          "-49",
+          "-50"
+        ],
+        "city_suffix": [
+          "-7",
+          "-8",
+          "-9",
+          "-18",
+          "-19"
+        ]
+      }
+    },
+    {
+      "id": "vanet_npc_highway_lane4_12",
+      "lane_index": 1,
+      "position": 841.301736,
+      "route": [
+        "-41",
+        "-46",
+        "-47",
+        "-48",
+        "-7",
+        "-8",
+        "-9",
+        "-18",
+        "-19"
+      ],
+      "initial_placement": {
+        "reference": "red_box_body_center",
+        "sumo_reference": [
+          65.29605309131885,
+          27.36168447200315
+        ],
+        "corridor_distance_metres": 375.12820512820514,
+        "lane_id": "-41_1",
+        "left_to_right_lane": 4
+      },
+      "junction_departure": {
+        "approach_edges": [
+          "-47",
+          "-48"
+        ],
+        "straight_suffix": [
+          "-49",
+          "-50"
+        ],
+        "city_suffix": [
+          "-7",
+          "-8",
+          "-9",
+          "-18",
+          "-19"
+        ]
+      }
+    },
+    {
+      "id": "vanet_npc_highway_lane4_13",
+      "lane_index": 1,
+      "position": 874.880423,
+      "route": [
+        "-41",
+        "-46",
+        "-47",
+        "-48",
+        "-7",
+        "-8",
+        "-9",
+        "-18",
+        "-19"
+      ],
+      "initial_placement": {
+        "reference": "red_box_body_center",
+        "sumo_reference": [
+          65.29605309131885,
+          27.36168447200315
+        ],
+        "corridor_distance_metres": 409.2307692307692,
+        "lane_id": "-41_1",
+        "left_to_right_lane": 4
+      },
+      "junction_departure": {
+        "approach_edges": [
+          "-47",
+          "-48"
+        ],
+        "straight_suffix": [
+          "-49",
+          "-50"
+        ],
+        "city_suffix": [
+          "-7",
+          "-8",
+          "-9",
+          "-18",
+          "-19"
+        ]
+      }
+    },
+    {
+      "id": "vanet_npc_highway_lane4_14",
+      "lane_index": 1,
+      "position": 0.811593,
+      "route": [
+        "-41",
+        "-46",
+        "-47",
+        "-48",
+        "-7",
+        "-8",
+        "-9",
+        "-18",
+        "-19"
+      ],
+      "initial_placement": {
+        "reference": "red_box_body_center",
+        "sumo_reference": [
+          65.29605309131885,
+          27.36168447200315
+        ],
+        "corridor_distance_metres": 443.3333333333333,
+        "lane_id": ":134_10_0",
+        "left_to_right_lane": 4
+      },
+      "junction_departure": {
+        "approach_edges": [
+          "-47",
+          "-48"
+        ],
+        "straight_suffix": [
+          "-49",
+          "-50"
+        ],
+        "city_suffix": [
+          "-7",
+          "-8",
+          "-9",
+          "-18",
+          "-19"
+        ]
+      },
+      "placement_lane_id": ":134_10_0"
+    },
+    {
+      "id": "vanet_npc_highway_lane4_15",
+      "lane_index": 1,
+      "position": 34.914855,
+      "route": [
+        "-41",
+        "-46",
+        "-47",
+        "-48",
+        "-7",
+        "-8",
+        "-9",
+        "-18",
+        "-19"
+      ],
+      "initial_placement": {
+        "reference": "red_box_body_center",
+        "sumo_reference": [
+          65.29605309131885,
+          27.36168447200315
+        ],
+        "corridor_distance_metres": 477.43589743589746,
+        "lane_id": ":134_10_0",
+        "left_to_right_lane": 4
+      },
+      "junction_departure": {
+        "approach_edges": [
+          "-47",
+          "-48"
+        ],
+        "straight_suffix": [
+          "-49",
+          "-50"
+        ],
+        "city_suffix": [
+          "-7",
+          "-8",
+          "-9",
+          "-18",
+          "-19"
+        ]
+      },
+      "placement_lane_id": ":134_10_0"
+    },
+    {
+      "id": "vanet_npc_highway_lane4_16",
+      "lane_index": 1,
+      "position": 69.018117,
+      "route": [
+        "-41",
+        "-46",
+        "-47",
+        "-48",
+        "-7",
+        "-8",
+        "-9",
+        "-18",
+        "-19"
+      ],
+      "initial_placement": {
+        "reference": "red_box_body_center",
+        "sumo_reference": [
+          65.29605309131885,
+          27.36168447200315
+        ],
+        "corridor_distance_metres": 511.53846153846155,
+        "lane_id": ":134_10_0",
+        "left_to_right_lane": 4
+      },
+      "junction_departure": {
+        "approach_edges": [
+          "-47",
+          "-48"
+        ],
+        "straight_suffix": [
+          "-49",
+          "-50"
+        ],
+        "city_suffix": [
+          "-7",
+          "-8",
+          "-9",
+          "-18",
+          "-19"
+        ]
+      },
+      "placement_lane_id": ":134_10_0"
+    },
+    {
+      "id": "vanet_npc_highway_lane4_17",
+      "lane_index": 1,
+      "position": 25.591747,
       "route": [
         "-46",
         "-47",
@@ -485,7 +790,133 @@
           65.29605309131885,
           27.36168447200315
         ],
-        "corridor_distance_metres": 630.0,
+        "corridor_distance_metres": 545.6410256410256,
+        "lane_id": "-46_1",
+        "left_to_right_lane": 4
+      },
+      "junction_departure": {
+        "approach_edges": [
+          "-47",
+          "-48"
+        ],
+        "straight_suffix": [
+          "-49",
+          "-50"
+        ],
+        "city_suffix": [
+          "-7",
+          "-8",
+          "-9",
+          "-18",
+          "-19"
+        ]
+      }
+    },
+    {
+      "id": "vanet_npc_highway_lane4_18",
+      "lane_index": 1,
+      "position": 59.444166,
+      "route": [
+        "-46",
+        "-47",
+        "-48",
+        "-7",
+        "-8",
+        "-9",
+        "-18",
+        "-19"
+      ],
+      "initial_placement": {
+        "reference": "red_box_body_center",
+        "sumo_reference": [
+          65.29605309131885,
+          27.36168447200315
+        ],
+        "corridor_distance_metres": 579.7435897435897,
+        "lane_id": "-46_1",
+        "left_to_right_lane": 4
+      },
+      "junction_departure": {
+        "approach_edges": [
+          "-47",
+          "-48"
+        ],
+        "straight_suffix": [
+          "-49",
+          "-50"
+        ],
+        "city_suffix": [
+          "-7",
+          "-8",
+          "-9",
+          "-18",
+          "-19"
+        ]
+      }
+    },
+    {
+      "id": "vanet_npc_highway_lane4_19",
+      "lane_index": 1,
+      "position": 93.296585,
+      "route": [
+        "-46",
+        "-47",
+        "-48",
+        "-7",
+        "-8",
+        "-9",
+        "-18",
+        "-19"
+      ],
+      "initial_placement": {
+        "reference": "red_box_body_center",
+        "sumo_reference": [
+          65.29605309131885,
+          27.36168447200315
+        ],
+        "corridor_distance_metres": 613.8461538461538,
+        "lane_id": "-46_1",
+        "left_to_right_lane": 4
+      },
+      "junction_departure": {
+        "approach_edges": [
+          "-47",
+          "-48"
+        ],
+        "straight_suffix": [
+          "-49",
+          "-50"
+        ],
+        "city_suffix": [
+          "-7",
+          "-8",
+          "-9",
+          "-18",
+          "-19"
+        ]
+      }
+    },
+    {
+      "id": "vanet_npc_highway_lane4_20",
+      "lane_index": 1,
+      "position": 127.149004,
+      "route": [
+        "-46",
+        "-47",
+        "-48",
+        "-7",
+        "-8",
+        "-9",
+        "-18",
+        "-19"
+      ],
+      "initial_placement": {
+        "reference": "red_box_body_center",
+        "sumo_reference": [
+          65.29605309131885,
+          27.36168447200315
+        ],
+        "corridor_distance_metres": 647.9487179487179,
         "lane_id": "-46_1",
         "left_to_right_lane": 4
       },
@@ -510,7 +941,7 @@
     {
       "id": "vanet_npc_highway_lane3_01",
       "lane_index": 2,
-      "position": 505.618238,
+      "position": 487.669528,
       "route": [
         "-41",
         "-46",
@@ -525,7 +956,7 @@
           65.29605309131885,
           27.36168447200315
         ],
-        "corridor_distance_metres": 35.0,
+        "corridor_distance_metres": 17.05128205128205,
         "lane_id": "-41_2",
         "left_to_right_lane": 3
       }
@@ -533,7 +964,7 @@
     {
       "id": "vanet_npc_highway_lane3_02",
       "lane_index": 2,
-      "position": 575.618205,
+      "position": 521.772077,
       "route": [
         "-41",
         "-46",
@@ -548,7 +979,7 @@
           65.29605309131885,
           27.36168447200315
         ],
-        "corridor_distance_metres": 105.0,
+        "corridor_distance_metres": 51.15384615384615,
         "lane_id": "-41_2",
         "left_to_right_lane": 3
       }
@@ -556,7 +987,7 @@
     {
       "id": "vanet_npc_highway_lane3_03",
       "lane_index": 2,
-      "position": 645.618173,
+      "position": 555.874625,
       "route": [
         "-41",
         "-46",
@@ -571,7 +1002,7 @@
           65.29605309131885,
           27.36168447200315
         ],
-        "corridor_distance_metres": 175.0,
+        "corridor_distance_metres": 85.25641025641025,
         "lane_id": "-41_2",
         "left_to_right_lane": 3
       }
@@ -579,7 +1010,7 @@
     {
       "id": "vanet_npc_highway_lane3_04",
       "lane_index": 2,
-      "position": 715.61814,
+      "position": 589.977173,
       "route": [
         "-41",
         "-46",
@@ -594,7 +1025,7 @@
           65.29605309131885,
           27.36168447200315
         ],
-        "corridor_distance_metres": 245.0,
+        "corridor_distance_metres": 119.35897435897436,
         "lane_id": "-41_2",
         "left_to_right_lane": 3
       }
@@ -602,7 +1033,7 @@
     {
       "id": "vanet_npc_highway_lane3_05",
       "lane_index": 2,
-      "position": 785.618107,
+      "position": 624.079721,
       "route": [
         "-41",
         "-46",
@@ -617,7 +1048,7 @@
           65.29605309131885,
           27.36168447200315
         ],
-        "corridor_distance_metres": 315.0,
+        "corridor_distance_metres": 153.46153846153845,
         "lane_id": "-41_2",
         "left_to_right_lane": 3
       }
@@ -625,7 +1056,7 @@
     {
       "id": "vanet_npc_highway_lane3_06",
       "lane_index": 2,
-      "position": 855.618074,
+      "position": 658.182269,
       "route": [
         "-41",
         "-46",
@@ -640,7 +1071,7 @@
           65.29605309131885,
           27.36168447200315
         ],
-        "corridor_distance_metres": 385.0,
+        "corridor_distance_metres": 187.56410256410254,
         "lane_id": "-41_2",
         "left_to_right_lane": 3
       }
@@ -648,7 +1079,7 @@
     {
       "id": "vanet_npc_highway_lane3_07",
       "lane_index": 2,
-      "position": 17.957365,
+      "position": 692.284817,
       "route": [
         "-41",
         "-46",
@@ -663,17 +1094,17 @@
           65.29605309131885,
           27.36168447200315
         ],
-        "corridor_distance_metres": 455.0,
-        "lane_id": ":134_10_1",
+        "corridor_distance_metres": 221.66666666666666,
+        "lane_id": "-41_2",
         "left_to_right_lane": 3
-      },
-      "placement_lane_id": ":134_10_1"
+      }
     },
     {
       "id": "vanet_npc_highway_lane3_08",
       "lane_index": 2,
-      "position": 11.884609,
+      "position": 726.387366,
       "route": [
+        "-41",
         "-46",
         "-47",
         "-48",
@@ -686,15 +1117,178 @@
           65.29605309131885,
           27.36168447200315
         ],
-        "corridor_distance_metres": 525.0,
-        "lane_id": "-46_2",
+        "corridor_distance_metres": 255.76923076923077,
+        "lane_id": "-41_2",
         "left_to_right_lane": 3
       }
     },
     {
       "id": "vanet_npc_highway_lane3_09",
       "lane_index": 2,
-      "position": 81.881443,
+      "position": 760.489914,
+      "route": [
+        "-41",
+        "-46",
+        "-47",
+        "-48",
+        "-49",
+        "-50"
+      ],
+      "initial_placement": {
+        "reference": "red_box_body_center",
+        "sumo_reference": [
+          65.29605309131885,
+          27.36168447200315
+        ],
+        "corridor_distance_metres": 289.87179487179486,
+        "lane_id": "-41_2",
+        "left_to_right_lane": 3
+      }
+    },
+    {
+      "id": "vanet_npc_highway_lane3_10",
+      "lane_index": 2,
+      "position": 794.592462,
+      "route": [
+        "-41",
+        "-46",
+        "-47",
+        "-48",
+        "-49",
+        "-50"
+      ],
+      "initial_placement": {
+        "reference": "red_box_body_center",
+        "sumo_reference": [
+          65.29605309131885,
+          27.36168447200315
+        ],
+        "corridor_distance_metres": 323.97435897435895,
+        "lane_id": "-41_2",
+        "left_to_right_lane": 3
+      }
+    },
+    {
+      "id": "vanet_npc_highway_lane3_11",
+      "lane_index": 2,
+      "position": 828.69501,
+      "route": [
+        "-41",
+        "-46",
+        "-47",
+        "-48",
+        "-49",
+        "-50"
+      ],
+      "initial_placement": {
+        "reference": "red_box_body_center",
+        "sumo_reference": [
+          65.29605309131885,
+          27.36168447200315
+        ],
+        "corridor_distance_metres": 358.07692307692304,
+        "lane_id": "-41_2",
+        "left_to_right_lane": 3
+      }
+    },
+    {
+      "id": "vanet_npc_highway_lane3_12",
+      "lane_index": 2,
+      "position": 862.797558,
+      "route": [
+        "-41",
+        "-46",
+        "-47",
+        "-48",
+        "-49",
+        "-50"
+      ],
+      "initial_placement": {
+        "reference": "red_box_body_center",
+        "sumo_reference": [
+          65.29605309131885,
+          27.36168447200315
+        ],
+        "corridor_distance_metres": 392.1794871794872,
+        "lane_id": "-41_2",
+        "left_to_right_lane": 3
+      }
+    },
+    {
+      "id": "vanet_npc_highway_lane3_13",
+      "lane_index": 2,
+      "position": 896.900106,
+      "route": [
+        "-41",
+        "-46",
+        "-47",
+        "-48",
+        "-49",
+        "-50"
+      ],
+      "initial_placement": {
+        "reference": "red_box_body_center",
+        "sumo_reference": [
+          65.29605309131885,
+          27.36168447200315
+        ],
+        "corridor_distance_metres": 426.28205128205127,
+        "lane_id": "-41_2",
+        "left_to_right_lane": 3
+      }
+    },
+    {
+      "id": "vanet_npc_highway_lane3_14",
+      "lane_index": 2,
+      "position": 23.341775,
+      "route": [
+        "-41",
+        "-46",
+        "-47",
+        "-48",
+        "-49",
+        "-50"
+      ],
+      "initial_placement": {
+        "reference": "red_box_body_center",
+        "sumo_reference": [
+          65.29605309131885,
+          27.36168447200315
+        ],
+        "corridor_distance_metres": 460.38461538461536,
+        "lane_id": ":134_10_1",
+        "left_to_right_lane": 3
+      },
+      "placement_lane_id": ":134_10_1"
+    },
+    {
+      "id": "vanet_npc_highway_lane3_15",
+      "lane_index": 2,
+      "position": 57.443037,
+      "route": [
+        "-41",
+        "-46",
+        "-47",
+        "-48",
+        "-49",
+        "-50"
+      ],
+      "initial_placement": {
+        "reference": "red_box_body_center",
+        "sumo_reference": [
+          65.29605309131885,
+          27.36168447200315
+        ],
+        "corridor_distance_metres": 494.4871794871795,
+        "lane_id": ":134_10_1",
+        "left_to_right_lane": 3
+      },
+      "placement_lane_id": ":134_10_1"
+    },
+    {
+      "id": "vanet_npc_highway_lane3_16",
+      "lane_index": 2,
+      "position": 15.47419,
       "route": [
         "-46",
         "-47",
@@ -708,13 +1302,79 @@
           65.29605309131885,
           27.36168447200315
         ],
-        "corridor_distance_metres": 595.0,
+        "corridor_distance_metres": 528.5897435897436,
         "lane_id": "-46_2",
         "left_to_right_lane": 3
       }
     },
     {
-      "id": "vanet_npc_highway_lane3_10",
+      "id": "vanet_npc_highway_lane3_17",
+      "lane_index": 2,
+      "position": 49.575212,
+      "route": [
+        "-46",
+        "-47",
+        "-48",
+        "-49",
+        "-50"
+      ],
+      "initial_placement": {
+        "reference": "red_box_body_center",
+        "sumo_reference": [
+          65.29605309131885,
+          27.36168447200315
+        ],
+        "corridor_distance_metres": 562.6923076923077,
+        "lane_id": "-46_2",
+        "left_to_right_lane": 3
+      }
+    },
+    {
+      "id": "vanet_npc_highway_lane3_18",
+      "lane_index": 2,
+      "position": 83.676234,
+      "route": [
+        "-46",
+        "-47",
+        "-48",
+        "-49",
+        "-50"
+      ],
+      "initial_placement": {
+        "reference": "red_box_body_center",
+        "sumo_reference": [
+          65.29605309131885,
+          27.36168447200315
+        ],
+        "corridor_distance_metres": 596.7948717948718,
+        "lane_id": "-46_2",
+        "left_to_right_lane": 3
+      }
+    },
+    {
+      "id": "vanet_npc_highway_lane3_19",
+      "lane_index": 2,
+      "position": 117.777256,
+      "route": [
+        "-46",
+        "-47",
+        "-48",
+        "-49",
+        "-50"
+      ],
+      "initial_placement": {
+        "reference": "red_box_body_center",
+        "sumo_reference": [
+          65.29605309131885,
+          27.36168447200315
+        ],
+        "corridor_distance_metres": 630.8974358974359,
+        "lane_id": "-46_2",
+        "left_to_right_lane": 3
+      }
+    },
+    {
+      "id": "vanet_npc_highway_lane3_20",
       "lane_index": 2,
       "position": 9.588589,
       "route": [
@@ -736,5 +1396,12 @@
       },
       "placement_lane_id": ":1061_2_2"
     }
+  ],
+  "vehicles_per_lane": 20,
+  "departure_pattern": [
+    "straight",
+    "straight",
+    "straight",
+    "city"
   ]
 }

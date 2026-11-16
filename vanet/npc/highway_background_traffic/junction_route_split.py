@@ -1,4 +1,4 @@
-"""普通交通分流：按第 4 车道车辆实际到达顺序交替直行/右转。"""
+"""普通交通分流：按第 4 车道实际到达顺序应用配置的直行/右转周期。"""
 import logging
 
 LOG = logging.getLogger(__name__)
@@ -36,7 +36,8 @@ class JunctionRouteSplit:
             candidates.append((-approaches.index(road),-float(position),name,policy,road))
         for _,_,name,policy,road in sorted(candidates):
             sequence = len(self.decisions)+1
-            branch = 'straight' if sequence%2 else 'city'
+            pattern=policy.get('departure_pattern',['straight','city'])
+            branch = pattern[(sequence-1)%len(pattern)]
             remaining = policy['approach_edges'][policy['approach_edges'].index(road):]
             route = remaining+policy[branch+'_suffix']
             self.connection.vehicle.setRoute(name,route)

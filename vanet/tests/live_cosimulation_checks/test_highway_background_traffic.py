@@ -36,7 +36,7 @@ class HighwayBackgroundTrafficLiveTests(unittest.TestCase):
                 scenario.traffic.spawn_next_vehicles(scenario.traffic.count)
                 for _ in range(3):c.simulationStep()
                 expected={v['id']:v for v in scenario.config['npcs'] if v.get('yielding_enabled') is False}
-                self.assertEqual(len(expected),20)
+                self.assertEqual(len(expected),40)
                 present=set(c.vehicle.getIDList())
                 self.assertTrue(set(expected)<=present)
                 self.assertFalse(c.simulation.getPendingVehicles())
@@ -49,7 +49,7 @@ class HighwayBackgroundTrafficLiveTests(unittest.TestCase):
                     self.assertEqual(c.vehicle.getSpeedMode(name),31)
                     self.assertEqual(c.vehicle.getParameter(name,'vanet.scenario.yielding_enabled'),'false')
                 for lane in original_limits:self.assertAlmostEqual(c.lane.getMaxSpeed(lane),100./3.6)
-                # The static cars remain excluded, while all twenty new radios
+                # The static cars remain excluded, while all forty new radios
                 # carry their per-vehicle no-yield policy to the coordinator.
                 bridge=SimpleNamespace(carla=SimpleNamespace(world=SimpleNamespace(get_snapshot=lambda:None)),
                     lincoln=SimpleNamespace(records={}),sumo=SimpleNamespace(connection=c,network=dict(offset=(503.02,423.76))),
@@ -74,6 +74,7 @@ class HighwayBackgroundTrafficLiveTests(unittest.TestCase):
                         actual=starts[lane]+front-c.vehicle.getLength(name)/2-reference
                         offsets[name]=actual
                         self.assertAlmostEqual(actual,entry['initial_placement']['corridor_distance_metres'],places=3)
+                self.assertAlmostEqual(max(offsets.values())-min(offsets.values()),665.,places=3)
                 scenario.start(c.simulation.getTime())
                 self.assertTrue(all(c.vehicle.getLaneChangeMode(name)==1621 for name in expected))
                 first=next(v for v in expected.values() if v['id']=='vanet_npc_highway_lane4_01')
@@ -107,22 +108,23 @@ class HighwayBackgroundTrafficLiveTests(unittest.TestCase):
                 self.assertTrue(merge_space_seen)
                 self.assertEqual(set(branches),set(expected))
                 self.assertEqual(lane3_entered_city,set())
-                self.assertEqual(sum(branch=='straight' for branch in branches.values()),15)
+                self.assertEqual(sum(branch=='straight' for branch in branches.values()),35)
                 self.assertEqual(sum(branch=='city' for branch in branches.values()),5)
                 decisions=scenario.traffic.junction_split.decisions
-                self.assertEqual(len(decisions),10)
-                self.assertEqual([v['branch'] for v in decisions],['straight','city']*5)
+                self.assertEqual(len(decisions),20)
+                self.assertEqual([v['branch'] for v in decisions],['straight','straight','straight','city']*5)
                 for decision in decisions:
                     self.assertEqual(branches[decision['vehicle']],decision['branch'])
                     if decision['branch']=='straight':self.assertIn(decision['vehicle'],lane4_merge_lanes)
                 scenario.traffic.remove_vehicles()
                 for lane,speed in original_limits.items():self.assertAlmostEqual(c.lane.getMaxSpeed(lane),speed)
                 self.assertEqual(errors.read_text(),'')
-                print(json.dumps(dict(networked_added=20,per_lane=10,same_lane_pitch_metres=70.,stagger_metres=35.,
+                print(json.dumps(dict(networked_added=40,per_lane=20,
+                    same_lane_pitch_metres=json.loads(SCENARIO_NETWORK_HIGHWAY_TRAFFIC_FILE.read_text())['placement_reference']['same_lane_pitch_metres'],
                     peak_speed_kmh=round(peak_speed*3.6,3),minimum_travel_metres=round(min(travel.values()),3),
                     lane_change_space_observed=merge_space_seen,collisions=0,road_limits_restored=True,
-                    initial_gap_from_lincoln_metres=180.,straight_departures=15,city_departures=5,
-                    lane4_alternating_order=[v['vehicle']+':'+v['branch'] for v in decisions])))
+                    initial_gap_from_lincoln_metres=180.,straight_departures=35,city_departures=5,
+                    lane4_departure_order=[v['vehicle']+':'+v['branch'] for v in decisions])))
             finally:
                 if c is not None:c.close()
 

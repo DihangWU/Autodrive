@@ -16,6 +16,7 @@ class FixedSumoScenarioTests(unittest.TestCase):
     def test_prepare_depart_yield_restore_and_reset(self):
         sys.path.insert(0,str(SUMO_INSTALLATION_DIRECTORY/'tools'))
         import traci
+        import traci.constants as tc
         import sumolib
         connection=None
         with tempfile.TemporaryDirectory(prefix='vanet_scenario_live_') as folder:
@@ -55,12 +56,17 @@ class FixedSumoScenarioTests(unittest.TestCase):
                 self.assertEqual(connection.vehicle.getSpeedMode(name),31)
                 self.assertEqual(connection.vehicle.getLaneChangeMode(name),1621)
                 scenario.start(0.)
+                for entry in scenario.config['npcs']:
+                    if entry.get('junction_departure'):
+                        connection.vehicle.subscribe(entry['id'],[tc.VAR_ROAD_ID,tc.VAR_LANEPOSITION])
                 seen = set()
                 positions = {}
                 maximum_travel = {}
                 moving_ids = {entry['id'] for entry in scenario.config['npcs'] if not entry.get('stationary',False)}
                 for index in range(1,1601):
-                    scenario.step(index*.05);scenario.traffic.spawn_next_vehicles(20);connection.simulationStep()
+                    scenario.step(index*.05);scenario.traffic.spawn_next_vehicles(20)
+                    scenario.traffic.maintain_routes(connection.vehicle.getAllSubscriptionResults(),tc)
+                    connection.simulationStep()
                     present = set(connection.vehicle.getIDList())
                     seen.update(present)
                     for vehicle_id in present & moving_ids:
