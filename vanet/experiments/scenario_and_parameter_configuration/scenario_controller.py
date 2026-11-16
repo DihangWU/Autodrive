@@ -6,6 +6,9 @@ from vanet.project_paths import SCENARIO_TOWN04_CONFIGURATION_FILE
 from modules.npcvehicules.traffic.vehicle_types import install_vehicle_type
 from vanet.npc.scenario_vehicle_configuration.load_vehicle_definitions import load_vehicle_definitions
 from vanet.npc.stationary_traffic_obstacles.highway_lane_queue import load_stationary_highway_vehicles
+from vanet.npc.highway_background_traffic.load_staggered_vehicles import load_staggered_traffic
+from vanet.npc.highway_background_traffic.lane_speed_limits import HighwaySpeedLimits
+from vanet.npc.highway_background_traffic.junction_route_split import JunctionRouteSplit
 
 LOG = logging.getLogger(__name__)
 OWNER_PARAMETER = 'autodrive.npc.batch'
@@ -19,6 +22,10 @@ def load_scenario(path=None):
         config['npcs']=config.get('npcs',[])+load_vehicle_definitions(config['npc_configuration_files'])
     if config.get('stationary_highway_queues',False):
         config['npcs']+=load_stationary_highway_vehicles(config['vehicle_type_spec'])
+    if config.get('network_highway_background_traffic',False):
+        vehicles, limits = load_staggered_traffic()
+        config['npcs'] += vehicles
+        config['highway_speed_limits'] = limits
     identifiers=[vehicle['id'] for vehicle in config['npcs']]
     if len(set(identifiers))!=len(identifiers):raise ValueError('Duplicate NPC id in scenario.')
     return config
@@ -39,6 +46,8 @@ class FixedNpcTraffic:
         self.type_spec = copy.deepcopy(config['vehicle_type_spec'])
         self.type_spec.setdefault('colors',[])
         self.route_generation = 0
+        self.lane_speed_limits = HighwaySpeedLimits(connection,config.get('highway_speed_limits'))
+        self.junction_split = JunctionRouteSplit(connection)
         LOG.info('Fixed scene traffic total=%s initial=%s stationary_obstacles=%s network_npcs=%s',
             self.count,self.initial_count,
             sum(bool(v.get('stationary',False)) for v in self.specifications),
@@ -54,6 +63,7 @@ class FixedNpcTraffic:
             if offset > 0 and (self.start_time is None or self.sim_time < self.start_time+offset):
                 break
             name = entry['id']
+            self.lane_speed_limits.apply()
             if installed_routes is None:
                 installed_routes = set(self.connection.route.getIDList())
             spec = self.type_spec
@@ -70,28 +80,39 @@ class FixedNpcTraffic:
             vehicle = self.connection.vehicle
             vehicle.setParameter(name,OWNER_PARAMETER,self.batch_id)
             vehicle.setParameter(name,'vanet.scenario.role',entry.get('role','traffic'))
+            if 'yielding_enabled' in entry:
+                vehicle.setParameter(name,'vanet.scenario.yielding_enabled',str(entry['yielding_enabled']).lower())
             vehicle.setColor(name,color)
-            vehicle.setSpeedFactor(name,float(self.config.get('npc_speed_factor',1.)))
+            vehicle.setSpeedFactor(name,float(entry.get('speed_factor',self.config.get('npc_speed_factor',1.))))
+            if 'maximum_speed_kmh' in entry:vehicle.setMaxSpeed(name,float(entry['maximum_speed_kmh'])/3.6)
+            if 'speed_mode' in entry:vehicle.setSpeedMode(name,entry['speed_mode'])
+            if 'lane_change_mode' in entry:vehicle.setLaneChangeMode(name,entry['lane_change_mode'])
+            for parameter,value in entry.get('lane_change_parameters',{}).items():
+                vehicle.setParameter(name,'laneChangeModel.'+parameter,str(value))
             vehicle.setImperfection(name,0.)
             stationary = entry.get('stationary',False)
             vehicle.setSpeed(name,0. if stationary or self.start_time is None else -1.)
+            if self.start_time is None and entry.get('hold_lane_before_start',False):
+                vehicle.setLaneChangeMode(name,0)
+            if entry.get('placement_lane_id'):
+                # Initial internal-lane placement is also used by moving
+                # background cars; normal traffic control resumes at Start.
+                vehicle.moveTo(name,entry['placement_lane_id'],entry['position'])
             if stationary:
                 vehicle.setLaneChangeMode(name,0)
-                if entry.get('placement_lane_id'):
-                    # SUMO cannot depart on an internal junction lane. Move the
-                    # owned vehicle there once before the first traffic step.
-                    vehicle.moveTo(name,entry['placement_lane_id'],entry['position'])
                 # flags=0 keeps the car on the driving lane (not parked off-road).
                 # A real SUMO stop also prevents the jam from being teleported
                 # after the normal waiting-time limit.
                 vehicle.setStop(name,entry.get('stop_edge',entry['route'][0]),pos=entry['position'],
                     laneIndex=entry.get('stop_lane_index',entry['lane_index']),duration=entry['stop_duration_seconds'],flags=0)
-            LOG.info('Fixed NPC added id=%s sim_time=%.3f route=%s lane=%s position=%.3f offset=%s stationary=%s network_enabled=%s',
+            LOG.info('Fixed NPC added id=%s sim_time=%.3f route=%s lane=%s position=%.3f offset=%s stationary=%s network_enabled=%s yielding_enabled=%s maximum_speed_kmh=%s',
                 name,self.sim_time,entry['route'],entry['lane_index'],entry['position'],offset,
-                stationary,entry.get('network_enabled',True))
+                stationary,entry.get('network_enabled',True),entry.get('yielding_enabled',True),entry.get('maximum_speed_kmh'))
 
     def maintain_routes(self, states, constants):
-        """固定路线驶完即正常离场，不消耗共享随机数重新选择道路。"""
+        """仅在指定路口按到达顺序分流，不随机续路、不请求紧急避让。"""
+        if self.start_time is not None:
+            self.junction_split.update(self.created,states,constants,self.sim_time)
 
     def remove_vehicles(self, subscribed=None):
         vehicle = self.connection.vehicle
@@ -110,6 +131,7 @@ class FixedNpcTraffic:
                 # warning. Speed remains pinned to zero; no simulation step occurs.
                 vehicle.resume(name)
             vehicle.remove(name)
+        self.lane_speed_limits.restore()
 
     def reset(self):
         self.remove_vehicles()
@@ -117,6 +139,7 @@ class FixedNpcTraffic:
         self.next_index = 0
         self.start_time = None
         self.route_generation += 1
+        self.junction_split.reset()
 
     def start(self, sim_time):
         if self.start_time is not None:
@@ -126,6 +149,8 @@ class FixedNpcTraffic:
         for name in self.created.keys() & active:
             entry = self.created[name]['scenario']
             self.connection.vehicle.setSpeed(name,0. if entry.get('stationary',False) else -1.)
+            if entry.get('hold_lane_before_start',False):
+                self.connection.vehicle.setLaneChangeMode(name,entry['lane_change_mode'])
 
 
 class ScenarioController:
@@ -198,6 +223,7 @@ class ScenarioController:
                     npc_requested=self.traffic.count,npc_added=self.traffic.next_index,
                     stationary_obstacle_count=sum(bool(v.get('stationary',False)) for v in self.config['npcs']),
                     network_npc_count=sum(v.get('network_enabled',True) for v in self.config['npcs']),
+                    junction_departures=self.traffic.junction_split.snapshot(),
                     initial_npc_count=self.traffic.initial_count,initial_npcs_added=self.traffic.next_index>=self.traffic.initial_count,
                     start_time=self.traffic.start_time,seed=self.config['seed'],
                     traffic_lights=copy.deepcopy(self.light_snapshot))

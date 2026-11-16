@@ -325,7 +325,10 @@ class ExperimentCoordinator:
             self.rsu.set_relay_targets([name for name,path in paths.items() if path=='rsu'],now)
         for state in states:
             if state['role']=='npc':
-                component=self.npc.setdefault(state['id'],NpcCooperation(state['id'],self.config))
+                component=self.npc.get(state['id'])
+                if component is None:
+                    component=NpcCooperation(state['id'],dict(self.config,yielding_enabled=state.get('yielding_enabled',True)))
+                    self.npc[state['id']]=component
                 component.set_communication_links(self.communication_links.get(state['id'],[]),now)
                 if self.group=='cooperative':component.set_communication_path(self.communication_paths.get(state['id']),now)
                 messages.extend(component.step(now,state,self.bridge.sumo.connection))

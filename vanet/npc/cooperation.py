@@ -8,6 +8,7 @@ from vanet.npc.yielding_action_control.sumo_actions import YieldingActions
 from vanet.npc.v2x_data_exchange.range_leases import RangeLeases
 from vanet.npc.v2x_data_exchange.communication_path import NpcCommunicationPath
 from vanet.npc.v2x_data_exchange.feedback_schedule import next_feedback_time
+from vanet.npc.highway_background_traffic.communication_only import communication_only_step
 
 LOG = logging.getLogger(__name__)
 
@@ -106,6 +107,8 @@ class NpcCooperation:
             if target:messages.append(self.send('beacon', sim_time, recipient=target, state=state))
             if beacon_due:self.next_beacon = sim_time+self.config.get('beacon_interval', 1.)
             self.path_beacon_pending=False
+        if not self.config.get('yielding_enabled',True):
+            return communication_only_step(self,sim_time,own_state,messages)
         if self.task is None:
             return messages
         previous = self.status, self.reason
@@ -166,8 +169,10 @@ class NpcCooperation:
     def snapshot(self):
         now=self.last_time if self.last_time is not None else 0.
         current=self.range_leases.current(now)
+        holding=self.config.get('yielding_enabled',True) and self.range_leases.holding(now)
         return dict(id=self.node_id,status=self.status,reason=self.reason,lease_until=self.lease_until,
+                    yielding_enabled=self.config.get('yielding_enabled',True),
                     communication_path=self.communication_path.path,
-                    out_of_range_yielding=self.range_leases.holding(now),
-                    out_of_range_yield_until=current['until'] if self.range_leases.holding(now) else None,
+                    out_of_range_yielding=holding,
+                    out_of_range_yield_until=current['until'] if holding else None,
                     task_id=self.task.get('task_id') if self.task else None)

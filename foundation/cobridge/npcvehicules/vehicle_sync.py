@@ -42,7 +42,7 @@ class NpcSumoAdapter:
         self.stationary_states = {}
         tc = tools.constants
         self.variables = [tc.VAR_POSITION3D, tc.VAR_ANGLE, tc.VAR_SLOPE,
-                          tc.VAR_SIGNALS, tc.VAR_ROUTE_INDEX, tc.VAR_ROAD_ID, tc.VAR_EDGES]
+                          tc.VAR_SIGNALS, tc.VAR_ROUTE_INDEX, tc.VAR_ROAD_ID, tc.VAR_EDGES, tc.VAR_LANEPOSITION]
 
     def get_net_offset(self):
         return self.adapter.network['offset']
