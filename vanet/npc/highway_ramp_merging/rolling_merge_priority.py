@@ -45,8 +45,9 @@ class RollingMergePriority:
                 # A reserved leader has priority over its following ramp car.
                 # SUMO's long internal links otherwise make both wait for each
                 # other even before their physical paths meet.
-                for ramp,reservation in self.reservations.items():
-                    leader = reservation['main']
+                for ramp,record in created.items():
+                    if record['scenario'].get('role')!='ramp_merging':continue
+                    leader = self.reservations.get(ramp,{}).get('main')
                     ramp_state = states.get(ramp)
                     if not isinstance(ramp_state,dict):continue
                     ramp_lane = value(ramp_state,constants.VAR_LANE_ID)
@@ -58,8 +59,11 @@ class RollingMergePriority:
                         and ramp_station is not None and
                         position-policy['main_conflict_position_metres'] >
                         ramp_station-policy['ramp_conflict_position_metres']+6.)
-                    follows_main = order.get(leader,-1) >= order.get(name,float('inf'))
-                    if own_leader_ahead or before_merge and leader is not None and follows_main:
+                    # An upstream car without a slot is still behind the
+                    # scheduled ramp queue; it must not trigger an early yield
+                    # by a main car that already owns an earlier turn.
+                    follows_main = record['scenario']['merge_queue_index'] >= order.get(name,float('inf'))
+                    if own_leader_ahead or before_merge and follows_main:
                         ignored.add(ramp)
             if name in active and lane==policy['ramp_internal_lane'] and position is not None:
                 length = float(created[name]['spec']['length'])

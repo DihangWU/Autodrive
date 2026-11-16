@@ -47,18 +47,19 @@ class RollingMergePriorityTests(unittest.TestCase):
     def test_next_main_car_respects_the_preceding_ramp_early_without_a_late_priority_switch(self):
         vehicles,policy=load_merging_vehicles();c=Mock();c.vehicle.getParameter.return_value=''
         controller=RollingMergePriority(c,policy['zipper_meter'])
-        first,second=vehicles[:2]
-        created={v['id']:dict(scenario=v,spec=dict(length='3.7')) for v in (first,second)}
+        first,second,third=vehicles[:3]
+        created={v['id']:dict(scenario=v,spec=dict(length='3.7')) for v in (first,second,third)}
         states={first['id']:{81:'31_1',86:140.,64:0.},second['id']:{81:'31_1',86:129.2,64:0.},
+                third['id']:{81:'31_1',86:118.4,64:0.},
                 'main1':{81:'-46_1',86:100.,64:10.},'main2':{81:'-46_1',86:60.,64:10.}}
         controller.reservations={first['id']:dict(main='main1'),second['id']:dict(main='main2')}
         controller.update(created,states,TC,set(created))
         self.assertEqual(set(controller.applied['main1'].split()),set(created))
-        self.assertEqual(controller.applied['main2'],second['id'])
+        self.assertEqual(set(controller.applied['main2'].split()),{second['id'],third['id']})
         states['main1']={81:':1061_2_1',86:46.,64:10.}
         controller.main_crossings['main1']=1.
         controller.update(created,states,TC,set(created))
-        self.assertEqual(controller.applied['main2'],second['id'])
+        self.assertEqual(set(controller.applied['main2'].split()),{second['id'],third['id']})
 
 
 if __name__=='__main__':unittest.main()
