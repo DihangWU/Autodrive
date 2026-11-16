@@ -1,0 +1,101 @@
+{
+  "description": "Ten networked ordinary vehicles merge from the right-hand ramp into lane 4 from the left, then use normal strategic lane selection for the straight highway exit; no emergency yielding.",
+  "id_prefix": "vanet_npc_ramp_merge",
+  "count": 10,
+  "route": [
+    "31",
+    "-47",
+    "-48",
+    "-49",
+    "-50"
+  ],
+  "ramp_lane_index": 1,
+  "front_vehicle_position": 140.0,
+  "ramp_lane_length_metres": 162.52,
+  "initial_pitch_metres": 10.8,
+  "maximum_speed_kmh": 80.0,
+  "release_offsets_seconds": [
+    0.0,
+    5.5,
+    12.0,
+    18.0,
+    25.0,
+    32.5,
+    40.0,
+    48.0,
+    56.5,
+    65.0
+  ],
+  "zipper_meter": {
+    "main_vehicles_per_ramp": [
+      1
+    ],
+    "main_approach_lanes": [
+      "-46_1"
+    ],
+    "counting_lane": ":1061_2_1",
+    "main_conflict_position_metres": 45.28,
+    "ramp_internal_lane": ":1061_0_1",
+    "ramp_conflict_position_metres": 41.15,
+    "main_conflict_carla": {
+      "x": 15.9,
+      "y": 96.0
+    },
+    "main_approach_lane_length_metres": 142.29,
+    "main_upstream_distances_metres": {
+      "-46_1": 142.29,
+      ":134_10_0": 219.63,
+      "-41_1": 1127.29
+    },
+    "ramp_approach_lane": "31_1",
+    "ramp_approach_lane_length_metres": 162.52,
+    "following_time_seconds": 0.45,
+    "control_interval_seconds": 0.2,
+    "prediction_acceleration_mps2": 2.6,
+    "ramp_merge_speed_kmh": 65.0,
+    "following_minimum_gap_metres": 1.5,
+    "slot_headway_seconds": 0.7,
+    "ramp_acceleration_lanes": [
+      "31_1",
+      ":1061_0_1"
+    ],
+    "following_control_lanes": [
+      "-41_1",
+      ":134_10_0",
+      "-46_1",
+      ":1061_2_1",
+      "31_1",
+      ":1061_0_1",
+      "-47_1",
+      "-48_1",
+      "-47_2",
+      "-48_2",
+      ":764_3_0",
+      ":764_3_1",
+      ":890_3_0",
+      ":890_3_1",
+      "-49_1",
+      "-49_2",
+      ":890_2_0",
+      ":890_13_0"
+    ],
+    "ramp_braking_mps2": 4.5
+  },
+  "merge_edges": [
+    "-47",
+    "-48",
+    "-49",
+    "-50"
+  ],
+  "target_sumo_lane_index": 1,
+  "target_left_to_right_lane": 4,
+  "lane_change_mode_after_merge": 1621,
+  "lane_request_interval_seconds": 1.0,
+  "lane_request_duration_seconds": 5.0,
+  "color": [
+    80,
+    120,
+    190,
+    255
+  ]
+}

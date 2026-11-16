@@ -100,7 +100,13 @@ def run(args):
         try:existing=sumo_status()
         except Exception:existing=None
         if existing:raise RuntimeError('已有 SUMO 运行。请先退出该 SUMO，再用 run_vanet 启动带实验操作栏的版本。CARLA 可继续保留。')
-        launch('SUMO',['run_sumo',str(SUMO_TOWN04_CONFIGURATION_FILE)])
+        sumo_configuration = SUMO_TOWN04_CONFIGURATION_FILE
+        if scenario.get('highway_ramp_merging',False):
+            from vanet.npc.highway_ramp_merging.zipper_network import prepare_zipper_configuration
+            sumo_configuration = prepare_zipper_configuration()
+            log.emit('zipper_merge_network',configuration=str(sumo_configuration),junction='1061',
+                     main_lane='-46_1',ramp_lane='31_1',target_left_to_right_lane=4)
+        launch('SUMO',['run_sumo',str(sumo_configuration)])
         wait_until(sumo_status,log,'SUMO')
         log.emit('startup_step',step=5,purpose='CoBridge')
         launch('CoBridge',['run_cobridge','--vanet','--timeout','10'])

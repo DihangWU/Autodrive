@@ -9,6 +9,7 @@ import unittest
 from vanet.project_paths import SUMO_INSTALLATION_DIRECTORY,SUMO_TOWN04_CONFIGURATION_FILE
 from vanet.experiments.scenario_and_parameter_configuration.scenario_controller import ScenarioController
 from vanet.npc.yielding_action_control.sumo_actions import YieldingActions
+from vanet.npc.highway_ramp_merging.zipper_network import prepare_zipper_configuration
 
 
 @unittest.skipUnless(os.environ.get('VANET_RUN_LIVE_SUMO')=='1','Explicit isolated live SUMO test only')
@@ -20,6 +21,7 @@ class FixedSumoScenarioTests(unittest.TestCase):
         import sumolib
         connection=None
         with tempfile.TemporaryDirectory(prefix='vanet_scenario_live_') as folder:
+            configuration=prepare_zipper_configuration(Path(folder)/'map')
             log_file=Path(folder)/'sumo.log'
             error_log_file=Path(folder)/'sumo-errors.log'
             sumo_binary_file=SUMO_INSTALLATION_DIRECTORY/'bin/sumo'
@@ -27,7 +29,7 @@ class FixedSumoScenarioTests(unittest.TestCase):
                 with socket.socket() as listener:
                     listener.bind(('127.0.0.1',0));port=listener.getsockname()[1]
                 label='vanet_scenario_live_test'
-                traci.start([str(sumo_binary_file),'-c',str(SUMO_TOWN04_CONFIGURATION_FILE),
+                traci.start([str(sumo_binary_file),'-c',str(configuration),
                              '--step-length','.05','--lateral-resolution','.25','--seed','20261104',
                              '--no-step-log','true','--log',str(log_file),'--error-log',str(error_log_file)],
                             port=port,label=label)
@@ -57,8 +59,9 @@ class FixedSumoScenarioTests(unittest.TestCase):
                 self.assertEqual(connection.vehicle.getLaneChangeMode(name),1621)
                 scenario.start(0.)
                 for entry in scenario.config['npcs']:
-                    if entry.get('junction_departure'):
-                        connection.vehicle.subscribe(entry['id'],[tc.VAR_ROAD_ID,tc.VAR_EDGES,tc.VAR_LANEPOSITION])
+                    if entry.get('junction_departure') or entry.get('role') in ('same_direction','ramp_merging'):
+                        connection.vehicle.subscribe(entry['id'],[tc.VAR_ROAD_ID,tc.VAR_EDGES,
+                            tc.VAR_LANEPOSITION,tc.VAR_LANE_ID,tc.VAR_LANEPOSITION_LAT,tc.VAR_SPEED])
                 seen = set()
                 positions = {}
                 maximum_travel = {}

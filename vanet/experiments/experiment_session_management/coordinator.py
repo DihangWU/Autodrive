@@ -296,7 +296,7 @@ class ExperimentCoordinator:
                 return False
             self.controller_wait_since=None
             states,nodes=collect_mobility(bridge,self.config['rsu'])
-            self.scenario.step(self.network_time-self.run_start_network_time)
+            self.scenario.step(self.network_time-self.run_start_network_time,states)
             transmissions=self.application_step(states)
             self.step_id+=1
             self.network.submit(self.step_id,round(self.network_time+self.config['step_length'],8),nodes,transmissions)

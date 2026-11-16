@@ -11,6 +11,8 @@ from vanet.npc.highway_background_traffic.lane_speed_limits import HighwaySpeedL
 from vanet.npc.highway_background_traffic.junction_route_split import JunctionRouteSplit
 from vanet.npc.highway_background_traffic.right_turn_queueing import RightTurnQueueing
 from vanet.npc.non_network_highway_traffic.load_background_vehicles import load_background_vehicles
+from vanet.npc.highway_ramp_merging.load_merging_vehicles import load_merging_vehicles
+from vanet.npc.highway_ramp_merging.merge_controller import RampMergeController
 
 LOG = logging.getLogger(__name__)
 OWNER_PARAMETER = 'autodrive.npc.batch'
@@ -32,6 +34,10 @@ def load_scenario(path=None):
         if config.get('stationary_highway_queues',False):
             raise ValueError('The same highway lanes cannot contain both static queues and moving background traffic.')
         config['npcs'] += load_background_vehicles(config['vehicle_type_spec'])
+    if config.get('highway_ramp_merging',False):
+        vehicles,policy = load_merging_vehicles()
+        config['npcs'] += vehicles
+        config['ramp_merging_policy'] = policy
     identifiers=[vehicle['id'] for vehicle in config['npcs']]
     if len(set(identifiers))!=len(identifiers):raise ValueError('Duplicate NPC id in scenario.')
     return config
@@ -55,6 +61,7 @@ class FixedNpcTraffic:
         self.lane_speed_limits = HighwaySpeedLimits(connection,config.get('highway_speed_limits'))
         self.junction_split = JunctionRouteSplit(connection)
         self.right_turn_queueing = RightTurnQueueing(connection,config.get('right_turn_queueing'))
+        self.ramp_merging = RampMergeController(connection,config.get('ramp_merging_policy'))
         LOG.info('Fixed scene traffic total=%s initial=%s stationary_obstacles=%s network_npcs=%s non_network_moving_npcs=%s',
             self.count,self.initial_count,
             sum(bool(v.get('stationary',False)) for v in self.specifications),
@@ -99,7 +106,7 @@ class FixedNpcTraffic:
                 vehicle.setParameter(name,'laneChangeModel.'+parameter,str(value))
             vehicle.setImperfection(name,float(entry.get('driver_imperfection',0.)))
             stationary = entry.get('stationary',False)
-            vehicle.setSpeed(name,0. if stationary or self.start_time is None else -1.)
+            vehicle.setSpeed(name,0. if stationary or self.start_time is None or entry.get('hold_for_merge_release',False) else -1.)
             if self.start_time is None and entry.get('hold_lane_before_start',False):
                 vehicle.setLaneChangeMode(name,0)
             if entry.get('placement_lane_id'):
@@ -122,6 +129,7 @@ class FixedNpcTraffic:
         if self.start_time is not None:
             self.junction_split.update(self.created,states,constants,self.sim_time)
             self.right_turn_queueing.update(self.created,states,constants,self.sim_time)
+            self.ramp_merging.update_lanes(self.created,states,constants,self.sim_time)
 
     def remove_vehicles(self, subscribed=None):
         vehicle = self.connection.vehicle
@@ -142,6 +150,7 @@ class FixedNpcTraffic:
             vehicle.remove(name)
         self.lane_speed_limits.restore()
         self.right_turn_queueing.reset()
+        self.ramp_merging.reset()
 
     def reset(self):
         self.remove_vehicles()
@@ -158,9 +167,10 @@ class FixedNpcTraffic:
         active = set(self.connection.vehicle.getIDList())
         for name in self.created.keys() & active:
             entry = self.created[name]['scenario']
-            self.connection.vehicle.setSpeed(name,0. if entry.get('stationary',False) else -1.)
+            self.connection.vehicle.setSpeed(name,0. if entry.get('stationary',False) or entry.get('hold_for_merge_release',False) else -1.)
             if entry.get('hold_lane_before_start',False):
                 self.connection.vehicle.setLaneChangeMode(name,entry['lane_change_mode'])
+        self.ramp_merging.start(self.created,sim_time)
 
 
 class ScenarioController:
@@ -225,8 +235,12 @@ class ScenarioController:
         self.started = True
         self.event('scenario_started',sim_time=sim_time)
 
-    def step(self, sim_time):
+    def step(self, sim_time, traffic_states=None):
         self.traffic.sim_time = float(sim_time)
+        if traffic_states is not None:
+            self.traffic.ramp_merging.rolling_priority.external = [state for state in traffic_states if state.get('role')=='lincoln']
+        if self.started:
+            self.traffic.ramp_merging.release(self.traffic.created,float(sim_time))
 
     def snapshot(self):
         return dict(name=self.config['name'],prepared=self.prepared,started=self.started,
@@ -236,6 +250,8 @@ class ScenarioController:
                     non_network_moving_npc_count=sum(not v.get('network_enabled',True) and not v.get('stationary',False)
                                                      for v in self.config['npcs']),
                     junction_departures=self.traffic.junction_split.snapshot(),
+                    ramp_merging=self.traffic.ramp_merging.snapshot(),
+                    ramp_zipper_meter=self.traffic.ramp_merging.meter.snapshot(),
                     initial_npc_count=self.traffic.initial_count,initial_npcs_added=self.traffic.next_index>=self.traffic.initial_count,
                     start_time=self.traffic.start_time,seed=self.config['seed'],
                     traffic_lights=copy.deepcopy(self.light_snapshot))

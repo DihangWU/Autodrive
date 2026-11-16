@@ -75,7 +75,15 @@ class NpcSumoAdapter:
         # Straight-only, non-network traffic needs pose/lights, not route data
         # on every frame. Keep the original subscription for other NPCs.
         background = self.traffic.created[actor_id].get('scenario', {}).get('role') == 'non_network_background'
-        connection.vehicle.subscribe(actor_id, self.variables[:4] if background else self.variables)
+        variables = self.variables[:4] if background else self.variables
+        role = self.traffic.created[actor_id].get('scenario', {}).get('role')
+        if role in ('same_direction','ramp_merging'):
+            variables = variables+[self.tools.constants.VAR_LANE_ID]
+        if role in ('same_direction','ramp_merging'):
+            variables = variables+[self.tools.constants.VAR_SPEED]
+        if role == 'ramp_merging':
+            variables = variables+[self.tools.constants.VAR_LANEPOSITION_LAT]
+        connection.vehicle.subscribe(actor_id, variables)
         self.subscribed.add(actor_id)
 
     def unsubscribe(self, actor_id):

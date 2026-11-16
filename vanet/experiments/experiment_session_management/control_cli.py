@@ -3,6 +3,8 @@ import argparse
 import json
 from foundation.cobridge.control import ControlClient
 from vanet.project_paths import SUMO_TOWN04_NETWORK_FILE
+from foundation.sumo.client import SumoClient
+from foundation.cobridge.network import read_network
 
 
 def main():
@@ -13,7 +15,12 @@ def main():
     client=ControlClient()
     try:
         action='vanet.scene.initialize' if args.operation=='initialize' else 'vanet.'+args.operation
-        fields=dict(source='operator_cli',network_file=str(SUMO_TOWN04_NETWORK_FILE))
+        network_file = SUMO_TOWN04_NETWORK_FILE
+        if args.operation not in ('status','initialize'):
+            sumo = SumoClient()
+            try:network_file = read_network(sumo.status()['config'])['network_file']
+            finally:sumo.close()
+        fields=dict(source='operator_cli',network_file=str(network_file))
         if args.group:fields['group']=args.group
         response=client.command(action,**fields)
         print(json.dumps(response,ensure_ascii=False,indent=2))

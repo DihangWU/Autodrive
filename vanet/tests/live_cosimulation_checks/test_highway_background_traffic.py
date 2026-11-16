@@ -12,6 +12,7 @@ import unittest
 from vanet.project_paths import SUMO_INSTALLATION_DIRECTORY,SUMO_TOWN04_CONFIGURATION_FILE,SCENARIO_NETWORK_HIGHWAY_TRAFFIC_FILE
 from vanet.experiments.scenario_and_parameter_configuration.scenario_controller import ScenarioController
 from vanet.cobridge.mobility_snapshot import collect_mobility
+from vanet.npc.highway_ramp_merging.zipper_network import prepare_zipper_configuration
 
 
 @unittest.skipUnless(os.environ.get('VANET_RUN_LIVE_SUMO')=='1','Explicit isolated real SUMO test only')
@@ -23,11 +24,12 @@ class HighwayBackgroundTrafficLiveTests(unittest.TestCase):
         import sumolib
         c=None
         with tempfile.TemporaryDirectory(prefix='highway_background_') as directory:
+            configuration=prepare_zipper_configuration(Path(directory)/'map')
             errors=Path(directory)/'errors.log'
             with socket.socket() as listener:
                 listener.bind(('127.0.0.1',0));port=listener.getsockname()[1]
             try:
-                traci.start([str(SUMO_INSTALLATION_DIRECTORY/'bin/sumo'),'-c',str(SUMO_TOWN04_CONFIGURATION_FILE),
+                traci.start([str(SUMO_INSTALLATION_DIRECTORY/'bin/sumo'),'-c',str(configuration),
                     '--step-length','.05','--lateral-resolution','.25','--no-step-log','true',
                     '--error-log',str(errors)],port=port,label='highway_background_test')
                 c=traci.getConnection('highway_background_test')
@@ -35,8 +37,7 @@ class HighwayBackgroundTrafficLiveTests(unittest.TestCase):
                 original_limits={lane:c.lane.getMaxSpeed(lane) for lane in scenario.config['highway_speed_limits']['lanes']}
                 scenario.traffic.spawn_next_vehicles(scenario.traffic.count)
                 for _ in range(3):c.simulationStep()
-                expected={v['id']:v for v in scenario.config['npcs']
-                          if v.get('network_enabled',True) and v.get('yielding_enabled') is False}
+                expected={v['id']:v for v in scenario.config['npcs'] if v['id'].startswith('vanet_npc_highway_')}
                 self.assertEqual(len(expected),40)
                 present=set(c.vehicle.getIDList())
                 self.assertTrue(set(expected)<=present)
@@ -82,11 +83,15 @@ class HighwayBackgroundTrafficLiveTests(unittest.TestCase):
                 lane_shape=c.lane.getShape('-41_1')
                 first_station,_=sumolib.geomhelper.polygonOffsetAndDistanceToPoint(origins[first['id']],lane_shape)
                 self.assertAlmostEqual(first_station-c.vehicle.getLength(first['id'])/2-297.43979019781625,180.,places=3)
-                for name in expected:c.vehicle.subscribe(name,[tc.VAR_ROAD_ID,tc.VAR_EDGES,tc.VAR_LANE_ID,tc.VAR_LANEPOSITION])
+                observed=set(expected)|{v['id'] for v in scenario.config['npcs']
+                                        if v.get('role') in ('same_direction','ramp_merging') and v.get('depart_offset',0.)<=0}
+                for name in observed:
+                    c.vehicle.subscribe(name,[tc.VAR_ROAD_ID,tc.VAR_EDGES,tc.VAR_LANE_ID,
+                                              tc.VAR_LANEPOSITION,tc.VAR_LANEPOSITION_LAT,tc.VAR_SPEED])
                 peak_speed=0.;collisions=set();travel={name:0. for name in expected}
                 merge_space_seen=False
                 branches={};lane3_entered_city=set();lane4_merge_lanes={}
-                for index in range(2400):
+                for index in range(6000):
                     scenario.step(index*.05)
                     states=c.vehicle.getAllSubscriptionResults()
                     scenario.traffic.maintain_routes(states,tc)
@@ -98,11 +103,17 @@ class HighwayBackgroundTrafficLiveTests(unittest.TestCase):
                         elif road=='-7':
                             branches[name]='city'
                             if expected[name]['lane_index']==2:lane3_entered_city.add(name)
-                        if lane=='-48_2' and expected[name]['lane_index']==1:lane4_merge_lanes[name]=lane
+                        # Normal strategic driving may finish this move on
+                        # -47 already, then use another straight-through lane.
+                        # Observe the actual lane-3 crossing, not a fixed road
+                        # on which it used to happen with the old slow meter.
+                        if lane in ('-47_2',':764_3_1','-48_2') and expected[name]['lane_index']==1:
+                            lane4_merge_lanes[name]=lane
                         speed=c.vehicle.getSpeed(name);peak_speed=max(peak_speed,speed)
                         self.assertLessEqual(speed,80./3.6+1e-6)
                         travel[name]=max(travel[name],math.dist(origins[name],c.vehicle.getPosition(name)))
                         if c.vehicle.getLaneID(name)=='-41_1' and c.vehicle.couldChangeLane(name,1):merge_space_seen=True
+                    if index>=2399 and set(branches)==set(expected):break
                 self.assertEqual(collisions,set())
                 self.assertGreater(min(travel.values()),30.)
                 self.assertGreater(peak_speed,75./3.6)

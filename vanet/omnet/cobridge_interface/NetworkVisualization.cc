@@ -37,6 +37,7 @@ NetworkVisualization::NetworkVisualization(cModule* module,const std::string& pa
     for(const auto* name:{"world","connectionManager","gateway"}) {
         auto& display=root->getSubmodule(name)->getDisplayString();
         display.setTagArg("p",0,std::to_string(width+75).c_str());display.setTagArg("p",1,std::to_string(100+row++*80).c_str());
+        display.setTagArg("t",0,name);display.setTagArg("t",2,"#eeeeee");
     }
     status=new cTextFigure("communication-status");status->setPosition(cFigure::Point(35,15));
     status->setColor(cFigure::Color(235,240,245));status->setFont(cFigure::Font("Arial",11));canvas->addFigure(status);
@@ -62,7 +63,7 @@ void NetworkVisualization::synchronize(const json& values,const std::map<std::st
         display.setTagArg("b",0,role=="rsu"?"12":"0");display.setTagArg("b",1,role=="rsu"?"12":"0");
         display.setTagArg("b",2,role=="rsu"?"oval":"rect");
         display.setTagArg("b",3,role=="rsu"?"#23df66":(role=="lincoln"?"#1e5ae6":"#a5aaaf"));
-        display.setTagArg("tt",0,id.c_str());display.setTagArg("t",0,id.c_str());
+        display.setTagArg("tt",0,id.c_str());display.setTagArg("t",0,role=="npc"?"":id.c_str());
         display.setTagArg("t",2,"#eeeeee");
         if(role!="rsu") {
             if(!vehicleIcons.count(id)) {
