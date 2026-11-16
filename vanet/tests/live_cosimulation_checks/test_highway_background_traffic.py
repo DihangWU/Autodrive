@@ -35,7 +35,8 @@ class HighwayBackgroundTrafficLiveTests(unittest.TestCase):
                 original_limits={lane:c.lane.getMaxSpeed(lane) for lane in scenario.config['highway_speed_limits']['lanes']}
                 scenario.traffic.spawn_next_vehicles(scenario.traffic.count)
                 for _ in range(3):c.simulationStep()
-                expected={v['id']:v for v in scenario.config['npcs'] if v.get('yielding_enabled') is False}
+                expected={v['id']:v for v in scenario.config['npcs']
+                          if v.get('network_enabled',True) and v.get('yielding_enabled') is False}
                 self.assertEqual(len(expected),40)
                 present=set(c.vehicle.getIDList())
                 self.assertTrue(set(expected)<=present)
@@ -49,7 +50,7 @@ class HighwayBackgroundTrafficLiveTests(unittest.TestCase):
                     self.assertEqual(c.vehicle.getSpeedMode(name),31)
                     self.assertEqual(c.vehicle.getParameter(name,'vanet.scenario.yielding_enabled'),'false')
                 for lane in original_limits:self.assertAlmostEqual(c.lane.getMaxSpeed(lane),100./3.6)
-                # The static cars remain excluded, while all forty new radios
+                # The non-network traffic remains excluded, while all forty radios
                 # carry their per-vehicle no-yield policy to the coordinator.
                 bridge=SimpleNamespace(carla=SimpleNamespace(world=SimpleNamespace(get_snapshot=lambda:None)),
                     lincoln=SimpleNamespace(records={}),sumo=SimpleNamespace(connection=c,network=dict(offset=(503.02,423.76))),

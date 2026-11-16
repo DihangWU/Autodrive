@@ -6,12 +6,13 @@ from unittest.mock import Mock
 from foundation.cobridge.npcvehicules.run_synchronization import SimulationSynchronization
 from vanet.cobridge.mobility_snapshot import collect_mobility
 from vanet.experiments.scenario_and_parameter_configuration.scenario_controller import FixedNpcTraffic, load_scenario
+from vanet.npc.stationary_traffic_obstacles.highway_lane_queue import load_stationary_highway_vehicles
 
 
 class StationaryHighwayQueueTests(unittest.TestCase):
     def test_start_releases_only_moving_traffic(self):
         config = load_scenario()
-        static = next(v for v in config['npcs'] if v.get('stationary'))
+        static = load_stationary_highway_vehicles(config['vehicle_type_spec'])[0]
         moving = next(v for v in config['npcs'] if v['id'] == 'vanet_npc_001')
         config['npcs'] = [static, moving]
         connection = Mock()

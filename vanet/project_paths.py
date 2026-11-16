@@ -42,6 +42,7 @@ SCENARIO_TOWN04_CONFIGURATION_FILE = VANET_DIRECTORY / 'experiments/scenario_and
 SCENARIO_NPC_DEFINITIONS_DIRECTORY = VANET_DIRECTORY / 'npc/scenario_vehicle_configuration'
 SCENARIO_STATIONARY_HIGHWAY_QUEUE_FILE = VANET_DIRECTORY / 'npc/stationary_traffic_obstacles/town04_left_lane_queues.json'
 SCENARIO_NETWORK_HIGHWAY_TRAFFIC_FILE = VANET_DIRECTORY / 'npc/highway_background_traffic/town04_staggered_traffic.json'
+SCENARIO_NON_NETWORK_HIGHWAY_TRAFFIC_FILE = VANET_DIRECTORY / 'npc/non_network_highway_traffic/town04_left_lane_traffic.json'
 EXPERIMENT_DEFAULT_CONFIGURATION_FILE = VANET_DIRECTORY / 'experiments/experiment_group_configuration/defaults.json'
 OMNET_DIRECTORY = VANET_DIRECTORY / 'omnet'
 OMNET_COMPILED_OUTPUT_DIRECTORY = OMNET_DIRECTORY / 'compiled_output'

@@ -10,6 +10,7 @@ from vanet.npc.highway_background_traffic.load_staggered_vehicles import load_st
 from vanet.npc.highway_background_traffic.lane_speed_limits import HighwaySpeedLimits
 from vanet.npc.highway_background_traffic.junction_route_split import JunctionRouteSplit
 from vanet.npc.highway_background_traffic.right_turn_queueing import RightTurnQueueing
+from vanet.npc.non_network_highway_traffic.load_background_vehicles import load_background_vehicles
 
 LOG = logging.getLogger(__name__)
 OWNER_PARAMETER = 'autodrive.npc.batch'
@@ -27,6 +28,10 @@ def load_scenario(path=None):
         vehicles, limits = load_staggered_traffic()
         config['npcs'] += vehicles
         config['highway_speed_limits'] = limits
+    if config.get('non_network_highway_background_traffic',False):
+        if config.get('stationary_highway_queues',False):
+            raise ValueError('The same highway lanes cannot contain both static queues and moving background traffic.')
+        config['npcs'] += load_background_vehicles(config['vehicle_type_spec'])
     identifiers=[vehicle['id'] for vehicle in config['npcs']]
     if len(set(identifiers))!=len(identifiers):raise ValueError('Duplicate NPC id in scenario.')
     return config
@@ -50,10 +55,11 @@ class FixedNpcTraffic:
         self.lane_speed_limits = HighwaySpeedLimits(connection,config.get('highway_speed_limits'))
         self.junction_split = JunctionRouteSplit(connection)
         self.right_turn_queueing = RightTurnQueueing(connection,config.get('right_turn_queueing'))
-        LOG.info('Fixed scene traffic total=%s initial=%s stationary_obstacles=%s network_npcs=%s',
+        LOG.info('Fixed scene traffic total=%s initial=%s stationary_obstacles=%s network_npcs=%s non_network_moving_npcs=%s',
             self.count,self.initial_count,
             sum(bool(v.get('stationary',False)) for v in self.specifications),
-            sum(v.get('network_enabled',True) for v in self.specifications))
+            sum(v.get('network_enabled',True) for v in self.specifications),
+            sum(not v.get('network_enabled',True) and not v.get('stationary',False) for v in self.specifications))
 
     def spawn_next_vehicles(self, limit):
         installed_routes = None
@@ -91,7 +97,7 @@ class FixedNpcTraffic:
             if 'lane_change_mode' in entry:vehicle.setLaneChangeMode(name,entry['lane_change_mode'])
             for parameter,value in entry.get('lane_change_parameters',{}).items():
                 vehicle.setParameter(name,'laneChangeModel.'+parameter,str(value))
-            vehicle.setImperfection(name,0.)
+            vehicle.setImperfection(name,float(entry.get('driver_imperfection',0.)))
             stationary = entry.get('stationary',False)
             vehicle.setSpeed(name,0. if stationary or self.start_time is None else -1.)
             if self.start_time is None and entry.get('hold_lane_before_start',False):
@@ -227,6 +233,8 @@ class ScenarioController:
                     npc_requested=self.traffic.count,npc_added=self.traffic.next_index,
                     stationary_obstacle_count=sum(bool(v.get('stationary',False)) for v in self.config['npcs']),
                     network_npc_count=sum(v.get('network_enabled',True) for v in self.config['npcs']),
+                    non_network_moving_npc_count=sum(not v.get('network_enabled',True) and not v.get('stationary',False)
+                                                     for v in self.config['npcs']),
                     junction_departures=self.traffic.junction_split.snapshot(),
                     initial_npc_count=self.traffic.initial_count,initial_npcs_added=self.traffic.next_index>=self.traffic.initial_count,
                     start_time=self.traffic.start_time,seed=self.config['seed'],

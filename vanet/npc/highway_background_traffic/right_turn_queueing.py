@@ -26,7 +26,8 @@ class RightTurnQueueing:
         vehicle = self.connection.vehicle
         types = self.connection.vehicletype
         for name, record in created.items():
-            if record['scenario'].get('stationary',False):
+            if (record['scenario'].get('stationary',False)
+                    or record['scenario'].get('role') == 'non_network_background'):
                 continue
             state = states.get(name)
             if not isinstance(state,dict):

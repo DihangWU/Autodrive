@@ -21,7 +21,7 @@ def collect_mobility(bridge, rsu):
     present=set(connection.vehicle.getIDList())
     for batch in bridge.npc.batches.values():
         for name,record in batch['traffic'].created.items():
-            # Physical queue obstacles remain in SUMO/CARLA but have no VANET
+            # Non-network traffic and obstacles stay in SUMO/CARLA but have no VANET
             # application, radio node, cooperative colour or per-frame RPC reads.
             if not record.get('scenario',{}).get('network_enabled',True):continue
             if name not in present:continue

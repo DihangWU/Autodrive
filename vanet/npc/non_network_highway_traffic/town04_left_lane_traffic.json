@@ -1,0 +1,17 @@
+{
+  "description": "Non-networked grey traffic in the leftmost two driving lanes; keep lane, simple SUMO following, straight exit only.",
+  "id_prefix": "background_highway",
+  "random_seed": 20261116,
+  "density_relative_to_network_lanes": 1.5,
+  "spacing_random_weight_range": [0.65, 1.35],
+  "maximum_speed_kmh_range": [38.0, 70.0],
+  "driver_imperfection_range": [0.1, 0.25],
+  "color": [165, 170, 175, 255],
+  "start_front_positions": {"3": 292.928613, "4": 291.995216},
+  "end_front_margin_metres": 5.0,
+  "route": ["-41", "-46", "-47", "-48", "-49", "-50"],
+  "corridors": [
+    {"sumo_lane_index": 4, "left_to_right_lane": 1, "lanes": ["-41_4", ":134_10_3", "-46_4", ":1061_2_4", "-47_4", ":764_3_3", "-48_4"]},
+    {"sumo_lane_index": 3, "left_to_right_lane": 2, "lanes": ["-41_3", ":134_10_2", "-46_3", ":1061_2_3", "-47_3", ":764_3_2", "-48_3"]}
+  ]
+}

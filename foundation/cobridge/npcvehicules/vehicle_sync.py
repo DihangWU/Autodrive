@@ -72,7 +72,10 @@ class NpcSumoAdapter:
         connection = self.adapter.connection
         if connection.vehicle.getParameter(actor_id, 'autodrive.npc.batch') != self.traffic.batch_id:
             raise RuntimeError(f'NPC 归属不匹配：{actor_id}')
-        connection.vehicle.subscribe(actor_id, self.variables)
+        # Straight-only, non-network traffic needs pose/lights, not route data
+        # on every frame. Keep the original subscription for other NPCs.
+        background = self.traffic.created[actor_id].get('scenario', {}).get('role') == 'non_network_background'
+        connection.vehicle.subscribe(actor_id, self.variables[:4] if background else self.variables)
         self.subscribed.add(actor_id)
 
     def unsubscribe(self, actor_id):

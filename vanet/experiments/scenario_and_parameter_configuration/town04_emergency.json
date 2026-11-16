@@ -28,7 +28,8 @@
   },
   "npc_vehicle_type": "vehicle.audi.a2",
   "npc_speed_factor": 1.0,
-  "stationary_highway_queues": true,
+  "stationary_highway_queues": false,
+  "non_network_highway_background_traffic": true,
   "network_highway_background_traffic": true,
   "right_turn_queueing": {
     "approach_edge": "-48",

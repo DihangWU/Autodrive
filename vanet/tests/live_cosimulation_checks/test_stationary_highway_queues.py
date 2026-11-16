@@ -9,6 +9,7 @@ import tempfile
 import unittest
 
 from vanet.experiments.scenario_and_parameter_configuration.scenario_controller import ScenarioController, load_scenario
+from vanet.npc.stationary_traffic_obstacles.highway_lane_queue import load_stationary_highway_vehicles
 from vanet.project_paths import SUMO_INSTALLATION_DIRECTORY, SUMO_TOWN04_CONFIGURATION_FILE
 
 
@@ -30,7 +31,8 @@ class StationaryHighwayQueueLiveTests(unittest.TestCase):
                     '--error-log', str(error_log)], port=port, label='stationary_highway_test')
                 connection = traci.getConnection('stationary_highway_test')
                 config = load_scenario()
-                config['npcs'] = [v for v in config['npcs'] if v.get('stationary')]
+                # Legacy static mode remains available, but is no longer the default scene.
+                config['npcs'] = load_stationary_highway_vehicles(config['vehicle_type_spec'])
                 expected = {v['id']: v for v in config['npcs']}
                 scenario = ScenarioController(connection, config)
                 scenario.reset()
