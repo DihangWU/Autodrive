@@ -31,9 +31,7 @@ python3 -m vanet.omnet.build_and_launch.run_network
 
 车辆使用带车窗、轮胎与车灯的俯视小车示意图，并随 CARLA 航向旋转；Lincoln 为深蓝色 `(30,90,230)`、NPC 为灰色 `(165,170,175)`。NPC 间不进行业务通信，普通交通判断复用现有 CARLA 全局状态。50 米内 NPC 的信标及反馈直接发给 Lincoln，RSU 不为该 NPC 重复通知或汇总；超出 50 米、且双方均在 RSU 范围内才经 RSU。切换通道后新通信授权仍需实际收包，等待期间原任务可在 30 秒内保持避让。固定种子控制周期信标及反馈的错峰相位，状态变化立即反馈。
 
-地图左上角增加可切换的“跟随 Lincoln”按钮，默认开启；Lincoln 首次出现在地图后自动保持居中，保留当前缩放。普通点击选中车辆不会暂停，拖动地图会自动取消勾选；再次点击按钮恢复跟随。Ctrl＋滚轮或原有缩放按钮仍可缩放；普通滚轮滚动、滚动条和方向键平移会暂停跟随。车辆暂时消失时等待，复位后重新绑定新图元，保留按钮的开启/关闭选择。
-
-跟随只在 Qt 主线程调整视图中心，最多每 50 毫秒检查一次，不移动道路或车辆图形，不修改 CARLA/SUMO 坐标、无线消息或 CoBridge 时钟。它直接读取 Qtenv 图元的显示位置，因此自动适应当前缩放和地图 Y 轴转换。图元重建或窗口关闭时自动释放引用；无 GUI 的 Cmdenv 不创建跟随控制器。此功能在重启网络进程后生效。
+Qtenv 使用原生手动拖动和缩放视图，不再自动跟随 Lincoln，也不显示跟随按钮。车辆、覆盖圈和通信箭头继续按实际位置更新。
 
 运行进程在 Unix socket 接受一个 CoBridge 连接；初始化后停留在网络时间 0，只有收到 `advance` 才推进。每个步长终点安排低优先级边界事件，确保该时刻的无线事件处理完成后再返回结果。桥端非阻塞调用可继续响应 SUMO GUI，不依赖墙上时间推动网络。
 
@@ -83,14 +81,11 @@ python3 -m vanet.omnet.build_and_launch.application_smoke
 python3 -m vanet.tests.live_cosimulation_checks.wireless_range_check
 python3 -m vanet.tests.live_cosimulation_checks.wireless_range_check --ui Qtenv
 python3 -m vanet.tests.live_cosimulation_checks.communication_path_check
-python3 -m vanet.tests.live_cosimulation_checks.qtenv_follow_check
 ```
 
 也可 `source setup.bash` 后执行 `check_vanet_communication_paths`。该检查使用真实 Veins 和项目实际 NPC/RSU/反馈应用，依次验证 RSU 区内直连、超距中转、恢复直连、RSU 区外直连、Lincoln 未连接 RSU 时禁止中转，以及没有任何新收包时保持避让 30 个仿真秒后开始恢复。SUMO 动作使用 mock，不接管当前 CARLA/SUMO 实验，结果及实际交付记录保存在 `vanet/results/communication_path_check_*/`。
 
 `wireless_range_check` 使用真实 Veins 验证双向 50/50.1 米、170/170.1 米边界、广播按接收者筛选、分片出圈后重新进入及新传输恢复、水平距离与外部时钟空闲冻结。Qtenv 模式使用离屏 Qt 实际启动、实际收发并保存 `omnet/qtenv_view.png`；添加 `--visible` 可以显示该独立检查窗口。检查不连接现有 CARLA/SUMO，不等同于完整联仿验收。
-
-`qtenv_follow_check` 独立启动离屏 Qtenv，检查多个 Lincoln 位置居中、关闭后视图不动、重新开启恢复、复位重绑，以及空闲时网络时间不变，保存 JSON 结果和实际截图到 `vanet/results/qtenv_follow_check_*/`。离线 Qt 控件检查 `test_qtenv_follow.py` 覆盖保持缩放、点击不暂停、真实鼠标拖动暂停、重新开启以及窗口/图元销毁，不连接当前交通仿真。
 
 `wireless_smoke` 使用真实 OMNeT++/Veins 检查近距离广播、远距离无接收、约 9.8 KB 消息分片重组、MAC 定向投递、复位后同种子同延迟、节点删除、每轮事件隔离和归档区间，以及 Python/C++ 两端对目录越界及符号链接越界的拒绝。
 

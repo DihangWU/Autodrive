@@ -1,12 +1,10 @@
 #include "NetworkVisualization.h"
 #include "VehicleIcon.h"
-#include "QtLincolnFollow.h"
 #include <fstream>
 #include <set>
 #include <sstream>
 
 NetworkVisualization::NetworkVisualization(cModule* module,const std::string& path):root(module) {
-    follow=std::make_unique<QtLincolnFollow>();
     std::ifstream input(path);if(!input)throw cRuntimeError("Cannot read Qtenv road scene");input>>scene;
     auto* canvas=root->getCanvas();
     auto* background=new cRectangleFigure("map-background");
@@ -44,11 +42,6 @@ NetworkVisualization::NetworkVisualization(cModule* module,const std::string& pa
     status->setColor(cFigure::Color(235,240,245));status->setFont(cFigure::Font("Arial",11));canvas->addFigure(status);
     refresh(0,0,0);
 }
-NetworkVisualization::~NetworkVisualization() = default;
-json NetworkVisualization::followView(const json& command) {
-    if(command.contains("enabled"))follow->setEnabled(command.at("enabled").get<bool>());
-    return follow->status();
-}
 cFigure::Point NetworkVisualization::position(const std::string& id) const {
     const auto& value=positions.at(id);
     return {value.at("x").get<double>()+scene["coordinate_offset_x"].get<double>(),
@@ -56,10 +49,8 @@ cFigure::Point NetworkVisualization::position(const std::string& id) const {
 }
 void NetworkVisualization::synchronize(const json& values,const std::map<std::string,cModule*>& modules) {
     positions.clear();
-    cModule* lincoln=nullptr;
     for(const auto& node:values) {
         std::string id=node["id"],role=node.value("role","npc");positions[id]=node;
-        if(role=="lincoln")lincoln=modules.at(id);
         if((role=="rsu"||role=="lincoln")&&!circles.count(id)) {
             auto* circle=new cOvalFigure(id.c_str());circle->setFilled(role=="rsu");
             circle->setFillColor(cFigure::Color(45,210,105));circle->setFillOpacity(.035);
@@ -82,7 +73,6 @@ void NetworkVisualization::synchronize(const json& values,const std::map<std::st
             positionVehicleIcon(vehicleIcons.at(id),point.x,point.y,node.value("heading",0.));
         }
     }
-    follow->setTarget(lincoln);
     for(auto it=circles.begin();it!=circles.end();) {
         if(!positions.count(it->first)) {delete coverage->removeFigure(it->second);pulses.erase(it->first);it=circles.erase(it);}
         else ++it;
@@ -133,7 +123,6 @@ void NetworkVisualization::refresh(double now,long sent,long received) {
     status->setText(label.str().c_str());
 }
 void NetworkVisualization::reset() {
-    follow->setTarget(nullptr);
     for(auto& entry:vehicleIcons)delete vehicles->removeFigure(entry.second);
     vehicleIcons.clear();
     for(auto& entry:circles)delete coverage->removeFigure(entry.second);

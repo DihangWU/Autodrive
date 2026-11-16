@@ -45,7 +45,7 @@ Lincoln 的车辆防撞判断改为使用沿实际轨迹的相对闭合速度，
 
 Qtenv 的 Lincoln 小车为深蓝色 `(30,90,230)`、NPC 为灰色 `(165,170,175)`；通信线仍为亮绿色 Lincoln ↔ RSU、蓝色 Lincoln ↔ NPC、暗绿色 RSU ↔ NPC，不标消息文字。SUMO 原有状态配色保持不变。
 
-`run_vanet` 默认启动 **Qtenv 图形界面**，地图方向与 SUMO 一致；绿色圆为 RSU 范围，蓝色圆为 Lincoln 的 50 米范围，NPC 不画通信圈，彩色箭头表示实际完整接收的无线消息。SUMO 同时显示绿色 RSU 覆盖圆与跟随 Lincoln 的蓝色 50 米圈。车辆圈在每个交通步结束后根据实际位置和朝向更新，圆心在车身中心；复位、车辆移除与退出时清理。网络自动等待 CoBridge 时间指令，不需要手动点 Qtenv Run，也不会因此开始紧急实验。Qtenv Stop 会阻止网络推进，联仿期间请保持网络运行。
+`run_vanet` 默认启动 **Qtenv 图形界面**，地图方向与 SUMO 一致，视图由用户手动拖动、缩放，不自动跟随 Lincoln；绿色圆为 RSU 范围，蓝色圆为 Lincoln 的 50 米范围，NPC 不画通信圈，彩色箭头表示实际完整接收的无线消息。SUMO 同时显示绿色 RSU 覆盖圆与跟随 Lincoln 的蓝色 50 米圈。车辆圈在每个交通步结束后根据实际位置和朝向更新，圆心在车身中心；复位、车辆移除与退出时清理。网络自动等待 CoBridge 时间指令，不需要手动点 Qtenv Run，也不会因此开始紧急实验。Qtenv Stop 会阻止网络推进，联仿期间请保持网络运行。
 
 原有两辆初始同向前车已删除。3 辆定时出发车辆的配置保留在 `experiments/scenario_and_parameter_configuration/town04_emergency.json`；新增车辆逐辆放在 `npc/scenario_vehicle_configuration/`，由场景的 `npc_configuration_files` 清单加载。通用参数在 `experiments/experiment_group_configuration/defaults.json`；无线参数在 `omnet/simulation_configuration/radio_parameters.json`。每轮重置恢复固定 NPC 和保存的信号灯状态，不使用原有随机续路机制。
 
