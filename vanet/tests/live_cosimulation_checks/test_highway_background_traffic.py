@@ -81,7 +81,7 @@ class HighwayBackgroundTrafficLiveTests(unittest.TestCase):
                 lane_shape=c.lane.getShape('-41_1')
                 first_station,_=sumolib.geomhelper.polygonOffsetAndDistanceToPoint(origins[first['id']],lane_shape)
                 self.assertAlmostEqual(first_station-c.vehicle.getLength(first['id'])/2-297.43979019781625,180.,places=3)
-                for name in expected:c.vehicle.subscribe(name,[tc.VAR_ROAD_ID,tc.VAR_LANE_ID,tc.VAR_LANEPOSITION])
+                for name in expected:c.vehicle.subscribe(name,[tc.VAR_ROAD_ID,tc.VAR_EDGES,tc.VAR_LANE_ID,tc.VAR_LANEPOSITION])
                 peak_speed=0.;collisions=set();travel={name:0. for name in expected}
                 merge_space_seen=False
                 branches={};lane3_entered_city=set();lane4_merge_lanes={}

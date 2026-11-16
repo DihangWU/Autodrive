@@ -9,6 +9,7 @@ from vanet.npc.stationary_traffic_obstacles.highway_lane_queue import load_stati
 from vanet.npc.highway_background_traffic.load_staggered_vehicles import load_staggered_traffic
 from vanet.npc.highway_background_traffic.lane_speed_limits import HighwaySpeedLimits
 from vanet.npc.highway_background_traffic.junction_route_split import JunctionRouteSplit
+from vanet.npc.highway_background_traffic.right_turn_queueing import RightTurnQueueing
 
 LOG = logging.getLogger(__name__)
 OWNER_PARAMETER = 'autodrive.npc.batch'
@@ -48,6 +49,7 @@ class FixedNpcTraffic:
         self.route_generation = 0
         self.lane_speed_limits = HighwaySpeedLimits(connection,config.get('highway_speed_limits'))
         self.junction_split = JunctionRouteSplit(connection)
+        self.right_turn_queueing = RightTurnQueueing(connection,config.get('right_turn_queueing'))
         LOG.info('Fixed scene traffic total=%s initial=%s stationary_obstacles=%s network_npcs=%s',
             self.count,self.initial_count,
             sum(bool(v.get('stationary',False)) for v in self.specifications),
@@ -110,9 +112,10 @@ class FixedNpcTraffic:
                 stationary,entry.get('network_enabled',True),entry.get('yielding_enabled',True),entry.get('maximum_speed_kmh'))
 
     def maintain_routes(self, states, constants):
-        """仅在指定路口按到达顺序分流，不随机续路、不请求紧急避让。"""
+        """指定入口分流与弯道排队，不随机续路、不请求紧急避让。"""
         if self.start_time is not None:
             self.junction_split.update(self.created,states,constants,self.sim_time)
+            self.right_turn_queueing.update(self.created,states,constants,self.sim_time)
 
     def remove_vehicles(self, subscribed=None):
         vehicle = self.connection.vehicle
@@ -132,6 +135,7 @@ class FixedNpcTraffic:
                 vehicle.resume(name)
             vehicle.remove(name)
         self.lane_speed_limits.restore()
+        self.right_turn_queueing.reset()
 
     def reset(self):
         self.remove_vehicles()

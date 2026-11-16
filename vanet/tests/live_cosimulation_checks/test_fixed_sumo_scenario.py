@@ -58,7 +58,7 @@ class FixedSumoScenarioTests(unittest.TestCase):
                 scenario.start(0.)
                 for entry in scenario.config['npcs']:
                     if entry.get('junction_departure'):
-                        connection.vehicle.subscribe(entry['id'],[tc.VAR_ROAD_ID,tc.VAR_LANEPOSITION])
+                        connection.vehicle.subscribe(entry['id'],[tc.VAR_ROAD_ID,tc.VAR_EDGES,tc.VAR_LANEPOSITION])
                 seen = set()
                 positions = {}
                 maximum_travel = {}

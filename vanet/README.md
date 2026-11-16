@@ -67,7 +67,9 @@ SUMO 位姿仅在创建时读取一次，随后退订动态字段，保留本地
 
 联网与避让单独配置：`network_enabled: true`、`yielding_enabled: false`。新车正常加入网络并发送信标；实际收到 emergency/notice 后反馈 `received`，原因为 `yielding_disabled_for_scenario`，不发送“已让开”的虚假反馈，也不执行任何紧急变道、停车、降速或恢复驾驶命令。普通交通控制器仍可因跟车或路线需求变道、减速。该标记从场景定义传入协调器和 NPC 应用，SUMO 参数 `vanet.scenario.yielding_enabled` 与 NPC 状态也显示它。原有 4 辆的避让策略保持启用。今后可将该批配置的 `vehicle_defaults.yielding_enabled` 改为 `true`，重启后启用避让。
 
-独立真实 SUMO 检查：`VANET_RUN_LIVE_SUMO=1 _vanet_python -m unittest vanet.tests.live_cosimulation_checks.test_highway_background_traffic -v`。检查 40 辆完整出生、180 米队尾位置、665 米整体长度、车道和几何间距、网络采样、正常行驶、80 km/h 车辆上限（道路仍为 100 km/h）、安全换道空间、实际经过的分流道路（35 直行/5 右转）、零碰撞和限速清理恢复。离线检查验证到达顺序排序、周期分流路线、复位计数以及紧急消息不触发避让；完整 CARLA/无线联仿和 Lincoln 实际追车过程仍需下一次启动验收。
+进城右转入口允许 NPC 利用弯道空间跟进红灯队列：`right_turn_queueing.py` 仅对实际路线为 `-48 → -7` 的动态场景 NPC，在 `-48` 和内部弯道 `:890_2/:890_13` 暂时放宽路口保空要求（独立车型的 `junctionModel.jmIgnoreKeepClearTime=0`），车头驶入 `-7` 后恢复原值。适用于原有 NPC 和新增车流，不限于 5 辆分流进城车；直行车、静态障碍物和 Lincoln 不应用。仍由 SUMO 判断跟车空间和冲突让行，前方红灯照常停车；不强制速度、不搬动车辆、不修改灯态。配置位于 `town04_emergency.json` 的 `right_turn_queueing`，日志 `RIGHT_TURN_QUEUE` 记录启用与恢复，仅状态变化时发送设置命令。
+
+独立真实 SUMO 检查：`VANET_RUN_LIVE_SUMO=1 _vanet_python -m unittest vanet.tests.live_cosimulation_checks.test_highway_background_traffic vanet.tests.live_cosimulation_checks.test_right_turn_queueing -v`。检查 40 辆完整出生、180 米队尾位置、665 米整体长度、车道和几何间距、网络采样、正常行驶、80 km/h 车辆上限（道路仍为 100 km/h）、安全换道空间、实际经过的分流道路（35 直行/5 右转）、零碰撞和限速清理恢复。右转专项复现入口等待，验证后车驶入弯道跟队、红灯不越线、绿灯继续行驶及设置恢复。离线检查验证到达顺序排序、周期分流路线、复位计数以及紧急消息不触发避让；完整 CARLA/无线联仿和 Lincoln 实际追车过程仍需下一次启动验收。
 
 静态队列回归可用 `VANET_RUN_LIVE_SUMO=1 _vanet_python -m unittest vanet.tests.live_cosimulation_checks.test_stationary_highway_queues -v` 独立运行：检查连接车道映射、337 辆原地停车、动态订阅清空、310 个仿真秒零位移/碰撞/传送，以及重置恢复。离线空间索引回归同时对照原始完整算法，覆盖弯道、多层道路、制动滞回和动态车辆，避免通过漏检换取提速。这些检查不代替完整 CARLA 联仿性能验收。
 

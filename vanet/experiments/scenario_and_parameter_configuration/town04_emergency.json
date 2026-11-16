@@ -30,6 +30,12 @@
   "npc_speed_factor": 1.0,
   "stationary_highway_queues": true,
   "network_highway_background_traffic": true,
+  "right_turn_queueing": {
+    "approach_edge": "-48",
+    "internal_edges": [":890_2", ":890_13"],
+    "exit_edge": "-7",
+    "ignore_keep_clear_after_seconds": 0.0
+  },
   "npcs": [
     {
       "id": "vanet_npc_cross_01",
