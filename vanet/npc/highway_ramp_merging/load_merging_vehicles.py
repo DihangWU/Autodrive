@@ -2,6 +2,7 @@
 import json
 
 from vanet.project_paths import SCENARIO_HIGHWAY_RAMP_MERGING_FILE
+from vanet.npc.highway_ramp_merging.ramp_queue_placement import queue_placement
 
 
 def load_merging_vehicles():
@@ -13,14 +14,9 @@ def load_merging_vehicles():
         raise ValueError('The rolling zipper controller uses one main vehicle per ramp vehicle.')
     vehicles = []
     for index in range(configuration['count']):
-        station = configuration['front_vehicle_position'] - index*configuration['initial_pitch_metres']
-        # All ten cars start upstream of the physical merge, with room to
-        # accelerate into their reserved slot instead of starting at the nose.
-        position = station
-        if not 4. <= position <= configuration['ramp_lane_length_metres']:
-            raise ValueError('Ramp queue extends beyond its starting lane.')
+        placement = queue_placement(configuration,index)
         vehicles.append(dict(id=f"{configuration['id_prefix']}_{index+1:02d}",
-            route=list(configuration['route']),lane_index=configuration['ramp_lane_index'],position=position,
+            **placement,
             speed=0.,depart_offset=0.,role='ramp_merging',network_enabled=True,yielding_enabled=False,
             maximum_speed_kmh=configuration['maximum_speed_kmh'],speed_factor=1.,speed_mode=31,
             # Keep SUMO's sublane centering after each requested lane change,

@@ -81,6 +81,23 @@ class ZipperMergingTests(unittest.TestCase):
         self.assertTrue(all(call.args[1]>0. for call in c.vehicle.setSpeed.call_args_list))
         c.vehicle.setSpeedMode.assert_not_called()
 
+    def test_more_ramp_cars_than_main_slots_can_still_drive_into_the_ramp(self):
+        c,meter,created,states=self.fixture();released=set();completed=set()
+        tc=SimpleNamespace(VAR_LANE_ID=81,VAR_LANEPOSITION=86,VAR_SPEED=64)
+        states.pop('main2')
+        waiting=next(name for name,record in created.items()
+                     if record['scenario'].get('merge_queue_index')==1)
+        meter.start(0.)
+        meter.update_slots(created,states,tc,released,completed,0.)
+        self.assertEqual(len(meter.reservations),1)
+        self.assertIn(waiting,released)
+        c.vehicle.setSpeed.assert_any_call(waiting,-1.)
+        self.assertNotIn(waiting,meter.reservations)  # approach is independent of the final merge slot
+        states['main1']={81:':1061_2_1',86:46.,64:12.}
+        meter.update_slots(created,states,tc,released,completed,1.)
+        self.assertEqual(meter.reservations[waiting]['main'],None)
+        self.assertEqual(len(meter.events),2)
+
     def test_crossing_is_counted_once_at_the_actual_main_conflict_point(self):
         c,meter,created,states=self.fixture()
         meter.observe(created,{'main1':{81:':1061_2_1',86:35.}},TC,0.)

@@ -19,7 +19,7 @@ class NonNetworkHighwayTrafficTests(unittest.TestCase):
         traffic=[v for v in config['npcs'] if v.get('role')=='non_network_background']
         self.assertEqual(len(traffic),100)
         self.assertFalse(any(v.get('stationary') for v in config['npcs']))
-        self.assertEqual(sum(v.get('network_enabled',True) for v in config['npcs']),54)
+        self.assertEqual(sum(v.get('network_enabled',True) for v in config['npcs']),74)
         pitch=json.loads(SCENARIO_NETWORK_HIGHWAY_TRAFFIC_FILE.read_text())['placement_reference']['same_lane_pitch_metres']
         for lane in (3,4):
             group=[v for v in traffic if v['lane_index']==lane]

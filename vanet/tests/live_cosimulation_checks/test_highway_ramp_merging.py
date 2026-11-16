@@ -1,4 +1,4 @@
-"""独立 SUMO：完整主路车流中的十车汇入、逐道并线与 Lincoln 路过。"""
+"""独立 SUMO：完整主路车流中的三十车汇入、逐道并线与 Lincoln 路过。"""
 import json
 import math
 import os
@@ -18,7 +18,7 @@ from vanet.npc.highway_ramp_merging.zipper_network import prepare_zipper_configu
 
 @unittest.skipUnless(os.environ.get('VANET_RUN_LIVE_SUMO')=='1','Explicit isolated real SUMO test only')
 class HighwayRampMergingLiveTests(unittest.TestCase):
-    def test_ten_networked_cars_merge_safely_and_overlap_main_traffic(self):
+    def test_thirty_networked_cars_merge_safely_and_overlap_main_traffic(self):
         sys.path.insert(0,str(SUMO_INSTALLATION_DIRECTORY/'tools'))
         import traci
         import traci.constants as tc
@@ -34,15 +34,24 @@ class HighwayRampMergingLiveTests(unittest.TestCase):
             c=traci.getConnection('highway_ramp_test')
             try:
                 scene=ScenarioController(c);scene.reset();scene.traffic.spawn_next_vehicles(scene.traffic.count)
-                for _ in range(3):c.simulationStep()
+                for _ in range(3):
+                    c.simulationStep()
+                    self.assertEqual(c.simulation.getCollidingVehiclesIDList(),())
                 self.assertEqual(len(c.vehicle.getIDList()),scene.traffic.initial_count)
                 self.assertFalse(c.simulation.getPendingVehicles())
                 ramp={v['id']:v for v in scene.config['npcs'] if v.get('role')=='ramp_merging'}
-                self.assertEqual(len(ramp),10)
+                self.assertEqual(len(ramp),30)
                 for name,entry in ramp.items():
                     self.assertEqual(c.vehicle.getSpeed(name),0.)
-                    self.assertEqual(c.vehicle.getLaneID(name),entry.get('placement_lane_id','31_1'))
+                    self.assertEqual(c.vehicle.getLaneID(name),entry.get('placement_lane_id',entry['route'][0]+'_'+str(entry['lane_index'])))
                     self.assertEqual(c.vehicle.getSpeedMode(name),31)
+                policy=scene.traffic.ramp_merging.meter.configuration
+                initial_distances=[]
+                for name in sorted(ramp):
+                    lane=c.vehicle.getLaneID(name)
+                    initial_distances.append(scene.traffic.ramp_merging.meter.ramp_distance(lane,c.vehicle.getLanePosition(name)))
+                for front,back in zip(initial_distances,initial_distances[1:]):
+                    self.assertAlmostEqual(back-front,10.8,places=3)
                 bridge=SimpleNamespace(carla=SimpleNamespace(world=SimpleNamespace(get_snapshot=lambda:None)),
                     lincoln=SimpleNamespace(records={}),sumo=SimpleNamespace(connection=c,network=dict(offset=(503.02,423.76))),
                     npc=SimpleNamespace(batches={'scene':dict(traffic=scene.traffic)}))
@@ -62,6 +71,7 @@ class HighwayRampMergingLiveTests(unittest.TestCase):
                 scene.start(0.)
                 collisions=set();teleports=set();entries={};targets={};arrivals=set();passage=None
                 entry_lanes={};straight_exits=set();curves=set()
+                moving_times={};ramp_approach_times={}
                 previous={};maximum_step=0.;nearby_active_merge=False
                 crossings=[];seen_crossings=set();main_cross_speeds=[]
                 flowing_main=set();stop_run={};longest_main_stop=0.
@@ -69,7 +79,11 @@ class HighwayRampMergingLiveTests(unittest.TestCase):
                 for index in range(5000):
                     now=index*.05;states=c.vehicle.getAllSubscriptionResults()
                     probe=states.get('lincoln_probe')
-                    if probe and probe[tc.VAR_ROAD_ID]=='-47' and passage is None:passage=now
+                    policy=scene.traffic.ramp_merging.meter.configuration
+                    # The proxy may use an adjacent main-road lane while
+                    # approaching, so measure passage across the whole merge.
+                    if (probe and passage is None and probe[tc.VAR_ROAD_ID]==':1061_2'
+                            and probe[tc.VAR_LANEPOSITION]>=policy['main_conflict_position_metres']):passage=now
                     scene.step(now);scene.traffic.spawn_next_vehicles(20);scene.traffic.maintain_routes(states,tc)
                     c.simulationStep()
                     collisions.update(c.simulation.getCollidingVehiclesIDList())
@@ -98,6 +112,8 @@ class HighwayRampMergingLiveTests(unittest.TestCase):
                                 longest_main_stop=max(longest_main_stop,stop_run[name])
                             else:stop_run[name]=0.
                         if name not in ramp:continue
+                        if state[tc.VAR_SPEED]>.2:moving_times.setdefault(name,now)
+                        if state[tc.VAR_ROAD_ID]=='31':ramp_approach_times.setdefault(name,now)
                         position=state[tc.VAR_POSITION]
                         if name in previous:maximum_step=max(maximum_step,math.dist(previous[name],position))
                         previous[name]=position
@@ -119,6 +135,8 @@ class HighwayRampMergingLiveTests(unittest.TestCase):
                             policy=scene.traffic.ramp_merging.snapshot())
                 report['zipper_meter']=scene.traffic.ramp_merging.meter.snapshot()
                 report['crossings']=crossings
+                report['upstream_motion_times']=moving_times
+                report['ramp_approach_entry_times']=ramp_approach_times
                 report['minimum_first_ten_main_cross_speed_kmh']=min(main_cross_speeds)
                 report['longest_main_merge_stop_seconds']=longest_main_stop
                 report['maximum_main_merge_braking_mps2']=maximum_main_braking
@@ -136,12 +154,20 @@ class HighwayRampMergingLiveTests(unittest.TestCase):
                 errors=(Path(folder)/'errors.log').read_text()
                 self.assertIsNone(re.search(r"Vehicle 'vanet_npc_highway_lane4_\d+'.*emergency braking on lane '(?:-46_1|:1061_2_1)'",errors))
                 self.assertIsNotNone(passage)
+                self.assertTrue(nearby_active_merge)
+                self.assertLess(min(entries.values()),passage)
+                self.assertGreater(max(entries.values()),passage)
                 self.assertGreaterEqual(sum(t<passage for t in entries.values()),2)
                 releases=scene.traffic.ramp_merging.meter.events
-                self.assertEqual(len(releases),10)
-                self.assertEqual([event['required_main_vehicles'] for event in releases],[1]*10)
-                self.assertEqual([event['main_vehicle'] for event in releases],
+                self.assertEqual(len(releases),30)
+                self.assertEqual([event['required_main_vehicles'] for event in releases],[1]*30)
+                self.assertEqual([event['main_vehicle'] for event in releases[:10]],
                                  [entry['vehicle'] for entry in crossings[:20] if entry['stream']=='main'])
+                unreserved=[event for event in releases if event['reason']=='main_empty']
+                self.assertEqual(len(unreserved),10)
+                for event in unreserved:
+                    self.assertLess(moving_times[event['vehicle']],event['sim_time'])
+                    self.assertLess(ramp_approach_times[event['vehicle']],passage)
                 scene.reset();scene.traffic.spawn_next_vehicles(scene.traffic.count)
                 for _ in range(3):c.simulationStep()
                 self.assertEqual(scene.traffic.ramp_merging.snapshot(),dict(start_time=None,released=0,completed=0))

@@ -5,6 +5,7 @@ from unittest.mock import Mock
 
 from vanet.npc.highway_ramp_merging.load_merging_vehicles import load_merging_vehicles
 from vanet.npc.highway_ramp_merging.merge_controller import RampMergeController
+from vanet.npc.highway_ramp_merging.zipper_release_meter import ZipperReleaseMeter
 from vanet.experiments.scenario_and_parameter_configuration.scenario_controller import load_scenario
 from vanet.npc.highway_background_traffic.load_staggered_vehicles import load_staggered_traffic
 from vanet.npc.cooperation import NpcCooperation
@@ -14,23 +15,26 @@ TC=SimpleNamespace(VAR_ROAD_ID=80,VAR_LANE_ID=81,VAR_LANEPOSITION_LAT=184)
 
 
 class HighwayRampMergingTests(unittest.TestCase):
-    def test_ten_networked_non_yielding_vehicles_and_existing_main_traffic_unchanged(self):
+    def test_thirty_networked_non_yielding_vehicles_and_existing_main_traffic_unchanged(self):
         vehicles,policy=load_merging_vehicles()
-        self.assertEqual(len(vehicles),10)
-        self.assertEqual(len({v['id'] for v in vehicles}),10)
-        self.assertTrue(all('placement_lane_id' not in v for v in vehicles))
-        self.assertTrue(all(4. <= v['position'] <= 140. for v in vehicles))
+        self.assertEqual(len(vehicles),30)
+        self.assertEqual(len({v['id'] for v in vehicles}),30)
+        self.assertEqual(sum('placement_lane_id' in v for v in vehicles),6)
+        self.assertEqual([v['position'] for v in vehicles[:10]],[round(140.-i*10.8,6) for i in range(10)])
+        self.assertTrue(all(v['depart_offset']==0. for v in vehicles))
+        self.assertEqual(sum(v['route'][0]=='31' for v in vehicles),13)
+        self.assertEqual(sum(v['route'][0]=='39' for v in vehicles),17)
         self.assertEqual(policy['target_sumo_lane_index'],1)
         self.assertEqual(policy['target_left_to_right_lane'],4)
         self.assertEqual([v['merge_release_delay_seconds'] for v in vehicles],policy['release_offsets_seconds'])
         for entry in vehicles:
-            self.assertEqual(entry['route'],['31','-47','-48','-49','-50'])
+            self.assertEqual(entry['route'][-5:],['31','-47','-48','-49','-50'])
             self.assertTrue(entry['network_enabled']);self.assertFalse(entry['yielding_enabled'])
             self.assertEqual(entry['speed_mode'],31);self.assertEqual(entry['lane_change_mode'],1536)
             self.assertTrue(entry['hold_for_merge_release'])
         scene=load_scenario();original,_=load_staggered_traffic()
         self.assertEqual([v for v in scene['npcs'] if v['id'].startswith('vanet_npc_highway_')],original)
-        self.assertEqual(sum(v.get('network_enabled',True) for v in scene['npcs']),54)
+        self.assertEqual(sum(v.get('network_enabled',True) for v in scene['npcs']),74)
         self.assertEqual(sum(v.get('role')=='non_network_background' for v in scene['npcs']),100)
         npc=NpcCooperation(vehicles[0]['id'],dict(yielding_enabled=False))
         c=connection();npc.receive(message(),0.);output=npc.step(0.,state(),c)
@@ -51,9 +55,21 @@ class HighwayRampMergingTests(unittest.TestCase):
         self.assertEqual(c.vehicle.setSpeed.call_count,2)
         controller.release(created,165.)
         self.assertEqual(c.vehicle.setSpeed.call_count,10)
-        controller.release(created,200.)
-        self.assertEqual(c.vehicle.setSpeed.call_count,10)
+        controller.release(created,100.+policy['release_offsets_seconds'][-1])
+        self.assertEqual(c.vehicle.setSpeed.call_count,30)
         controller.reset();self.assertEqual(controller.snapshot(),dict(start_time=None,released=0,completed=0))
+
+    def test_queue_crosses_upstream_lane_boundaries_without_compressing_spacing(self):
+        vehicles,policy=load_merging_vehicles()
+        meter=ZipperReleaseMeter(Mock(),policy['zipper_meter'])
+        distances=[]
+        for entry in vehicles:
+            lane=entry.get('placement_lane_id',entry['route'][0]+'_'+str(entry['lane_index']))
+            distances.append(meter.ramp_distance(lane,entry['position']))
+        self.assertAlmostEqual(distances[0],63.67)
+        self.assertAlmostEqual(distances[-1],376.87)
+        for front,back in zip(distances,distances[1:]):
+            self.assertAlmostEqual(back-front,10.8)
 
     def test_each_lane_change_waits_for_center_and_is_rate_limited(self):
         vehicles,policy=load_merging_vehicles();c=Mock()

@@ -43,9 +43,8 @@ class ZipperReleaseMeter:
         remaining = self.configuration['ramp_conflict_position_metres']-position
         if lane == self.configuration['ramp_internal_lane']:
             return remaining
-        if lane == self.configuration['ramp_approach_lane']:
-            return remaining+self.configuration['ramp_approach_lane_length_metres']
-        return None
+        upstream = self.configuration['ramp_upstream_distances_metres'].get(lane)
+        return None if upstream is None else remaining+upstream
 
     def update_slots(self, created, states, constants, released, completed, sim_time):
         if not self.configuration or self.start_time is None:
@@ -98,6 +97,13 @@ class ZipperReleaseMeter:
                 elif not main:
                     reservation = dict(main=None,target=sim_time,speed=policy['ramp_merge_speed_kmh']/3.6)
                 else:
+                    # Exhausting merge slots must not pin the upstream queue
+                    # at zero speed. Single-file normal following keeps these
+                    # cars behind the scheduled queue while they approach.
+                    if name not in released:
+                        LOG.info('RAMP_ZIPPER_APPROACH sim_time=%.3f vehicle=%s reason=merge_slots_reserved',sim_time,name)
+                    self.command_speed(name,-1.,sim_time)
+                    released.add(name)
                     continue
                 self.reservations[name] = reservation
                 event = dict(vehicle=name,sim_time=sim_time,main_vehicle=reservation['main'],

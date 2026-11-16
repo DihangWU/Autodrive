@@ -1,7 +1,7 @@
 {
-  "description": "Ten networked ordinary vehicles merge from the right-hand ramp into lane 4 from the left, then use normal strategic lane selection for the straight highway exit; no emergency yielding.",
+  "description": "Thirty networked ordinary vehicles merge from the right-hand ramp into lane 4 from the left, then use normal strategic lane selection for the straight highway exit; no emergency yielding.",
   "id_prefix": "vanet_npc_ramp_merge",
-  "count": 10,
+  "count": 30,
   "route": [
     "31",
     "-47",
@@ -24,7 +24,27 @@
     40.0,
     48.0,
     56.5,
-    65.0
+    65.0,
+    72.5,
+    80.0,
+    87.5,
+    95.0,
+    102.5,
+    110.0,
+    117.5,
+    125.0,
+    132.5,
+    140.0,
+    147.5,
+    155.0,
+    162.5,
+    170.0,
+    177.5,
+    185.0,
+    192.5,
+    200.0,
+    207.5,
+    215.0
   ],
   "zipper_meter": {
     "main_vehicles_per_ramp": [
@@ -79,7 +99,13 @@
       ":890_2_0",
       ":890_13_0"
     ],
-    "ramp_braking_mps2": 4.5
+    "ramp_braking_mps2": 4.5,
+    "ramp_upstream_distances_metres": {
+      "31_1": 162.52,
+      ":1082_16_0": 209.7,
+      ":1082_9_0": 222.03,
+      "39_1": 355.93
+    }
   },
   "merge_edges": [
     "-47",
@@ -97,5 +123,33 @@
     120,
     190,
     255
+  ],
+  "initial_queue_lanes": [
+    {
+      "lane_id": "31_1",
+      "length_metres": 162.52,
+      "route_prefix": []
+    },
+    {
+      "lane_id": ":1082_16_0",
+      "length_metres": 47.18,
+      "route_prefix": [
+        "39"
+      ]
+    },
+    {
+      "lane_id": ":1082_9_0",
+      "length_metres": 12.33,
+      "route_prefix": [
+        "39"
+      ]
+    },
+    {
+      "lane_id": "39_1",
+      "length_metres": 133.9,
+      "route_prefix": [
+        "39"
+      ]
+    }
   ]
 }
